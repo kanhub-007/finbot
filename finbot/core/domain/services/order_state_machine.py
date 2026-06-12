@@ -59,6 +59,12 @@ class OrderStateMachine:
         OrderState.RISK_REJECTED,
     }
 
+    # States before exchange submission — cannot be reconciled to unknown.
+    PRE_EXCHANGE: ClassVar[set[OrderState]] = {
+        OrderState.PLANNED,
+        OrderState.INTENT_PERSISTED,
+    }
+
     # -- public API --------------------------------------------------------
 
     @classmethod
@@ -99,13 +105,17 @@ class OrderStateMachine:
 
         # Reconciliation escape hatch.
         if to_state == OrderState.UNKNOWN_RECONCILE_REQUIRED:
-            if not cls.is_terminal(current):
-                lifecycle.record_transition(current, to_state, reason)
-                lifecycle.state = to_state
-                return
-            raise InvalidTransitionError(
-                f"Cannot reconcile from terminal state {current.value}"
-            )
+            if current in cls.PRE_EXCHANGE:
+                raise InvalidTransitionError(
+                    f"Cannot reconcile from pre-exchange state " f"{current.value}"
+                )
+            if cls.is_terminal(current):
+                raise InvalidTransitionError(
+                    f"Cannot reconcile from terminal state " f"{current.value}"
+                )
+            lifecycle.record_transition(current, to_state, reason)
+            lifecycle.state = to_state
+            return
 
         if not cls.can_transition(current, to_state):
             raise InvalidTransitionError(
@@ -134,7 +144,7 @@ class OrderStateMachine:
                     lifecycle.original_size - lifecycle.filled_size,
                 )
             except Exception:
-                pass
+                raise InvalidTransitionError(f"Invalid fill size: {reason}") from None
         elif to_state == OrderState.FILLED:
             lifecycle.filled_size = lifecycle.original_size
             lifecycle.remaining_size = Decimal("0")

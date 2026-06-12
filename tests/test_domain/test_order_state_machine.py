@@ -165,6 +165,7 @@ class TestReconciliation:
             original_size=Decimal("0.001"),
         )
         OrderStateMachine.transition(lifecycle, OrderState.INTENT_PERSISTED)
+        OrderStateMachine.transition(lifecycle, OrderState.SUBMITTED)
         OrderStateMachine.transition(
             lifecycle,
             OrderState.UNKNOWN_RECONCILE_REQUIRED,
@@ -188,6 +189,19 @@ class TestReconciliation:
             OrderStateMachine.transition(lifecycle, s)
 
         with pytest.raises(InvalidTransitionError, match="reconcile"):
+            OrderStateMachine.transition(
+                lifecycle, OrderState.UNKNOWN_RECONCILE_REQUIRED
+            )
+
+    def test_cannot_reconcile_from_pre_exchange(self) -> None:
+        lifecycle = OrderLifecycle(
+            order_id="o1",
+            symbol="BTC",
+            side="buy",
+            original_size=Decimal("0.001"),
+        )
+        OrderStateMachine.transition(lifecycle, OrderState.INTENT_PERSISTED)
+        with pytest.raises(InvalidTransitionError, match="pre-exchange"):
             OrderStateMachine.transition(
                 lifecycle, OrderState.UNKNOWN_RECONCILE_REQUIRED
             )

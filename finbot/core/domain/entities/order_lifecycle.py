@@ -27,6 +27,10 @@ class OrderLifecycle:
     )
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
+    def __post_init__(self) -> None:
+        if self.remaining_size == Decimal("0"):
+            object.__setattr__(self, "remaining_size", self.original_size)
+
     def record_transition(
         self, from_state: OrderState, to_state: OrderState, reason: str = ""
     ) -> None:
