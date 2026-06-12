@@ -16,7 +16,10 @@ class JsonRiskPriceCalculator(RiskPriceCalculator):
         """Return rounded stop and target prices for an entry signal."""
         if risk is None:
             return 0.0, 0.0
-        close = float(bar.get("close", 0) or 0)
+        try:
+            close = float(bar.get("close", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0, 0.0
         if close <= 0:
             return 0.0, 0.0
         stop = _calculate_stop(risk, bar, close, side)
@@ -46,7 +49,10 @@ def _calculate_target(
 
 
 def _stop_atr(risk: RiskSpec, bar: dict, close: float, side: str) -> float:
-    atr = float(bar.get(risk.stop_indicator, 0) or 0)
+    try:
+        atr = float(bar.get(risk.stop_indicator, 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
     if atr <= 0 or risk.stop_multiplier <= 0:
         return 0.0
     distance = atr * risk.stop_multiplier
@@ -75,7 +81,10 @@ def _stop_none(*_args) -> float:
 def _target_atr(
     risk: RiskSpec, bar: dict, close: float, side: str, _stop: float
 ) -> float:
-    atr = float(bar.get(risk.take_profit_indicator, 0) or 0)
+    try:
+        atr = float(bar.get(risk.take_profit_indicator, 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
     if atr <= 0 or risk.take_profit_multiplier <= 0:
         return 0.0
     distance = atr * risk.take_profit_multiplier
