@@ -104,3 +104,24 @@ class TestJsonRiskPriceCalculator:
         stop, target = calc.calculate(risk, _bar(close=100.0, atr=2.0), "long")
         assert stop == 0.0
         assert target == 0.0
+
+    def test_fixed_pct_stop_for_long(self) -> None:
+        calc = _calc()
+        risk = RiskSpec(
+            stop_loss_type="fixed_pct",
+            stop_pct=0.05,
+        )
+        stop, target = calc.calculate(risk, _bar(close=200.0), "long")
+        # Stop: 200 * (1 - 0.05) = 190
+        assert stop == 190.0
+        assert target == 0.0
+
+    def test_fixed_pct_stop_for_short(self) -> None:
+        calc = _calc()
+        risk = RiskSpec(
+            stop_loss_type="fixed_pct",
+            stop_pct=0.03,
+        )
+        stop, target = calc.calculate(risk, _bar(close=100.0), "short")
+        # Stop: 100 * (1 + 0.03) = 103
+        assert stop == 103.0

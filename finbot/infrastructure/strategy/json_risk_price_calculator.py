@@ -60,6 +60,8 @@ def _stop_fixed_pct(risk: RiskSpec, _bar: dict, close: float, side: str) -> floa
 
 
 def _stop_none(*_args) -> float:
+    # Accepts any arguments so the handler registry never raises TypeError
+    # for an unrecognized key. Returns 0.0 (no stop) for graceful degradation.
     return 0.0
 
 
@@ -100,6 +102,7 @@ def _target_risk_reward(
 
 
 def _target_none(*_args) -> float:
+    # Same graceful-degradation pattern as _stop_none.
     return 0.0
 
 
