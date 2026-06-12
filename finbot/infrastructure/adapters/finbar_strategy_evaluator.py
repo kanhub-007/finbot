@@ -3,6 +3,7 @@
 from typing import Any
 
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.interfaces.strategy_evaluator import StrategyEvaluator
 
@@ -23,4 +24,4 @@ class FinbarStrategyEvaluator(StrategyEvaluator):
         position: PositionSnapshot,
     ) -> SignalDecision:
         """Evaluate one enriched closed bar with the configured strategy."""
-        return SignalDecision(action="hold")
+        return SignalDecision(action=SignalAction.HOLD)

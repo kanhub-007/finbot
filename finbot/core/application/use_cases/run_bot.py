@@ -2,6 +2,7 @@
 
 from finbot.core.application.dto.run_bot_request import RunBotRequest
 from finbot.core.application.dto.run_bot_result import RunBotResult
+from finbot.core.domain.entities.safety_validation import SafetyValidation
 from finbot.core.domain.entities.trading_mode import TradingMode
 from finbot.core.domain.interfaces.bot_state_repository import BotStateRepository
 from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
@@ -15,6 +16,10 @@ class RunBotUseCase:
     The first implementation deliberately stops after validation and exchange
     reconciliation. Live order placement belongs behind a later, tested signal
     processing pipeline.
+
+    Dependencies are constructor-injected. market_data_stream,
+    strategy_evaluator, and state_repository are wired now so the signature
+    is stable; they will be used in later phases.
     """
 
     def __init__(
@@ -31,9 +36,12 @@ class RunBotUseCase:
 
     def execute(self, request: RunBotRequest) -> RunBotResult:
         """Run startup checks and prepare the bot for streaming."""
-        safety_error = self._validate_safety(request)
-        if safety_error:
-            return RunBotResult(status="rejected", message=safety_error)
+        validation = self._validate_safety(request)
+        if not validation.is_valid:
+            return RunBotResult(
+                status="rejected",
+                message="; ".join(validation.errors),
+            )
 
         position = self._exchange_gateway.get_position(request.symbol)
         open_orders = self._exchange_gateway.list_open_orders(request.symbol)
@@ -43,14 +51,27 @@ class RunBotUseCase:
         )
         return RunBotResult(status="ready", message=message)
 
-    def _validate_safety(self, request: RunBotRequest) -> str | None:
+    def _validate_safety(self, request: RunBotRequest) -> SafetyValidation:
+        mode_check = self._validate_mode(request)
+        config_check = self._validate_config_limits(request)
+        return mode_check.merge(config_check)
+
+    def _validate_mode(self, request: RunBotRequest) -> SafetyValidation:
         if (
             request.config.mode == TradingMode.LIVE
             and not request.config.live_trading_ack
         ):
-            return "live mode requires explicit live_trading_ack=true"
+            return SafetyValidation.failure(
+                "live mode requires explicit live_trading_ack=true"
+            )
+        return SafetyValidation.success()
+
+    def _validate_config_limits(self, request: RunBotRequest) -> SafetyValidation:
+        errors: list[str] = []
         if request.config.max_open_orders < 1:
-            return "max_open_orders must be at least 1"
+            errors.append("max_open_orders must be at least 1")
         if request.config.stale_data_seconds < 1:
-            return "stale_data_seconds must be positive"
-        return None
+            errors.append("stale_data_seconds must be positive")
+        if errors:
+            return SafetyValidation.failure(*errors)
+        return SafetyValidation.success()

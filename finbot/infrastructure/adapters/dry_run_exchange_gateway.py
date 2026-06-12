@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 from finbot.core.domain.entities.order_intent import OrderIntent
+from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 
@@ -13,7 +14,9 @@ class DryRunExchangeGateway(ExchangeGateway):
 
     def get_position(self, symbol: str) -> PositionSnapshot:
         """Return an empty synthetic position for dry-run mode."""
-        return PositionSnapshot(symbol=symbol, direction="flat", size=Decimal("0"))
+        return PositionSnapshot(
+            symbol=symbol, direction=PositionDirection.FLAT, size=Decimal("0")
+        )
 
     def list_open_orders(self, symbol: str) -> list[dict[str, Any]]:
         """Return no open orders in dry-run mode."""

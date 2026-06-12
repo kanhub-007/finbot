@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +11,9 @@ class Settings(BaseSettings):
 
     Values are read from environment variables prefixed with `FINBOT_` and may
     be supplied through a local `.env` file.
+
+    Private key values use pydantic.SecretStr to prevent accidental exposure
+    in logs, repr, or tracebacks.
     """
 
     model_config = SettingsConfigDict(
@@ -22,7 +25,9 @@ class Settings(BaseSettings):
     mode: str = Field(default="dry_run")
     live_trading_ack: bool = Field(default=False)
     hyperliquid_testnet: bool = Field(default=True)
-    hyperliquid_private_key: str = Field(default="")
+    hyperliquid_private_key: SecretStr = Field(
+        default=SecretStr(""),
+    )
     hyperliquid_account_address: str = Field(default="")
     hyperliquid_vault_address: str = Field(default="")
     database_url: str = Field(default="sqlite:///data/finbot.db")
