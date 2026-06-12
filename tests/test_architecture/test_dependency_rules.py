@@ -208,3 +208,60 @@ class TestNoFinbarInProductionCode:
             f"{file_path.name} imports finbar: {sorted(violations)}. "
             f"Finbot must be standalone at runtime."
         )
+
+
+class TestCopiedRuntimeModules:
+    """Guardrails for code copied from Finbar into finbot/infrastructure/strategy/.
+
+    These tests will be empty (trivially pass) until files are copied in
+    later phases. Once files exist they prevent accidental Finbar imports
+    and ban Finbar presentation/startup code.
+    """
+
+    def test_copied_runtime_modules_do_not_import_finbar(self) -> None:
+        """Every file under infrastructure/strategy/ must not import finbar."""
+        files = [
+            p
+            for p in _walk_finbot_sources("infrastructure/strategy")
+            if not _is_init_only_module(str(p))
+        ]
+        if not files:
+            pytest.skip("No copied runtime modules yet")
+
+        violations: dict[str, set[str]] = {}
+        for file_path in files:
+            imports = _collect_imports(file_path)
+            if "finbar" in imports:
+                violations[str(file_path.name)] = imports["finbar"]
+
+        assert not violations, (
+            f"Copied runtime modules import finbar: {violations}. "
+            f"All imports must be rewritten to finbot.*."
+        )
+
+    def test_copied_runtime_no_finbar_presentation_or_startup(self) -> None:
+        """Copied modules must not transitively pull in Finbar presentation/startup."""
+        files = [
+            p
+            for p in _walk_finbot_sources("infrastructure/strategy")
+            if not _is_init_only_module(str(p))
+        ]
+        if not files:
+            pytest.skip("No copied runtime modules yet")
+
+        violations: dict[str, set[str]] = {}
+        for file_path in files:
+            imports = _collect_imports(file_path)
+            if "finbar" in imports:
+                for imp in imports["finbar"]:
+                    parts = imp.split(".")
+                    if len(parts) >= 3 and parts[1] in (
+                        "presentation",
+                        "startup",
+                    ):
+                        violations.setdefault(str(file_path.name), set()).add(imp)
+
+        assert not violations, (
+            f"Copied runtime modules import Finbar presentation/startup: "
+            f"{violations}. Only strategy runtime code may be copied."
+        )
