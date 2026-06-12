@@ -1,5 +1,7 @@
 """Use case for replaying a strategy over historical bar data."""
 
+from __future__ import annotations
+
 from decimal import Decimal
 
 from finbot.core.application.dto.replay_strategy_result import ReplayStrategyResult
@@ -9,26 +11,42 @@ from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.interfaces.bar_loader import BarLoader
+from finbot.core.domain.interfaces.bar_source import BarSource
 from finbot.core.domain.interfaces.strategy_definition_loader import (
     StrategyDefinitionLoader,
 )
 from finbot.core.domain.interfaces.strategy_evaluator_factory import (
     StrategyEvaluatorFactory,
 )
+from finbot.core.domain.services.warmup_window import WarmupWindow
 
 
 class ReplayStrategyUseCase:
-    """Replay a strategy against historical bar data without network access."""
+    """Replay a strategy against historical bar data without network access.
+
+    Bars are loaded from a ``BarLoader`` (CSV, etc.) and optionally
+    pre-warmed through a ``BarSource`` / ``WarmupWindow`` pair. When
+    warmup is configured the evaluator skips bars until the minimum bar
+    count is reached.
+    """
+
+    DEFAULT_MIN_WARMUP = 20
 
     def __init__(
         self,
         loader: StrategyDefinitionLoader,
         bar_loader: BarLoader,
         evaluator_factory: StrategyEvaluatorFactory,
+        bar_source: BarSource | None = None,
+        warmup: WarmupWindow | None = None,
     ):
         self._loader = loader
         self._bar_loader = bar_loader
         self._evaluator_factory = evaluator_factory
+        self._bar_source = bar_source
+        self._warmup = warmup
+
+    # -- public API --------------------------------------------------------
 
     def execute(self, request: ReplayStrategyRequest) -> ReplayStrategyResult:
         errors: list[str] = []
@@ -47,6 +65,7 @@ class ReplayStrategyUseCase:
             strategy_hash=_hash_content(request.strategy_content),
         )
 
+        warmup = self._warmup
         signals: list[SignalEvent] = []
         position = PositionSnapshot(
             symbol=request.symbol,
@@ -55,6 +74,12 @@ class ReplayStrategyUseCase:
         )
 
         for i, bar in enumerate(bars):
+            # Feed every bar into warmup so indicators have full history.
+            if warmup is not None:
+                warmup.append(bar)
+                if not warmup.is_ready():
+                    continue
+
             signal = evaluator.evaluate(bar, position)
             if signal.action == SignalAction.HOLD:
                 continue
@@ -64,6 +89,7 @@ class ReplayStrategyUseCase:
                     action=signal.action,
                     symbol=request.symbol,
                     bar_index=i,
+                    warmup_ready=(warmup.is_ready() if warmup else True),
                     close=_float_bar(bar, "close"),
                     stop_price=(
                         float(signal.stop_price)
@@ -84,6 +110,8 @@ class ReplayStrategyUseCase:
             status="complete", signal_count=len(signals), signals=signals
         )
 
+    # -- internal -----------------------------------------------------------
+
     def _load_definition(self, request, errors):
         try:
             return self._loader.load_from_text(request.strategy_content)
@@ -92,13 +120,12 @@ class ReplayStrategyUseCase:
             return None
 
     def _load_bars(self, request, errors):
-        if request.bars_csv:
-            bars = self._bar_loader.load_bars(request.bars_csv)
+        csv = request.bars_csv
+        if csv:
+            bars = self._bar_loader.load_bars(csv)
             if bars:
                 return bars
-            # Headers-only CSV — no bars, no signals. Use a dummy so
-            # the replay loop runs once and produces zero signals.
-            return [{"timestamp": 0}]
+            return [{"timestamp": 0}]  # headers-only → no signals
         errors.append("No bar data provided (bars_csv required)")
         return []
 
@@ -126,6 +153,9 @@ class ReplayStrategyUseCase:
                 size=Decimal("0"),
             )
         return position
+
+
+# -- helpers --------------------------------------------------------------
 
 
 def _float_bar(bar: dict, key: str) -> float:

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from finbot.core.application.use_cases.replay_strategy import ReplayStrategyUseCase
 from finbot.core.domain.dto.replay_strategy_request import ReplayStrategyRequest
+from finbot.core.domain.services.warmup_window import WarmupWindow
 from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
     RuleBasedStrategyEvaluatorFactory,
 )
@@ -15,11 +16,12 @@ from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 
 
-def _use_case() -> ReplayStrategyUseCase:
+def _use_case(warmup: WarmupWindow | None = None) -> ReplayStrategyUseCase:
     return ReplayStrategyUseCase(
         loader=YamlStrategyDefinitionLoader(),
         bar_loader=CsvBarLoader(),
         evaluator_factory=RuleBasedStrategyEvaluatorFactory(),
+        warmup=warmup,
     )
 
 
@@ -27,16 +29,17 @@ def _read_strategy(name: str) -> str:
     return (FIXTURES_DIR / "strategies" / name).read_text(encoding="utf-8")
 
 
+def _sample_bars_csv() -> str:
+    return (FIXTURES_DIR / "bars" / "amt_sample_bars.csv").read_text(encoding="utf-8")
+
+
 class TestReplayStrategy:
     def test_replay_runs_without_exchange_gateway(self) -> None:
         uc = _use_case()
-        bars_csv = (FIXTURES_DIR / "bars" / "amt_sample_bars.csv").read_text(
-            encoding="utf-8"
-        )
         request = ReplayStrategyRequest(
             strategy_path="amt_dip_buyer_final.yaml",
             strategy_content=_read_strategy("amt_dip_buyer_final.yaml"),
-            bars_csv=bars_csv,
+            bars_csv=_sample_bars_csv(),
             symbol="BTC",
             interval="1h",
         )
@@ -45,13 +48,10 @@ class TestReplayStrategy:
 
     def test_replay_produces_signal_events(self) -> None:
         uc = _use_case()
-        bars_csv = (FIXTURES_DIR / "bars" / "amt_sample_bars.csv").read_text(
-            encoding="utf-8"
-        )
         request = ReplayStrategyRequest(
             strategy_path="amt_dip_buyer_final.yaml",
             strategy_content=_read_strategy("amt_dip_buyer_final.yaml"),
-            bars_csv=bars_csv,
+            bars_csv=_sample_bars_csv(),
             symbol="BTC",
             interval="1h",
         )
@@ -90,8 +90,6 @@ class TestReplayStrategy:
             symbol="BTC",
         )
         result = uc.execute(request)
-        # Bar 0: entry fires, position becomes long.
-        # Bar 1: already long → no new entry.
         assert result.signal_count == 1
 
     def test_replay_reports_indicator_warmup_errors(self) -> None:
@@ -104,4 +102,33 @@ class TestReplayStrategy:
         )
         result = uc.execute(request)
         assert result.status == "complete"
+        assert result.signal_count == 0
+
+
+class TestReplayWithWarmup:
+    def test_warmup_skips_early_bars(self) -> None:
+        warmup = WarmupWindow(min_bars=3, max_length=10)
+        uc = _use_case(warmup=warmup)
+        request = ReplayStrategyRequest(
+            strategy_path="t.yaml",
+            strategy_content=_read_strategy("amt_dip_buyer_final.yaml"),
+            bars_csv=_sample_bars_csv(),
+            symbol="BTC",
+        )
+        result = uc.execute(request)
+        # With warmup_min=3, first 3 bars are skipped; bar 3+ may trigger.
+        assert result.signal_count >= 1
+        for sig in result.signals:
+            assert sig.bar_index >= 2, f"bar {sig.bar_index} emitted before warmup"
+
+    def test_warmup_not_ready_blocks_all(self) -> None:
+        warmup = WarmupWindow(min_bars=500, max_length=1000)
+        uc = _use_case(warmup=warmup)
+        request = ReplayStrategyRequest(
+            strategy_path="t.yaml",
+            strategy_content=_read_strategy("amt_dip_buyer_final.yaml"),
+            bars_csv=_sample_bars_csv(),
+            symbol="BTC",
+        )
+        result = uc.execute(request)
         assert result.signal_count == 0

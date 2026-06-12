@@ -12,6 +12,7 @@ class SignalEvent:
     action: SignalAction
     symbol: str = ""
     bar_index: int = 0
+    warmup_ready: bool = True
     close: float = 0.0
     stop_price: float | None = None
     target_price: float | None = None

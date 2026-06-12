@@ -64,6 +64,12 @@ def _add_replay_parser(sub) -> None:
     p.add_argument("--bars", default="")
     p.add_argument("--symbol", default="BTC")
     p.add_argument("--interval", default="1h")
+    p.add_argument(
+        "--warmup-bars",
+        type=int,
+        default=0,
+        help="Minimum warmup bars before evaluating (0 = no warmup)",
+    )
 
 
 def _cmd_run(args) -> None:
@@ -121,11 +127,15 @@ def _cmd_replay(args) -> None:
         ReplayStrategyRequest,
     )
 
-    use_case = create_replay_strategy_use_case()
     content = _read_strategy_file(args.strategy)
     bars_csv = ""
     if args.bars:
         bars_csv = _read_strategy_file(args.bars)
+
+    use_case = create_replay_strategy_use_case(
+        bar_source_csv=bars_csv,
+        warmup_min_bars=args.warmup_bars or 0,
+    )
     request = ReplayStrategyRequest(
         strategy_path=args.strategy,
         strategy_content=content,
