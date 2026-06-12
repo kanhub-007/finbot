@@ -35,3 +35,11 @@ class Settings(BaseSettings):
     max_daily_loss_usd: Decimal = Field(default=Decimal("25"))
     max_open_orders: int = Field(default=3)
     stale_data_seconds: int = Field(default=120)
+
+    @property
+    def database_path(self) -> str:
+        """Extract the filesystem path from the database URL."""
+        url = self.database_url
+        if url.startswith("sqlite:///"):
+            return url[len("sqlite:///") :]
+        return url

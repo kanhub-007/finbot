@@ -110,3 +110,34 @@ def create_replay_strategy_use_case(
         evaluator_factory=RuleBasedStrategyEvaluatorFactory(),
         warmup=warmup,
     )
+
+
+def _db_path_from_settings() -> str:
+    return Settings().database_path or "data/finbot.db"
+
+
+def create_bot_state_repository():
+    """Create the default bot state repository.
+
+    Uses SQLite unless overridden for testing.  Migrations are applied
+    automatically on first access.
+    """
+    from finbot.infrastructure.repositories.sqlite_bot_state_repository import (
+        SqliteBotStateRepository,
+    )
+    from finbot.infrastructure.repositories.sqlite_migrator import (
+        SqliteMigrator,
+    )
+
+    db_path = _db_path_from_settings()
+    SqliteMigrator(db_path).migrate()
+    return SqliteBotStateRepository(db_path)
+
+
+def create_in_memory_repository():
+    """Create an in-memory repository for tests/dry-runs."""
+    from finbot.infrastructure.repositories.in_memory_bot_state_repository import (
+        InMemoryBotStateRepository,
+    )
+
+    return InMemoryBotStateRepository()
