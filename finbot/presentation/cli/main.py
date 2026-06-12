@@ -9,6 +9,13 @@ from finbot.config.settings import Settings
 from finbot.core.domain.dto.validate_strategy_request import (
     ValidateStrategyRequest,
 )
+from finbot.core.domain.entities.order_intent import OrderIntent
+from finbot.core.domain.entities.order_side import OrderSide
+from finbot.core.domain.entities.order_type import OrderType
+from finbot.core.domain.entities.position_direction import PositionDirection
+from finbot.infrastructure.adapters.hyperliquid_exchange_gateway import (
+    HyperliquidExchangeGateway,
+)
 from finbot.startup.service_factory import (
     create_replay_strategy_use_case,
     create_run_bot_request,
@@ -29,6 +36,7 @@ def main() -> None:
     _add_replay_parser(sub)
     _add_status_parser(sub)
     _add_db_parser(sub)
+    _add_panic_parser(sub)
 
     args = parser.parse_args()
 
@@ -44,6 +52,8 @@ def main() -> None:
         _cmd_status(args)
     elif args.command == "db":
         _cmd_db(args)
+    elif args.command == "panic":
+        _cmd_panic(args)
     else:
         parser.print_help()
 
@@ -92,6 +102,13 @@ def _add_db_parser(sub) -> None:
     p = sub.add_parser("db", help="Database management commands")
     sp = p.add_subparsers(dest="db_command")
     sp.add_parser("migrate", help="Apply pending schema migrations")
+
+
+def _add_panic_parser(sub) -> None:
+    p = sub.add_parser("panic", help="Emergency order/position management")
+    p.add_argument("--symbol", required=True)
+    p.add_argument("--cancel-orders", action="store_true")
+    p.add_argument("--close-position", action="store_true")
 
 
 def _cmd_run(args) -> None:
@@ -227,6 +244,51 @@ def _cmd_db(args) -> None:
         print(f"Database migrated to version {version}")
     else:
         print("Usage: finbot db migrate")
+
+
+def _cmd_panic(args) -> None:
+    settings = Settings()
+    if not settings.hyperliquid_private_key.get_secret_value():
+        print("ERROR: FINBOT_HYPERLIQUID_PRIVATE_KEY not set")
+        sys.exit(1)
+
+    gateway = HyperliquidExchangeGateway(
+        private_key=settings.hyperliquid_private_key.get_secret_value(),
+        base_url=(
+            "https://api.hyperliquid-testnet.xyz"
+            if settings.hyperliquid_testnet
+            else "https://api.hyperliquid.xyz"
+        ),
+        account_address=settings.hyperliquid_account_address,
+        vault_address=settings.hyperliquid_vault_address,
+    )
+
+    if args.cancel_orders:
+        result = gateway.cancel_all(args.symbol)
+        print(json.dumps({"cancel_orders": result}, indent=2))
+
+    if args.close_position:
+        pos = gateway.get_position(args.symbol)
+        if pos.direction != PositionDirection.FLAT:
+            side = (
+                OrderSide.SELL
+                if pos.direction == PositionDirection.LONG
+                else OrderSide.BUY
+            )
+            intent = OrderIntent(
+                symbol=args.symbol,
+                side=side,
+                size=pos.size,
+                order_type=OrderType.MARKET,
+                reduce_only=True,
+            )
+            result = gateway.submit_order(intent)
+            print(json.dumps({"close_position": result}, indent=2))
+        else:
+            print("No open position to close")
+
+    if not args.cancel_orders and not args.close_position:
+        print("Usage: finbot panic --symbol BTC --cancel-orders [--close-position]")
 
 
 def _read_strategy_file(path: str) -> str:
