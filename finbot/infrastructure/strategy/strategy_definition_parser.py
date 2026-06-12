@@ -171,7 +171,7 @@ class StrategyDefinitionParser(ParserInterface):
         self,
         raw_definition: str | dict,
         param_overrides: dict | None = None,
-    ):
+    ) -> StrategyDefinition | None:
         """Parse and return the canonical definition entity directly."""
         result = self.parse(raw_definition, param_overrides)
         return result.definition

@@ -24,44 +24,63 @@ from finbot.core.domain.services.amt_signals import (
 from finbot.core.domain.services.auction_state import (
     classify_auction_state,
 )
-from finbot.core.domain.services.coil_detector import (
-    detect_coil,
-)
-from finbot.core.domain.services.composite_vp import (
-    compute_composite_vp,
-)
-from finbot.core.domain.services.market_profile import (
-    compute_all_session_market_profiles,
-)
-from finbot.core.domain.services.profile_shape import (
-    classify_all_profile_shapes,
-)
-from finbot.core.domain.services.profile_shape_wrappers import (
-    compute_is_b_shape,
-    compute_is_d_shape,
-    compute_is_neutral_shape,
-    compute_is_normal_shape,
-    compute_is_p_shape,
-)
-from finbot.core.domain.services.proxy_indicator import (
-    enrich_dataframe_with_proxies,
-)
 from finbot.core.domain.services.volume_profile import (
     compute_all_session_volume_profiles,
     compute_rolling_vp,
     compute_rolling_window_vp,
 )
-from finbot.core.domain.services.vwap_bands import compute_vwap_session_bands
-from finbot.core.domain.services.wyckoff_phase import (
-    classify_wyckoff_phase,
+
+# --- Lazy imports for non-AMT domain services ---
+# These are only needed when a strategy requests indicators beyond the
+# AMT target set. They are imported lazily to avoid requiring all 10
+# domain service implementations in the MVP.
+
+
+def _lazy_import(module_name: str, attr: str):
+    """Return a callable that imports and delegates on first use."""
+    _cached = None
+
+    def _wrapper(*args, **kwargs):
+        nonlocal _cached
+        if _cached is None:
+            import importlib
+
+            mod = importlib.import_module(f"finbot.core.domain.services.{module_name}")
+            _cached = getattr(mod, attr)
+        return _cached(*args, **kwargs)
+
+    return _wrapper
+
+
+compute_vwap_session_bands = _lazy_import("vwap_bands", "compute_vwap_session_bands")
+classify_wyckoff_phase = _lazy_import("wyckoff_phase", "classify_wyckoff_phase")
+compute_is_accumulation = _lazy_import("wyckoff_wrappers", "compute_is_accumulation")
+compute_is_markup = _lazy_import("wyckoff_wrappers", "compute_is_markup")
+compute_is_distribution = _lazy_import("wyckoff_wrappers", "compute_is_distribution")
+compute_is_markdown = _lazy_import("wyckoff_wrappers", "compute_is_markdown")
+compute_is_wyckoff_neutral = _lazy_import(
+    "wyckoff_wrappers", "compute_is_wyckoff_neutral"
 )
-from finbot.core.domain.services.wyckoff_wrappers import (
-    compute_is_accumulation,
-    compute_is_distribution,
-    compute_is_markdown,
-    compute_is_markup,
-    compute_is_wyckoff_neutral,
+compute_composite_vp = _lazy_import("composite_vp", "compute_composite_vp")
+classify_all_profile_shapes = _lazy_import(
+    "profile_shape", "classify_all_profile_shapes"
 )
+compute_is_b_shape = _lazy_import("profile_shape_wrappers", "compute_is_b_shape")
+compute_is_d_shape = _lazy_import("profile_shape_wrappers", "compute_is_d_shape")
+compute_is_neutral_shape = _lazy_import(
+    "profile_shape_wrappers", "compute_is_neutral_shape"
+)
+compute_is_normal_shape = _lazy_import(
+    "profile_shape_wrappers", "compute_is_normal_shape"
+)
+compute_is_p_shape = _lazy_import("profile_shape_wrappers", "compute_is_p_shape")
+enrich_dataframe_with_proxies = _lazy_import(
+    "proxy_indicator", "enrich_dataframe_with_proxies"
+)
+compute_all_session_market_profiles = _lazy_import(
+    "market_profile", "compute_all_session_market_profiles"
+)
+detect_coil = _lazy_import("coil_detector", "detect_coil")
 
 logger = logging.getLogger(__name__)
 

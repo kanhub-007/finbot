@@ -9,6 +9,7 @@ from finbot.core.domain.dto.validate_strategy_request import (
 from finbot.core.domain.dto.validate_strategy_result import (
     ValidateStrategyResult,
 )
+from finbot.core.domain.entities.strategy_load_error import StrategyLoadError
 from finbot.core.domain.interfaces.strategy_definition_loader import (
     StrategyDefinitionLoader,
 )
@@ -49,11 +50,14 @@ class ValidateStrategyUseCase(StrategyValidator):
         """Parse and validate a strategy, returning errors/warnings."""
         try:
             definition = self._loader.load_from_text(request.strategy_content)
+        except StrategyLoadError as exc:
+            return ValidateStrategyResult(valid=False, errors=[str(exc)])
         except Exception as exc:
             return ValidateStrategyResult(valid=False, errors=[str(exc)])
 
         return ValidateStrategyResult(
             valid=True,
+            definition=definition,
             strategy_name=definition.name,
             schema_version=definition.schema_version,
             primary_timeframe=(
@@ -74,10 +78,15 @@ class ValidateStrategyUseCase(StrategyValidator):
                 modes=modes,
             )
 
-        # Reuse the parsed definition — validate already loaded it, but
-        # validate() doesn't return the definition yet. Parse once more
-        # until validate() is refactored to return it.
-        definition = self._loader.load_from_text(request.strategy_content)
+        # definition was already parsed by validate() above.
+        definition = validation.definition
+        if definition is None:
+            modes = {m: {"parse": "error"} for m in _EXECUTION_MODES}
+            return StrategyCompatibilityResult(
+                strategy_name=validation.strategy_name or "invalid",
+                modes=modes,
+            )
+
         modes = self._build_compatibility_modes(definition)
         return StrategyCompatibilityResult(strategy_name=definition.name, modes=modes)
 

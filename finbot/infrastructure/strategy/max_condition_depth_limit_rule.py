@@ -13,7 +13,9 @@ class MaxConditionDepthLimitRule(StrategyLimitRule):
     def __init__(self, maximum: int = 5):
         self._maximum = maximum
 
-    def check(self, definition, params, indicators, features):
+    def check(
+        self, definition, params, indicators, features
+    ) -> StrategyValidationError | None:
         for side, rules in definition.sides.items():
             err = self._check_side(side, rules.entry, rules.exit)
             if err:

@@ -12,7 +12,9 @@ class MaxIndicatorsLimitRule(StrategyLimitRule):
     def __init__(self, maximum: int = 20):
         self._maximum = maximum
 
-    def check(self, definition, params, indicators, features):
+    def check(
+        self, definition, params, indicators, features
+    ) -> StrategyValidationError | None:
         if len(indicators) > self._maximum:
             return StrategyValidationError(
                 path="$.indicators",

@@ -143,9 +143,10 @@ inside use cases or presentation handlers.
 
 ### DTOs
 
-Data crossing application boundaries uses dataclasses in
-`core/application/dto/`. API-specific Pydantic request/response models belong in
-`presentation/`.
+Pure dataclass DTOs with no framework dependencies belong in
+`core/domain/dto/`. DTOs that depend on framework types (e.g. Pydantic)
+belong in `core/application/dto/`. API-specific request/response models
+belong in `presentation/`.
 
 ### Pipeline / Extract Method
 
