@@ -29,3 +29,7 @@ class DryRunExchangeGateway(ExchangeGateway):
     def cancel_all(self, symbol: str) -> dict[str, Any]:
         """Return a synthetic cancellation response."""
         return {"status": "dry_run", "symbol": symbol, "cancelled": 0}
+
+    def cancel_by_cloid(self, symbol: str, cloid: str) -> dict[str, Any]:
+        """Return a synthetic cancellation response."""
+        return {"status": "dry_run", "symbol": symbol, "cloid": cloid}

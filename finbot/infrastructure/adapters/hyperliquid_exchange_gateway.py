@@ -167,10 +167,20 @@ def _execute_order(
     is_buy = intent.side == OrderSide.BUY
 
     if intent.reduce_only:
-        # Exit order — use market_close for simplicity.
-        return exchange.market_close(
+        if intent.order_type == OrderType.MARKET:
+            return exchange.market_close(
+                coin=intent.symbol,
+                sz=float(intent.size),
+            )  # type: ignore[no-any-return]
+        # Limit exit — use limit order with reduce_only.
+        return exchange.order(
             coin=intent.symbol,
+            is_buy=is_buy,
             sz=float(intent.size),
+            limit_px=(float(intent.limit_price) if intent.limit_price else 0.0),
+            order_type={"limit": {"tif": "Gtc"}},
+            reduce_only=True,
+            cloid=intent.cloid,
         )  # type: ignore[no-any-return]
 
     if intent.order_type == OrderType.MARKET:

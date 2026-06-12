@@ -25,3 +25,7 @@ class ExchangeGateway(ABC):
     @abstractmethod
     def cancel_all(self, symbol: str) -> dict[str, Any]:
         """Cancel all open orders for a symbol."""
+
+    @abstractmethod
+    def cancel_by_cloid(self, symbol: str, cloid: str) -> dict[str, Any]:
+        """Cancel a single order by its client-assigned ID."""
