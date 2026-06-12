@@ -2,11 +2,11 @@
 
 from pathlib import Path
 
-from finbot.core.application.dto.validate_strategy_request import (
-    ValidateStrategyRequest,
-)
 from finbot.core.application.use_cases.validate_strategy_definition import (
     ValidateStrategyUseCase,
+)
+from finbot.core.domain.dto.validate_strategy_request import (
+    ValidateStrategyRequest,
 )
 from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
     YamlStrategyDefinitionLoader,

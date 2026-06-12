@@ -1,0 +1,8 @@
+schema_version: "2.0"
+# Intentionally missing "name" field — used to test validation failure.
+sides:
+  long:
+    entry:
+      condition:
+        operator: is_true
+        left: some_indicator

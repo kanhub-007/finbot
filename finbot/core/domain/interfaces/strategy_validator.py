@@ -2,13 +2,13 @@
 
 from abc import ABC, abstractmethod
 
-from finbot.core.application.dto.strategy_compatibility_result import (
+from finbot.core.domain.dto.strategy_compatibility_result import (
     StrategyCompatibilityResult,
 )
-from finbot.core.application.dto.validate_strategy_request import (
+from finbot.core.domain.dto.validate_strategy_request import (
     ValidateStrategyRequest,
 )
-from finbot.core.application.dto.validate_strategy_result import (
+from finbot.core.domain.dto.validate_strategy_result import (
     ValidateStrategyResult,
 )
 

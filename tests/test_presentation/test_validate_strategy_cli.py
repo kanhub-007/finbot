@@ -36,7 +36,7 @@ class TestValidateStrategyCLI:
         proc = _run(
             "validate-strategy",
             "--strategy",
-            str(FIXTURES_DIR / "strategy_requirements.json"),
+            str(FIXTURES_DIR / "invalid_missing_name.yaml"),
         )
         assert proc.returncode != 0, proc.stdout
 

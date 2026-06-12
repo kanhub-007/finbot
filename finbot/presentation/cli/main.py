@@ -3,9 +3,10 @@
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from finbot.config.settings import Settings
-from finbot.core.application.dto.validate_strategy_request import (
+from finbot.core.domain.dto.validate_strategy_request import (
     ValidateStrategyRequest,
 )
 from finbot.startup.service_factory import (
@@ -104,8 +105,6 @@ def _cmd_compat(args) -> None:
 
 
 def _read_strategy_file(path: str) -> str:
-    from pathlib import Path
-
     return Path(path).read_text(encoding="utf-8")
 
 
