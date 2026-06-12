@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 
-from finbot.core.application.dto.bot_event import BotEvent
+from finbot.core.domain.entities.bot_event import BotEvent
 
 
 class EventQueue(ABC):

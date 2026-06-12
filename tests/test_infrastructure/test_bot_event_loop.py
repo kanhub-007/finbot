@@ -6,7 +6,8 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
-from finbot.core.application.dto.bot_event import BotEvent, BotEventType
+from finbot.core.domain.entities.bot_event import BotEvent
+from finbot.core.domain.entities.bot_event_type import BotEventType
 from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
 from finbot.infrastructure.adapters.thread_safe_event_queue import (

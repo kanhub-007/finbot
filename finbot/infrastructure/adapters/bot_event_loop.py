@@ -12,7 +12,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from finbot.core.application.dto.bot_event import BotEvent, BotEventType
+from finbot.core.domain.entities.bot_event import BotEvent
+from finbot.core.domain.entities.bot_event_type import BotEventType
 from finbot.core.domain.interfaces.event_queue import EventQueue
 from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 
@@ -116,9 +117,11 @@ class BotEventLoop:
     def _enqueue_from_callback(self, raw: dict[str, Any]) -> None:
         """SDK callback — runs on websocket thread."""
         if raw.get("_stale"):
-            self._queue.enqueue(BotEvent(type=BotEventType.STALE, data=raw))
-            return
-        self._queue.enqueue(BotEvent(type=BotEventType.CANDLE, data=raw))
+            event = BotEvent(type=BotEventType.STALE, data=raw)
+        else:
+            event = BotEvent(type=BotEventType.CANDLE, data=raw)
+        if not self._queue.enqueue(event):
+            logger.warning("Event queue full — dropping %s event", event.type)
 
     def _dispatch(self, event: BotEvent) -> None:
         if event.type == BotEventType.CANDLE:

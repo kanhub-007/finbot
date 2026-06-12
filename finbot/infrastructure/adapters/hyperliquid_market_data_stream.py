@@ -72,6 +72,10 @@ class HyperliquidMarketDataStream(MarketDataStream):
         self._interval = interval
         self._user_callback = callback
         self._last_update_at = time.monotonic()
+        # Reset candle close tracking for the new connection.
+        self._pending_bar = None
+        self._current_candle_ts_ms = 0
+        self._last_emitted_ts_ms = 0
 
         from hyperliquid.info import Info
 

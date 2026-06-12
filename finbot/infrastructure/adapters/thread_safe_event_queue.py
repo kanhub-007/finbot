@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import queue
 
-from finbot.core.application.dto.bot_event import BotEvent
+from finbot.core.domain.entities.bot_event import BotEvent
 from finbot.core.domain.interfaces.event_queue import EventQueue
 
 

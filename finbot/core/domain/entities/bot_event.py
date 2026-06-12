@@ -1,22 +1,9 @@
-"""Bot event DTO — typed event envelope for the bot event loop.
-
-All events flowing through the bot are wrapped in this envelope so
-the event loop can dispatch them uniformly.
-"""
-
-from __future__ import annotations
+"""Bot event — typed envelope for events flowing through the bot loop."""
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any
 
-
-class BotEventType(StrEnum):
-    CANDLE = "candle"
-    ORDER_UPDATE = "order_update"
-    FILL = "fill"
-    STALE = "stale"
-    SHUTDOWN = "shutdown"
+from finbot.core.domain.entities.bot_event_type import BotEventType
 
 
 @dataclass(frozen=True)
