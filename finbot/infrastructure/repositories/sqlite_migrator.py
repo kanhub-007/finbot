@@ -1,5 +1,6 @@
 """SQLite migration runner — creates and migrates the Finbot schema."""
 
+import os
 import sqlite3
 
 from finbot.core.domain.interfaces.database_migrator import DatabaseMigrator
@@ -121,6 +122,7 @@ class SqliteMigrator(DatabaseMigrator):
         self._db_path = db_path
 
     def migrate(self) -> int:
+        _ensure_directory(self._db_path)
         conn = sqlite3.connect(self._db_path)
         try:
             current = self._version_from_conn(conn)
@@ -137,8 +139,6 @@ class SqliteMigrator(DatabaseMigrator):
             conn.close()
 
     def current_version(self) -> int:
-        import os
-
         if not os.path.exists(self._db_path):
             return 0
         try:
@@ -157,3 +157,10 @@ class SqliteMigrator(DatabaseMigrator):
             return row[0] if row and row[0] is not None else 0
         except sqlite3.OperationalError:
             return 0
+
+
+def _ensure_directory(db_path: str) -> None:
+    """Create parent directories so sqlite3.connect can create the file."""
+    parent = os.path.dirname(db_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)

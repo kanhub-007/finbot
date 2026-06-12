@@ -22,6 +22,9 @@ from finbot.core.domain.entities.strategy_snapshot import StrategySnapshot
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
+from finbot.infrastructure.repositories.sqlite_migrator import (
+    _ensure_directory,
+)
 
 
 class SqliteBotStateRepository(BotStateRepository):
@@ -318,6 +321,7 @@ class SqliteBotStateRepository(BotStateRepository):
     @property
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:
+            _ensure_directory(self._db_path)
             self._conn = sqlite3.connect(self._db_path)
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")

@@ -28,6 +28,7 @@ def main() -> None:
     _add_compat_parser(sub)
     _add_replay_parser(sub)
     _add_status_parser(sub)
+    _add_db_parser(sub)
 
     args = parser.parse_args()
 
@@ -41,6 +42,8 @@ def main() -> None:
         _cmd_replay(args)
     elif args.command == "status":
         _cmd_status(args)
+    elif args.command == "db":
+        _cmd_db(args)
     else:
         parser.print_help()
 
@@ -78,6 +81,12 @@ def _add_replay_parser(sub) -> None:
 
 def _add_status_parser(sub) -> None:
     sub.add_parser("status", help="Show bot status (last signal, last order, counts)")
+
+
+def _add_db_parser(sub) -> None:
+    p = sub.add_parser("db", help="Database management commands")
+    sp = p.add_subparsers(dest="db_command")
+    sp.add_parser("migrate", help="Apply pending schema migrations")
 
 
 def _cmd_run(args) -> None:
@@ -197,6 +206,18 @@ def _cmd_status(args) -> None:
             indent=2,
         )
     )
+
+
+def _cmd_db(args) -> None:
+    if args.db_command == "migrate":
+        from finbot.startup.db import run_migrations
+        from finbot.startup.service_factory import db_path_from_settings
+
+        db_path = db_path_from_settings()
+        version = run_migrations(db_path)
+        print(f"Database migrated to version {version}")
+    else:
+        print("Usage: finbot db migrate")
 
 
 def _read_strategy_file(path: str) -> str:

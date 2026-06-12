@@ -112,25 +112,32 @@ def create_replay_strategy_use_case(
     )
 
 
-def _db_path_from_settings() -> str:
+def db_path_from_settings() -> str:
     return Settings().database_path or "data/finbot.db"
 
 
-def create_bot_state_repository():
-    """Create the default bot state repository.
+def create_bot_state_repository(*, migrate: bool = True):
+    """Create the default SQLite bot state repository.
 
-    Uses SQLite unless overridden for testing.  Migrations are applied
-    automatically on first access.
+    Parameters
+    ----------
+    migrate:
+        When ``True`` (default), pending schema migrations are applied
+        before the repository is returned.  Set to ``False`` for
+        read-only commands like ``status`` that should never trigger
+        DDL.
     """
     from finbot.infrastructure.repositories.sqlite_bot_state_repository import (
         SqliteBotStateRepository,
     )
-    from finbot.infrastructure.repositories.sqlite_migrator import (
-        SqliteMigrator,
-    )
 
-    db_path = _db_path_from_settings()
-    SqliteMigrator(db_path).migrate()
+    db_path = db_path_from_settings()
+    if migrate:
+        from finbot.infrastructure.repositories.sqlite_migrator import (
+            SqliteMigrator,
+        )
+
+        SqliteMigrator(db_path).migrate()
     return SqliteBotStateRepository(db_path)
 
 
@@ -144,7 +151,7 @@ def create_in_memory_repository():
 
 
 def create_status_use_case():
-    """Create a fully wired status use case."""
+    """Create a fully wired status use case (read-only — no migrations)."""
     from finbot.core.application.use_cases.status import StatusUseCase
 
-    return StatusUseCase(repo=create_bot_state_repository())
+    return StatusUseCase(repo=create_bot_state_repository(migrate=False))
