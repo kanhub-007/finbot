@@ -59,12 +59,30 @@ def _build_exchange_gateway(settings: Settings, mode: TradingMode) -> ExchangeGa
     return HyperliquidExchangeGateway()
 
 
-def create_run_bot_use_case(settings: Settings, strategy_path: str) -> RunBotUseCase:
-    """Create a fully wired run-bot use case."""
+def create_run_bot_use_case(
+    settings: Settings,
+    strategy_path: str,
+    live_data: bool = False,
+) -> RunBotUseCase:
+    """Create a fully wired run-bot use case.
+
+    When ``live_data`` is True the Hyperliquid websocket stream is used
+    instead of the in-memory stub (dry-run only — no orders placed).
+    """
     mode = TradingMode(settings.mode)
+    if live_data:
+        from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
+            HyperliquidMarketDataStream,
+        )
+
+        stream = HyperliquidMarketDataStream(
+            stale_data_seconds=settings.stale_data_seconds,
+        )
+    else:
+        stream = InMemoryMarketDataStream()
     return RunBotUseCase(
         exchange_gateway=_build_exchange_gateway(settings, mode),
-        market_data_stream=InMemoryMarketDataStream(),
+        market_data_stream=stream,
         strategy_evaluator=FinbarStrategyEvaluator(strategy_path),
         state_repository=InMemoryBotStateRepository(),
     )

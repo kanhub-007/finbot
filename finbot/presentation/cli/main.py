@@ -53,6 +53,11 @@ def _add_run_parser(sub) -> None:
     p.add_argument("--strategy", required=True)
     p.add_argument("--symbol", default="BTC")
     p.add_argument("--interval", default="1h")
+    p.add_argument(
+        "--live-data",
+        action="store_true",
+        help="Use Hyperliquid websocket for market data (dry-run only)",
+    )
 
 
 def _add_validate_parser(sub) -> None:
@@ -91,7 +96,11 @@ def _add_db_parser(sub) -> None:
 
 def _cmd_run(args) -> None:
     settings = Settings()
-    use_case = create_run_bot_use_case(settings, args.strategy)
+    use_case = create_run_bot_use_case(
+        settings,
+        args.strategy,
+        live_data=args.live_data,
+    )
     request = create_run_bot_request(
         settings=settings,
         strategy_path=args.strategy,
