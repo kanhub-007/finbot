@@ -1,8 +1,12 @@
 """Tests for copied strategy domain entities."""
 
+import pytest
+
 from finbot.core.domain.entities.condition import Condition
 from finbot.core.domain.entities.condition_group import ConditionGroup
 from finbot.core.domain.entities.data_mode import DataMode
+from finbot.core.domain.entities.feature_spec import FeatureSpec
+from finbot.core.domain.entities.formula_node import FormulaNode
 from finbot.core.domain.entities.indicator_spec import IndicatorSpec
 from finbot.core.domain.entities.operand import Operand
 from finbot.core.domain.entities.side_rules import SideRules
@@ -22,7 +26,7 @@ from finbot.core.domain.entities.volume_profile_result import VolumeProfileResul
 
 
 class TestStrategyDomainEntities:
-    def test_condition_can_be_constucted(self) -> None:
+    def test_condition_can_be_constructed(self) -> None:
         cond = Condition(left=Operand(kind="indicator", value="atr"), operator=">")
         assert cond.operator == ">"
         assert cond.left.kind == "indicator"
@@ -103,14 +107,12 @@ class TestStrategyDomainEntities:
         assert result.errors[0].path == "$.name"
 
     def test_signal_result_is_frozen(self) -> None:
+        from dataclasses import FrozenInstanceError
+
         signal = SignalResult(action="buy", direction="long")
         assert signal.action == "buy"
-        # Frozen dataclass: setting an attribute must raise.
-        try:
+        with pytest.raises(FrozenInstanceError):
             signal.action = "sell"  # type: ignore[misc]
-            assert False, "Expected FrozenInstanceError"
-        except Exception:
-            pass
 
     def test_volume_profile_result_is_mutable(self) -> None:
         vp = VolumeProfileResult(
@@ -156,3 +158,18 @@ class TestStrategyDomainEntities:
         assert decl.has_informative() is False
         assert decl.interval_for("primary") == "1h"
         assert decl.interval_for("nonexistent") is None
+
+    def test_formula_node_can_be_constructed(self) -> None:
+        leaf = FormulaNode(kind="literal", value=1.5, label="threshold")
+        assert leaf.kind == "literal"
+        assert leaf.value == 1.5
+        assert leaf.left is None
+
+        binary = FormulaNode(op=">", kind="operator", left=leaf, right=leaf)
+        assert binary.op == ">"
+        assert binary.left is leaf
+
+    def test_feature_spec_can_be_constructed(self) -> None:
+        spec = FeatureSpec(name="rolling_high", type="rolling_max", window=20)
+        assert spec.name == "rolling_high"
+        assert spec.window == 20

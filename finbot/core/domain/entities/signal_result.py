@@ -1,6 +1,11 @@
 """Signal output from a trading strategy's on_bar() call.
 
 Pure dataclass — no behavior, no ORM, no framework dependencies.
+
+This entity intentionally uses raw ``str`` for ``action`` and ``direction``
+instead of the Finbot-native ``SignalAction`` / ``PositionDirection`` enums.
+It matches Finbar's wire format for runtime compatibility. The adapter layer
+in ``infrastructure/strategy/`` converts to ``SignalDecision`` which uses enums.
 """
 
 from dataclasses import dataclass, field
@@ -10,8 +15,8 @@ from dataclasses import dataclass, field
 class SignalResult:
     """Unified signal output from a strategy evaluated on a single bar.
 
-    The backtest engine calls strategy.on_bar(bar, position) for each bar
-    and receives a SignalResult indicating buy/sell/hold with optional
+    The strategy evaluator calls strategy.on_bar(bar, position) for each
+    bar and receives a SignalResult indicating buy/sell/hold with optional
     stop-loss and take-profit levels.
     """
 

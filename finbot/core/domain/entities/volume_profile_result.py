@@ -11,7 +11,12 @@ from dataclasses import dataclass, field
 
 @dataclass
 class VolumeProfileResult:
-    """Result of a Volume Profile computation for one session."""
+    """Result of a Volume Profile computation for one session.
+
+    Intentionally **not frozen** — the pandas-based volume profile math
+    in ``core/domain/services/volume_profile.py`` mutates these fields
+    during computation. All other domain entities are frozen.
+    """
 
     poc: float
     """Point of Control — price level with the most volume."""
