@@ -1,22 +1,59 @@
 """Command-line interface for Finbot."""
 
 import argparse
+import json
+import sys
 
 from finbot.config.settings import Settings
+from finbot.core.application.dto.validate_strategy_request import (
+    ValidateStrategyRequest,
+)
 from finbot.startup.service_factory import (
     create_run_bot_request,
     create_run_bot_use_case,
+    create_validate_strategy_use_case,
 )
 
 
 def main() -> None:
     """Run the Finbot command-line interface."""
     parser = argparse.ArgumentParser(description="Finbot live trading runtime")
-    parser.add_argument("--strategy", required=False, default="")
-    parser.add_argument("--symbol", required=False, default="BTC")
-    parser.add_argument("--interval", required=False, default="1h")
+    sub = parser.add_subparsers(dest="command")
+
+    _add_run_parser(sub)
+    _add_validate_parser(sub)
+    _add_compat_parser(sub)
+
     args = parser.parse_args()
 
+    if args.command == "run":
+        _cmd_run(args)
+    elif args.command == "validate-strategy":
+        _cmd_validate(args)
+    elif args.command == "strategy-compat":
+        _cmd_compat(args)
+    else:
+        parser.print_help()
+
+
+def _add_run_parser(sub) -> None:
+    p = sub.add_parser("run", help="Start the live trading runtime")
+    p.add_argument("--strategy", required=True)
+    p.add_argument("--symbol", default="BTC")
+    p.add_argument("--interval", default="1h")
+
+
+def _add_validate_parser(sub) -> None:
+    p = sub.add_parser("validate-strategy", help="Validate a strategy file")
+    p.add_argument("--strategy", required=True)
+
+
+def _add_compat_parser(sub) -> None:
+    p = sub.add_parser("strategy-compat", help="Check strategy feature compatibility")
+    p.add_argument("--strategy", required=True)
+
+
+def _cmd_run(args) -> None:
     settings = Settings()
     use_case = create_run_bot_use_case(settings, args.strategy)
     request = create_run_bot_request(
@@ -27,3 +64,50 @@ def main() -> None:
     )
     result = use_case.execute(request)
     print(f"{result.status}: {result.message}")
+
+
+def _cmd_validate(args) -> None:
+    use_case = create_validate_strategy_use_case()
+    content = _read_strategy_file(args.strategy)
+    request = ValidateStrategyRequest(
+        strategy_path=args.strategy, strategy_content=content
+    )
+    result = use_case.validate(request)
+
+    if result.valid:
+        print(f"VALID  {result.strategy_name}  ({result.schema_version})")
+        print(
+            f"       timeframe={result.primary_timeframe},"
+            f" indicators={result.indicator_count}"
+        )
+    else:
+        print("INVALID")
+        for err in result.errors:
+            print(f"  - {err}")
+        sys.exit(1)
+
+
+def _cmd_compat(args) -> None:
+    use_case = create_validate_strategy_use_case()
+    content = _read_strategy_file(args.strategy)
+    request = ValidateStrategyRequest(
+        strategy_path=args.strategy, strategy_content=content
+    )
+    result = use_case.compatibility(request)
+
+    print(
+        json.dumps(
+            {"strategy": result.strategy_name, "modes": result.modes},
+            indent=2,
+        )
+    )
+
+
+def _read_strategy_file(path: str) -> str:
+    from pathlib import Path
+
+    return Path(path).read_text(encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()
