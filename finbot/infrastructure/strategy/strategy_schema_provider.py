@@ -8,8 +8,8 @@ class StrategySchemaProvider:
         """Return the strategy definition JSON Schema."""
         return {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "$id": "https://finbar.local/schemas/strategy-definition.schema.json",
-            "title": "Finbar Strategy Definition",
+            "$id": "https://finbot.local/schemas/strategy-definition.schema.json",
+            "title": "Finbot Strategy Definition",
             "type": "object",
             "required": ["schema_version", "name", "sides"],
             "additionalProperties": True,

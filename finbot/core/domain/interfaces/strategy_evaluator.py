@@ -8,7 +8,7 @@ from finbot.core.domain.entities.signal_decision import SignalDecision
 
 
 class StrategyEvaluator(ABC):
-    """Abstracts Finbar-backed strategy evaluation."""
+    """Abstracts Finbot-native strategy evaluation."""
 
     @abstractmethod
     def evaluate(

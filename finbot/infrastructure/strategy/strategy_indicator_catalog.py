@@ -6,7 +6,7 @@ from finbot.core.domain.interfaces.indicator_capability_provider import (
 
 
 class StrategyIndicatorCatalog(IndicatorCapabilityProvider):
-    """Catalog of indicator columns currently supported by Finbar."""
+    """Catalog of indicator columns currently supported by Finbot."""
 
     _PERIOD_RANGES = {
         "sma": (2, 500),
