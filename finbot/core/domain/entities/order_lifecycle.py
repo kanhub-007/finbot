@@ -1,0 +1,33 @@
+"""Order lifecycle entity — tracks an order through its state machine."""
+
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from decimal import Decimal
+
+from finbot.core.domain.entities.order_state import OrderState
+
+
+@dataclass
+class OrderLifecycle:
+    """Mutable entity tracking an order from planning to final state.
+
+    Not frozen — the state and remaining size change as the order
+    progresses through fills and cancellations.
+    """
+
+    order_id: str
+    symbol: str
+    side: str
+    original_size: Decimal
+    state: OrderState = OrderState.PLANNED
+    remaining_size: Decimal = Decimal("0")
+    filled_size: Decimal = Decimal("0")
+    transition_history: list[tuple[OrderState, OrderState, str]] = field(
+        default_factory=list
+    )
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    def record_transition(
+        self, from_state: OrderState, to_state: OrderState, reason: str = ""
+    ) -> None:
+        self.transition_history.append((from_state, to_state, reason))
