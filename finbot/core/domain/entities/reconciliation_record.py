@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from uuid import uuid4
 
 
 @dataclass(frozen=True)
@@ -17,5 +18,5 @@ class ReconciliationRecord:
     open_orders_match: bool
     exchange_state_json: str = "{}"
     details: str = ""
-    reconciliation_id: str = field(default_factory=lambda: str(hash(object())))
+    reconciliation_id: str = field(default_factory=lambda: uuid4().hex)
     reconciled_at: datetime = field(default_factory=lambda: datetime.now(UTC))

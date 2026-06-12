@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from uuid import uuid4
 
 
 @dataclass(frozen=True)
@@ -15,5 +16,5 @@ class StrategySnapshot:
     bot_run_id: str
     strategy_hash: str
     full_yaml: str
-    snapshot_id: str = field(default_factory=lambda: str(hash(object())))
+    snapshot_id: str = field(default_factory=lambda: uuid4().hex)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

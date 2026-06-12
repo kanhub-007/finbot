@@ -15,6 +15,7 @@ class OrderIntent:
     side: OrderSide
     size: Decimal
     order_type: OrderType
+    signal_key: str = ""
     reduce_only: bool = False
     limit_price: Decimal | None = None
     stop_price: Decimal | None = None

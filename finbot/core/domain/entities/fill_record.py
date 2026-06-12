@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 
 @dataclass(frozen=True)
@@ -16,5 +17,5 @@ class FillRecord:
     size: Decimal
     price: Decimal
     fee: Decimal = Decimal("0")
-    fill_id: str = field(default_factory=lambda: str(hash(object())))
+    fill_id: str = field(default_factory=lambda: uuid4().hex)
     filled_at: datetime = field(default_factory=lambda: datetime.now(UTC))

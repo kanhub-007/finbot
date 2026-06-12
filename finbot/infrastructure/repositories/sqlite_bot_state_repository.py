@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
@@ -42,11 +43,38 @@ class SqliteBotStateRepository(BotStateRepository):
             self._conn.close()
             self._conn = None
 
+    @contextmanager
+    def transaction(self):
+        """Context manager that defers commit until the block exits.
+
+        Usage::
+
+            with repo.transaction():
+                repo.record_order_intent(intent)
+                repo.mark_signal_processed(signal)
+
+        All writes inside the block are committed atomically when the
+        block exits without exception.
+        """
+        try:
+            self._connection.isolation_level = None  # manual txn
+            self._connection.execute("BEGIN")
+            yield
+            self._connection.commit()
+        except Exception:
+            self._connection.rollback()
+            raise
+        finally:
+            self._connection.execute("PRAGMA journal_mode=WAL")
+            self._connection.execute("PRAGMA foreign_keys=ON")
+            self._connection.isolation_level = ""  # back to autocommit
+
     # -- bot run lifecycle --------------------------------------------------
 
     def create_bot_run(self, bot_run: BotRun) -> None:
         self._execute(
-            "INSERT INTO bot_runs (run_id, strategy_name, strategy_hash, "
+            "INSERT OR IGNORE INTO bot_runs "
+            "(run_id, strategy_name, strategy_hash, "
             "symbol, interval, mode, started_at) "
             "VALUES (?,?,?,?,?,?,?)",
             (
@@ -118,7 +146,7 @@ class SqliteBotStateRepository(BotStateRepository):
             "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 intent_id,
-                getattr(intent, "signal_key", ""),
+                intent.signal_key,
                 intent.symbol,
                 intent.side.value,
                 intent.order_type.value,

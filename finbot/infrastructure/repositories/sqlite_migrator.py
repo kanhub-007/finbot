@@ -123,7 +123,7 @@ class SqliteMigrator(DatabaseMigrator):
     def migrate(self) -> int:
         conn = sqlite3.connect(self._db_path)
         try:
-            current = self.current_version()
+            current = self._version_from_conn(conn)
             for version, sql in MIGRATIONS:
                 if version > current:
                     conn.executescript(sql)
@@ -140,17 +140,20 @@ class SqliteMigrator(DatabaseMigrator):
         import os
 
         if not os.path.exists(self._db_path):
-            # Brand-new path — version 0 will trigger all migrations
             return 0
         try:
             conn = sqlite3.connect(self._db_path)
             try:
-                row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
-                return row[0] if row and row[0] is not None else 0
-            except sqlite3.OperationalError:
-                # schema_version table does not exist yet
-                return 0
+                return self._version_from_conn(conn)
             finally:
                 conn.close()
         except Exception:
+            return 0
+
+    @staticmethod
+    def _version_from_conn(conn: sqlite3.Connection) -> int:
+        try:
+            row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+            return row[0] if row and row[0] is not None else 0
+        except sqlite3.OperationalError:
             return 0
