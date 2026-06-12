@@ -17,6 +17,8 @@ class JsonRiskPriceCalculator(RiskPriceCalculator):
         if risk is None:
             return 0.0, 0.0
         close = float(bar.get("close", 0) or 0)
+        if close <= 0:
+            return 0.0, 0.0
         stop = _calculate_stop(risk, bar, close, side)
         target = _calculate_target(risk, bar, close, side, stop)
         return round(stop, 2), round(target, 2)

@@ -96,3 +96,8 @@ class TestYamlStrategyDefinitionLoader:
     ) -> None:
         indicator_types = [ind.type for ind in amt_v2.indicators]
         assert "value_area_width_pct" in indicator_types
+
+    def test_path_traversal_is_rejected(self) -> None:
+        loader = _loader()
+        with pytest.raises(FileNotFoundError):
+            loader.load_from_file("../../../etc/passwd")

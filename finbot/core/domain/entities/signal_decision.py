@@ -25,7 +25,20 @@ class SignalDecision:
 
     @property
     def signal_key(self) -> str:
-        """Unique signal key for idempotent processing."""
+        """Unique signal key for idempotent processing.
+
+        Raises ValueError when any required key field is empty — this
+        prevents accidental key collisions where every signal maps to
+        the same default key ``::0:``.
+        """
+        if not self.symbol:
+            raise ValueError("signal_key requires a non-empty symbol")
+        if not self.interval:
+            raise ValueError("signal_key requires a non-empty interval")
+        if not self.candle_timestamp:
+            raise ValueError("signal_key requires a positive candle_timestamp")
+        if not self.strategy_hash:
+            raise ValueError("signal_key requires a non-empty strategy_hash")
         return (
             f"{self.symbol}:{self.interval}:"
             f"{self.candle_timestamp}:{self.strategy_hash}"

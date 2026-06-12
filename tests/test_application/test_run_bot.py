@@ -42,3 +42,35 @@ def test_live_mode_requires_acknowledgment() -> None:
 
     assert result.status == "rejected"
     assert "live mode requires" in result.message
+
+
+def test_negative_max_position_is_rejected() -> None:
+    use_case = create_dry_run_use_case()
+    request = RunBotRequest(
+        strategy_path="s.yaml",
+        symbol="BTC",
+        interval="1h",
+        config=BotConfig(
+            mode=TradingMode.DRY_RUN,
+            max_position_usd=Decimal("-50"),
+        ),
+    )
+    result = use_case.execute(request)
+    assert result.status == "rejected"
+    assert "max_position_usd" in result.message
+
+
+def test_negative_daily_loss_is_rejected() -> None:
+    use_case = create_dry_run_use_case()
+    request = RunBotRequest(
+        strategy_path="s.yaml",
+        symbol="BTC",
+        interval="1h",
+        config=BotConfig(
+            mode=TradingMode.DRY_RUN,
+            max_daily_loss_usd=Decimal("-10"),
+        ),
+    )
+    result = use_case.execute(request)
+    assert result.status == "rejected"
+    assert "max_daily_loss_usd" in result.message

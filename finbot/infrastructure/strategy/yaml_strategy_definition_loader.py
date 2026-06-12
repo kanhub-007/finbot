@@ -30,5 +30,8 @@ class YamlStrategyDefinitionLoader(StrategyDefinitionLoader):
         return result.definition
 
     def load_from_file(self, path: str) -> StrategyDefinition:
-        content = Path(path).read_text(encoding="utf-8")
+        full = Path(path).resolve()
+        if not full.is_file():
+            raise FileNotFoundError(f"Strategy file not found: {path}")
+        content = full.read_text(encoding="utf-8")
         return self.load_from_text(content)

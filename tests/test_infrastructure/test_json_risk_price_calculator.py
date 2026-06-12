@@ -125,3 +125,25 @@ class TestJsonRiskPriceCalculator:
         stop, target = calc.calculate(risk, _bar(close=100.0), "short")
         # Stop: 100 * (1 + 0.03) = 103
         assert stop == 103.0
+
+    def test_zero_close_returns_zeroes(self) -> None:
+        calc = _calc()
+        risk = RiskSpec(
+            stop_loss_type="atr",
+            stop_indicator="atr",
+            stop_multiplier=3.5,
+        )
+        stop, target = calc.calculate(risk, _bar(close=0.0, atr=2.0), "long")
+        assert stop == 0.0
+        assert target == 0.0
+
+    def test_negative_close_returns_zeroes(self) -> None:
+        calc = _calc()
+        risk = RiskSpec(
+            stop_loss_type="atr",
+            stop_indicator="atr",
+            stop_multiplier=3.5,
+        )
+        stop, target = calc.calculate(risk, _bar(close=-10.0, atr=2.0), "long")
+        assert stop == 0.0
+        assert target == 0.0

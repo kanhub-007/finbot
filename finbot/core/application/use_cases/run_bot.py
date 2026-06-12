@@ -46,7 +46,7 @@ class RunBotUseCase:
         position = self._exchange_gateway.get_position(request.symbol)
         open_orders = self._exchange_gateway.list_open_orders(request.symbol)
         message = (
-            f"ready: mode={request.config.mode}, symbol={request.symbol}, "
+            f"mode={request.config.mode}, symbol={request.symbol}, "
             f"position_size={position.size}, open_orders={len(open_orders)}"
         )
         return RunBotResult(status="ready", message=message)
@@ -72,6 +72,16 @@ class RunBotUseCase:
             errors.append("max_open_orders must be at least 1")
         if request.config.stale_data_seconds < 1:
             errors.append("stale_data_seconds must be positive")
+        if request.config.max_position_usd <= 0:
+            errors.append(
+                "max_position_usd must be positive"
+                f" (got {request.config.max_position_usd})"
+            )
+        if request.config.max_daily_loss_usd <= 0:
+            errors.append(
+                "max_daily_loss_usd must be positive"
+                f" (got {request.config.max_daily_loss_usd})"
+            )
         if errors:
             return SafetyValidation.failure(*errors)
         return SafetyValidation.success()

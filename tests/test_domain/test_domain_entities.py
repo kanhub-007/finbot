@@ -59,8 +59,9 @@ class TestSignalDecision:
         assert decision.signal_key == "BTC:1h:1700000000:abc123"
 
     def test_hold_produces_valid_key(self) -> None:
-        decision = SignalDecision(action=SignalAction.HOLD)
-        assert decision.signal_key == "::0:"
+        with pytest.raises(ValueError, match="signal_key requires"):
+            decision = SignalDecision(action=SignalAction.HOLD)
+            _ = decision.signal_key
 
     def test_entry_and_exit_actions_are_distinct(self) -> None:
         assert SignalAction.LONG_ENTRY != SignalAction.LONG_EXIT
