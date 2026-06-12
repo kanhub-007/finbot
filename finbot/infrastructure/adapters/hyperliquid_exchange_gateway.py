@@ -20,6 +20,7 @@ from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
 from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
+from finbot.core.domain.services.retry_policy import RetryPolicy
 
 if TYPE_CHECKING:
     from hyperliquid.exchange import Exchange
@@ -50,12 +51,14 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         account_address: str = "",
         vault_address: str = "",
         repo: BotStateRepository | None = None,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         self._private_key = private_key
         self._base_url = base_url
         self._account_address = account_address or None
         self._vault_address = vault_address or None
         self._repo = repo
+        self._retry = retry_policy or RetryPolicy()
         self._exchange: Exchange | None = None
         self._info: Info | None = None
 
@@ -100,7 +103,11 @@ class HyperliquidExchangeGateway(ExchangeGateway):
     def submit_order(self, intent: OrderIntent) -> dict[str, Any]:
         exchange = self._ensure_exchange()
         intent_id = self._repo.record_order_intent(intent) if self._repo else ""
-        result = _execute_order(exchange, intent)
+
+        def _submit() -> dict[str, Any]:
+            return _execute_order(exchange, intent)
+
+        result = self._retry.execute(_submit, require_cloid=intent.cloid)
         if self._repo:
             import json
 
