@@ -113,6 +113,25 @@ def _add_panic_parser(sub) -> None:
 
 def _cmd_run(args) -> None:
     settings = Settings()
+
+    # Live-mode safety gate.
+    if settings.mode == "live" or not settings.hyperliquid_testnet:
+        from finbot.core.domain.services.live_mode_guard import (
+            check_live_mode,
+        )
+
+        check = check_live_mode(
+            mode=settings.mode,
+            live_trading_ack=settings.live_trading_ack,
+            private_key=settings.hyperliquid_private_key.get_secret_value(),
+            max_position_usd=float(settings.max_position_usd),
+            database_path=settings.database_path,
+        )
+        if not check.allowed:
+            for reason in check.reasons:
+                print(f"LIVE MODE BLOCKED: {reason}")
+            sys.exit(1)
+
     use_case = create_run_bot_use_case(
         settings,
         args.strategy,
