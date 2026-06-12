@@ -17,9 +17,12 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
+
+if TYPE_CHECKING:
+    from hyperliquid.info import Info
 
 
 class HyperliquidMarketDataStream(MarketDataStream):
@@ -41,8 +44,10 @@ class HyperliquidMarketDataStream(MarketDataStream):
     ) -> None:
         self._base_url = base_url
         self._stale_seconds = stale_data_seconds
-        self._info: Any = None
+        self._info: Info | None = None
         self._sub_id: int | None = None
+        self._symbol: str = ""
+        self._interval: str = ""
         self._last_timestamp_ms: int | None = None
         self._last_update_at: float = 0.0
         self._user_callback: Callable[[dict[str, Any]], None] | None = None
@@ -60,6 +65,8 @@ class HyperliquidMarketDataStream(MarketDataStream):
         if self._info is not None:
             raise RuntimeError("Already subscribed — call stop() first")
 
+        self._symbol = symbol
+        self._interval = interval
         self._user_callback = callback
         self._last_update_at = time.monotonic()
 
@@ -78,7 +85,11 @@ class HyperliquidMarketDataStream(MarketDataStream):
         if self._sub_id is not None and self._info is not None:
             try:
                 self._info.unsubscribe(
-                    {"type": "candle", "coin": "", "interval": ""},
+                    {
+                        "type": "candle",
+                        "coin": self._symbol,
+                        "interval": self._interval,
+                    },
                     self._sub_id,
                 )
             except Exception:
@@ -88,9 +99,14 @@ class HyperliquidMarketDataStream(MarketDataStream):
                 self._info.ws_manager.stop()
             except Exception:
                 pass
+        if self._stale_checker is not None:
+            self._stale_checker.join(timeout=2)
+            self._stale_checker = None
         self._info = None
         self._sub_id = None
         self._user_callback = None
+        self._symbol = ""
+        self._interval = ""
 
     # -- internal -----------------------------------------------------------
 
@@ -111,15 +127,11 @@ class HyperliquidMarketDataStream(MarketDataStream):
             return
 
         if ts_ms > self._last_timestamp_ms:
-            # New candle started → previous is now closed.
-            # We don't have the previous bar in hand; the SDK callback
-            # only gives us the current candle.  We need to store the
-            # previous candle and emit it when the next starts.
-            # For now we skip because we only hold one candle.
+            # TODO(Phase 12.2): previous candle is now closed — emit it here.
             pass
 
-        # For v1: treat every candle update that arrives as valid.
-        # Partial detection will be refined in Phase 12.2.
+        # Emit current bar to caller.
+        # Partial-candle filtering will be refined in Phase 12.2.
         if self._user_callback is not None:
             self._user_callback(bar)
 
