@@ -36,8 +36,8 @@ framework dependencies.
 | `finbar/core/domain/entities/condition_group.py` | `finbot/core/domain/entities/condition_group.py` | Nested boolean tree nodes | `condition.py` | Frozen dataclass |
 | `finbar/core/domain/entities/operand.py` | `finbot/core/domain/entities/operand.py` | Typed operand for conditions | None | Frozen dataclass |
 | `finbar/core/domain/entities/risk_spec.py` | `finbot/core/domain/entities/risk_spec.py` | Risk settings for stop/target calc | None | Frozen dataclass |
-| `finbar/core/domain/entities/side_rules.py` | `finbar/core/domain/entities/side_rules.py` | Entry/exit condition trees per side | `condition_group.py` | Frozen dataclass |
-| `finbar/core/domain/entities/signal_result.py` | `finbar/core/domain/entities/signal_result.py` | Signal output from strategy evaluation | None | Mutable dataclass — maps to `SignalDecision` |
+| `finbar/core/domain/entities/side_rules.py` | `finbot/core/domain/entities/side_rules.py` | Entry/exit condition trees per side | `condition_group.py` | Frozen dataclass |
+| `finbar/core/domain/entities/signal_result.py` | `finbot/core/domain/entities/signal_result.py` | Signal output from strategy evaluation | None | Will be made frozen during copy. Maps to Finbot `SignalDecision` in the evaluator adapter. |
 | `finbar/core/domain/entities/volume_profile_result.py` | `finbot/core/domain/entities/volume_profile_result.py` | VP computation result | None | Used by volume profile math |
 | `finbar/core/domain/entities/strategy_definition.py` | `finbot/core/domain/entities/strategy_definition.py` | Root strategy entity after parsing | `indicator_spec`, `feature_spec`, `side_rules`, `risk_spec`, `strategy_parameter`, `timeframe_declaration` | Frozen dataclass |
 | `finbar/core/domain/entities/strategy_parameter.py` | `finbot/core/domain/entities/strategy_parameter.py` | Parameter definitions | None | Used by parser |
@@ -49,7 +49,7 @@ framework dependencies.
 | `finbar/core/domain/entities/strategy_validation_error.py` | `finbot/core/domain/entities/strategy_validation_error.py` | Validation error DTO | None | Used by parser/validator |
 | `finbar/core/domain/entities/strategy_validation_result.py` | `finbot/core/domain/entities/strategy_validation_result.py` | Validation result DTO | `strategy_definition.py`, `strategy_validation_error.py` | Used by parser |
 | `finbar/core/domain/entities/strategy_meta.py` | `finbot/core/domain/entities/strategy_meta.py` | Strategy metadata for `TradingStrategy.meta()` | None | Required by `TradingStrategy` interface |
-| `finbar/core/domain/entities/strategy_kind.py` | `finbot/core/domain/entities/strategy_kind.py` | Enum for strategy type | None | Needed if schema references `strategy_kind` |
+| `finbar/core/domain/entities/strategy_kind.py` | `finbot/core/domain/entities/strategy_kind.py` | Enum for strategy type | None | **CONDITIONAL** — only if schema references `strategy_kind`; not needed by AMT target strategies |
 
 ---
 
@@ -84,6 +84,13 @@ Pure math functions. No framework dependencies beyond `numpy`/`pandas`.
 Needed to load Finbar YAML/JSON strategies into domain entities. This is the
 largest dependency chain.
 
+**Why infrastructure and not application?** The parser stack depends on YAML
+parsing (`PyYAML`) and is tightly coupled to the Finbar strategy file format.
+Per Clean Architecture, YAML/JSON format-specific code belongs in infrastructure,
+not in application use cases or domain. The use case (Phase 4 validator) depends
+on an abstract parser interface defined in domain; the concrete YAML
+implementation lives here.
+
 | Finbar source | Finbot target | Needed for | Dependencies | Notes |
 |---|---|---|---|---|
 | `finbar/core/application/services/strategy_definition_parser.py` | `finbot/infrastructure/strategy/strategy_definition_parser.py` | Main YAML/JSON parser entry point | All resolvers, limit rules, warning rules | Core parser |
@@ -113,7 +120,7 @@ largest dependency chain.
 | `finbar/core/application/services/required_column_collector.py` | `finbot/infrastructure/strategy/required_column_collector.py` | Collect required bar columns from definition | `condition_tree_visitor` | |
 | `finbar/core/application/services/feature_input_column_collector.py` | `finbot/infrastructure/strategy/feature_input_column_collector.py` | Collect indicator columns needed by features | None | |
 | `finbar/core/application/services/strategy_schema_provider.py` | `finbot/infrastructure/strategy/strategy_schema_provider.py` | JSON schema for strategy validation | None | |
-| `finbar/core/application/services/description_visitor.py` | `finbot/infrastructure/strategy/description_visitor.py` | Human-readable condition description visitor | `condition_tree_visitor` | Nice-to-have for explainability |
+| `finbar/core/application/services/description_visitor.py` | `finbot/infrastructure/strategy/description_visitor.py` | Human-readable condition description visitor | `condition_tree_visitor` | **DEFER** — skip initially; add in later phase if explainability needed |
 
 ---
 
@@ -170,6 +177,29 @@ These should never appear in Finbot:
   - `market_profile.py`, `profile_shape.py`, `profile_shape_wrappers.py`
   - `proxy_indicator.py`, `rolling_metrics.py`, `vwap_bands.py`
   - `wyckoff_phase.py`, `wyckoff_wrappers.py`, `annualization.py`
+
+---
+
+Dependency notes
+---------------
+
+When copying Tier 4 (domain services), add these to ``pyproject.toml``:
+
+.. code-block:: toml
+
+    "numpy>=1.26.0"
+    "pandas>=2.0.0"
+
+When copying Tier 6 (indicator infra), also add if needed:
+
+.. code-block:: toml
+
+    "pandas-ta>=0.3.14"
+
+Some copied files may import symbols re-exported from Finbar's
+``finbar/__init__.py`` (e.g. ``from finbar import SomeEntity``). Check each
+file's imports and add any needed re-exports to ``finbot/__init__.py`` or the
+relevant sub-package ``__init__.py``.
 
 ---
 
