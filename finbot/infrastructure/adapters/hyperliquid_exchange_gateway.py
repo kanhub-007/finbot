@@ -107,7 +107,7 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         def _submit() -> dict[str, Any]:
             return _execute_order(exchange, intent)
 
-        result = self._retry.execute(_submit, require_cloid=intent.cloid)
+        result = self._retry.execute(_submit, require_cloid=intent.cloid or "")
         if self._repo:
             import json
 

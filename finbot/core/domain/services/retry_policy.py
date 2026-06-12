@@ -1,12 +1,12 @@
 """Retry policy — exponential backoff with non-retryable error detection.
 
-Pure domain service with no I/O.  Used by exchange gateways and
-websocket reconnect logic.
+Domain service with injectable sleep for testability (defaults to
+``time.sleep``; inject a no-op in tests).
 """
 
 from __future__ import annotations
 
-import time
+import time as _time
 from collections.abc import Callable
 from typing import TypeVar
 
@@ -51,10 +51,12 @@ class RetryPolicy:
         base_delay: float = 1.0,
         max_delay: float = 30.0,
         non_retryable_substrings: list[str] | None = None,
+        sleep: Callable[[float], None] = _time.sleep,
     ) -> None:
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.max_delay = max_delay
+        self._sleep = sleep
         self._non_retryable = non_retryable_substrings or list(_DEFAULT_NON_RETRYABLE)
 
     # -- public API --------------------------------------------------------
@@ -117,7 +119,7 @@ class RetryPolicy:
                 if self.is_non_retryable(exc):
                     raise NonRetryableError(str(exc)) from exc
                 if attempt < self.max_retries:
-                    time.sleep(delay)
+                    self._sleep(delay)
                     delay = min(delay * 2, self.max_delay)
 
         raise RuntimeError(

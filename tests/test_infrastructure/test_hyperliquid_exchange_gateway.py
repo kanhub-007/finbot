@@ -69,6 +69,7 @@ class TestHyperliquidExchangeGateway:
                 size=Decimal("0.001"),
                 order_type=OrderType.MARKET,
                 reduce_only=True,
+                cloid="cloid-exit",
             )
             result = gateway.submit_order(intent)
             mock_exchange.market_close.assert_called_once_with(
