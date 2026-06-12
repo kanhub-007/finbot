@@ -58,6 +58,8 @@ class JsonRuleBasedStrategy(TradingStrategy):
         self._previous_values.clear()
 
     def _entry_signal(self, bar: dict, pending_values: PrevValues) -> SignalResult:
+        # Long checked first — if both sides trigger on the same bar,
+        # long entry takes priority (Finbar convention).
         for side in ("long", "short"):
             rules = self._definition.sides.get(side)
             if rules is None:

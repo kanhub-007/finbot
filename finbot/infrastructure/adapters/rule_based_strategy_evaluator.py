@@ -67,17 +67,22 @@ class RuleBasedStrategyEvaluator(StrategyEvaluator):
 
 
 def _map_action(finbar_action: str, finbar_direction: str) -> SignalAction:
-    """Convert Finbar's raw string action/direction to SignalAction enum."""
+    """Convert Finbar's raw string action/direction to SignalAction enum.
+
+    Finbar conventions:
+      Entry: action="buy"/"sell", direction="long"/"short"
+      Exit:  action="sell"/"buy", direction="exit"
+    """
     if finbar_action == "hold":
         return SignalAction.HOLD
     if finbar_action == "buy":
-        if finbar_direction == "short":
-            return SignalAction.SHORT_ENTRY
+        if finbar_direction == "exit":
+            return SignalAction.SHORT_EXIT
         return SignalAction.LONG_ENTRY
     if finbar_action == "sell":
+        if finbar_direction == "short":
+            return SignalAction.SHORT_ENTRY
         if finbar_direction == "exit":
             return SignalAction.LONG_EXIT
-        if finbar_direction == "short":
-            return SignalAction.SHORT_EXIT
         return SignalAction.LONG_EXIT
     return SignalAction.HOLD

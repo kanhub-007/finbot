@@ -40,3 +40,8 @@ def create_dry_run_config(**overrides: Any) -> BotConfig:
     }
     kwargs.update(overrides)
     return BotConfig(**kwargs)
+
+
+def make_bar(**fields: object) -> dict:
+    """Build a synthetic enriched bar dict for tests."""
+    return dict(fields)
