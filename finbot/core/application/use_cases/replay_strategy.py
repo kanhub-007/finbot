@@ -11,7 +11,6 @@ from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.interfaces.bar_loader import BarLoader
-from finbot.core.domain.interfaces.bar_source import BarSource
 from finbot.core.domain.interfaces.strategy_definition_loader import (
     StrategyDefinitionLoader,
 )
@@ -24,10 +23,9 @@ from finbot.core.domain.services.warmup_window import WarmupWindow
 class ReplayStrategyUseCase:
     """Replay a strategy against historical bar data without network access.
 
-    Bars are loaded from a ``BarLoader`` (CSV, etc.) and optionally
-    pre-warmed through a ``BarSource`` / ``WarmupWindow`` pair. When
-    warmup is configured the evaluator skips bars until the minimum bar
-    count is reached.
+    Bars are loaded from a ``BarLoader`` and optionally pre-warmed
+    through a ``WarmupWindow``.  When warmup is configured the evaluator
+    skips bars until the minimum bar count is reached.
     """
 
     DEFAULT_MIN_WARMUP = 20
@@ -37,13 +35,11 @@ class ReplayStrategyUseCase:
         loader: StrategyDefinitionLoader,
         bar_loader: BarLoader,
         evaluator_factory: StrategyEvaluatorFactory,
-        bar_source: BarSource | None = None,
         warmup: WarmupWindow | None = None,
     ):
         self._loader = loader
         self._bar_loader = bar_loader
         self._evaluator_factory = evaluator_factory
-        self._bar_source = bar_source
         self._warmup = warmup
 
     # -- public API --------------------------------------------------------

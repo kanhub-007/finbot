@@ -133,7 +133,6 @@ def _cmd_replay(args) -> None:
         bars_csv = _read_strategy_file(args.bars)
 
     use_case = create_replay_strategy_use_case(
-        bar_source_csv=bars_csv,
         warmup_min_bars=args.warmup_bars or 0,
     )
     request = ReplayStrategyRequest(

@@ -7,6 +7,7 @@ minimum number of bars has been accumulated with no gaps.
 
 from __future__ import annotations
 
+import statistics
 from datetime import UTC, datetime
 from typing import Any
 
@@ -105,15 +106,30 @@ class WarmupWindow:
             del self._bars[oldest]
 
     def _detect_gap(self) -> None:
-        if len(self._bars) < 2:
+        """Scan sorted timestamps; flag irregular intervals as gaps.
+
+        Uses the **median interval** across all stored bars as the
+        expected cadence.  Any interval that deviates 50% or more from
+        the median is treated as a gap.
+        """
+        n = len(self._bars)
+        if n < 2:
+            self._has_gap = False
             return
-        timestamps = list(self._bars.keys())
-        d0 = timestamps[1] - timestamps[0]
-        if d0 <= 0:
+        timestamps = sorted(self._bars)
+        intervals = [timestamps[i + 1] - timestamps[i] for i in range(n - 1)]
+        expected = _median(intervals)
+        if expected <= 0:
+            self._has_gap = False
             return
-        for i in range(1, len(timestamps) - 1):
-            di = timestamps[i + 1] - timestamps[i]
-            if abs(di - d0) >= (d0 * 0.5):  # ≥50% deviation = gap
+        threshold = expected * 0.5
+        for di in intervals:
+            if abs(di - expected) >= threshold:
                 self._has_gap = True
                 return
         self._has_gap = False
+
+
+def _median(values: list[int]) -> int:
+    """Return the median of a non-empty list of integers."""
+    return int(statistics.median(values))

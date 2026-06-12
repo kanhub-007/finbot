@@ -1,5 +1,6 @@
 """Historical CSV bar source — wraps CsvBarLoader as a BarSource."""
 
+from finbot.core.domain.interfaces.bar_loader import BarLoader
 from finbot.core.domain.interfaces.bar_source import BarSource
 from finbot.infrastructure.strategy.csv_bar_loader import CsvBarLoader
 
@@ -7,17 +8,19 @@ from finbot.infrastructure.strategy.csv_bar_loader import CsvBarLoader
 class HistCsvBarSource(BarSource):
     """Load closed bars from CSV files for warmup.
 
-    Wraps the existing CsvBarLoader so it satisfies the BarSource
+    Wraps a :class:`BarLoader` so it satisfies the ``BarSource``
     interface expected by the warmup orchestration layer.
 
     Parameters
     ----------
     csv_text:
-        Raw CSV content to parse. All bars are treated as closed.
+        Raw CSV content to parse.  All bars are treated as closed.
+    loader:
+        Optional loader.  Defaults to :class:`CsvBarLoader`.
     """
 
-    def __init__(self, csv_text: str = "") -> None:
-        self._loader = CsvBarLoader()
+    def __init__(self, csv_text: str = "", loader: BarLoader | None = None) -> None:
+        self._loader = loader if loader is not None else CsvBarLoader()
         self._csv_text = csv_text
         self._cached_bars: list[dict] | None = None
 

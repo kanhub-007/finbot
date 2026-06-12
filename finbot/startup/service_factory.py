@@ -91,30 +91,22 @@ def create_validate_strategy_use_case() -> ValidateStrategyUseCase:
 
 
 def create_replay_strategy_use_case(
-    bar_source_csv: str = "",
-    warmup_min_bars: int = ReplayStrategyUseCase.DEFAULT_MIN_WARMUP,
+    warmup_min_bars: int = 0,
 ) -> ReplayStrategyUseCase:
     """Create a fully wired replay-strategy use case.
 
-    When ``bar_source_csv`` is non-empty a :class:`WarmupWindow` is
-    wired in so signals are suppressed until the minimum bar count is
-    reached.
+    When ``warmup_min_bars`` is > 0 a :class:`WarmupWindow` is wired in
+    so signals are suppressed until the minimum bar count is reached.
     """
     from finbot.core.domain.services.warmup_window import WarmupWindow
-    from finbot.infrastructure.strategy.hist_csv_bar_source import (
-        HistCsvBarSource,
-    )
 
-    bar_source = None
     warmup = None
-    if bar_source_csv:
-        bar_source = HistCsvBarSource(bar_source_csv)
+    if warmup_min_bars:
         warmup = WarmupWindow(min_bars=warmup_min_bars)
 
     return ReplayStrategyUseCase(
         loader=YamlStrategyDefinitionLoader(),
         bar_loader=CsvBarLoader(),
         evaluator_factory=RuleBasedStrategyEvaluatorFactory(),
-        bar_source=bar_source,
         warmup=warmup,
     )
