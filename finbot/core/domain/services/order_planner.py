@@ -9,7 +9,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from finbot.core.application.dto.order_plan_result import OrderPlanResult
+from finbot.core.domain.dto.order_plan_result import OrderPlanResult
 from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_side import OrderSide
 from finbot.core.domain.entities.order_type import OrderType

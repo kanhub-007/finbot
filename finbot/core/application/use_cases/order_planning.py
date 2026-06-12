@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from finbot.core.application.dto.order_plan_result import OrderPlanResult
+from finbot.core.domain.dto.order_plan_result import OrderPlanResult
 from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.services.order_planner import OrderPlanner
 
