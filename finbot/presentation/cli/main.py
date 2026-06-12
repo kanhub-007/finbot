@@ -10,6 +10,7 @@ from finbot.core.domain.dto.validate_strategy_request import (
     ValidateStrategyRequest,
 )
 from finbot.startup.service_factory import (
+    create_replay_strategy_use_case,
     create_run_bot_request,
     create_run_bot_use_case,
     create_validate_strategy_use_case,
@@ -24,6 +25,7 @@ def main() -> None:
     _add_run_parser(sub)
     _add_validate_parser(sub)
     _add_compat_parser(sub)
+    _add_replay_parser(sub)
 
     args = parser.parse_args()
 
@@ -33,6 +35,8 @@ def main() -> None:
         _cmd_validate(args)
     elif args.command == "strategy-compat":
         _cmd_compat(args)
+    elif args.command == "replay":
+        _cmd_replay(args)
     else:
         parser.print_help()
 
@@ -52,6 +56,14 @@ def _add_validate_parser(sub) -> None:
 def _add_compat_parser(sub) -> None:
     p = sub.add_parser("strategy-compat", help="Check strategy feature compatibility")
     p.add_argument("--strategy", required=True)
+
+
+def _add_replay_parser(sub) -> None:
+    p = sub.add_parser("replay", help="Replay a strategy over historical bar data")
+    p.add_argument("--strategy", required=True)
+    p.add_argument("--bars", default="")
+    p.add_argument("--symbol", default="BTC")
+    p.add_argument("--interval", default="1h")
 
 
 def _cmd_run(args) -> None:
@@ -102,6 +114,40 @@ def _cmd_compat(args) -> None:
             indent=2,
         )
     )
+
+
+def _cmd_replay(args) -> None:
+    from finbot.core.domain.dto.replay_strategy_request import (
+        ReplayStrategyRequest,
+    )
+
+    use_case = create_replay_strategy_use_case()
+    content = _read_strategy_file(args.strategy)
+    bars_csv = ""
+    if args.bars:
+        bars_csv = _read_strategy_file(args.bars)
+    request = ReplayStrategyRequest(
+        strategy_path=args.strategy,
+        strategy_content=content,
+        bars_csv=bars_csv,
+        symbol=args.symbol,
+        interval=args.interval,
+    )
+    result = use_case.execute(request)
+    print(f"{result.status}: {result.signal_count} signals")
+    if result.errors:
+        for err in result.errors:
+            print(f"  ERROR: {err}")
+    for sig in result.signals:
+        extras = ""
+        if sig.stop_price:
+            extras += f" stop={sig.stop_price:.2f}"
+        if sig.target_price:
+            extras += f" target={sig.target_price:.2f}"
+        print(
+            f"  bar={sig.bar_index} {sig.action.value}"
+            f" close={sig.close:.2f}{extras}"
+        )
 
 
 def _read_strategy_file(path: str) -> str:

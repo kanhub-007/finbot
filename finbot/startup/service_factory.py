@@ -2,6 +2,9 @@
 
 from finbot.config.settings import Settings
 from finbot.core.application.dto.run_bot_request import RunBotRequest
+from finbot.core.application.use_cases.replay_strategy import (
+    ReplayStrategyUseCase,
+)
 from finbot.core.application.use_cases.run_bot import RunBotUseCase
 from finbot.core.application.use_cases.validate_strategy_definition import (
     ValidateStrategyUseCase,
@@ -21,9 +24,13 @@ from finbot.infrastructure.adapters.hyperliquid_exchange_gateway import (
 from finbot.infrastructure.adapters.in_memory_market_data_stream import (
     InMemoryMarketDataStream,
 )
+from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
+    RuleBasedStrategyEvaluatorFactory,
+)
 from finbot.infrastructure.repositories.in_memory_bot_state_repository import (
     InMemoryBotStateRepository,
 )
+from finbot.infrastructure.strategy.csv_bar_loader import CsvBarLoader
 from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
     YamlStrategyDefinitionLoader,
 )
@@ -81,3 +88,12 @@ def create_run_bot_request(
 def create_validate_strategy_use_case() -> ValidateStrategyUseCase:
     """Create a fully wired validate-strategy use case."""
     return ValidateStrategyUseCase(loader=YamlStrategyDefinitionLoader())
+
+
+def create_replay_strategy_use_case() -> ReplayStrategyUseCase:
+    """Create a fully wired replay-strategy use case."""
+    return ReplayStrategyUseCase(
+        loader=YamlStrategyDefinitionLoader(),
+        bar_loader=CsvBarLoader(),
+        evaluator_factory=RuleBasedStrategyEvaluatorFactory(),
+    )
