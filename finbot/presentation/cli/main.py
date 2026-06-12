@@ -13,6 +13,7 @@ from finbot.startup.service_factory import (
     create_replay_strategy_use_case,
     create_run_bot_request,
     create_run_bot_use_case,
+    create_status_use_case,
     create_validate_strategy_use_case,
 )
 
@@ -26,6 +27,7 @@ def main() -> None:
     _add_validate_parser(sub)
     _add_compat_parser(sub)
     _add_replay_parser(sub)
+    _add_status_parser(sub)
 
     args = parser.parse_args()
 
@@ -37,6 +39,8 @@ def main() -> None:
         _cmd_compat(args)
     elif args.command == "replay":
         _cmd_replay(args)
+    elif args.command == "status":
+        _cmd_status(args)
     else:
         parser.print_help()
 
@@ -70,6 +74,10 @@ def _add_replay_parser(sub) -> None:
         default=0,
         help="Minimum warmup bars before evaluating (0 = no warmup)",
     )
+
+
+def _add_status_parser(sub) -> None:
+    sub.add_parser("status", help="Show bot status (last signal, last order, counts)")
 
 
 def _cmd_run(args) -> None:
@@ -157,6 +165,38 @@ def _cmd_replay(args) -> None:
             f"  bar={sig.bar_index} {sig.action.value}"
             f" close={sig.close:.2f}{extras}"
         )
+
+
+def _cmd_status(args) -> None:
+    _ = args
+    use_case = create_status_use_case()
+    result = use_case.execute()
+    print(
+        json.dumps(
+            {
+                "active_bot_run_id": result.active_bot_run_id,
+                "strategy": result.strategy_name,
+                "symbol": result.symbol,
+                "interval": result.interval,
+                "mode": result.mode,
+                "last_signal": {
+                    "key": result.last_signal_key,
+                    "action": result.last_signal_action,
+                    "timestamp": result.last_signal_timestamp,
+                },
+                "last_order": {
+                    "intent_id": result.last_order_intent_id,
+                    "status": result.last_order_status,
+                },
+                "totals": {
+                    "signals": result.total_signals,
+                    "orders": result.total_orders,
+                    "fills": result.total_fills,
+                },
+            },
+            indent=2,
+        )
+    )
 
 
 def _read_strategy_file(path: str) -> str:

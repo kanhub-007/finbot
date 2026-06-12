@@ -27,6 +27,7 @@ class InMemoryBotStateRepository(BotStateRepository):
     def __init__(self) -> None:
         self._responses: dict[str, dict[str, Any]] = {}
         self._processed: set[str] = set()
+        self._processed_signals: list[ProcessedSignal] = []
         self._bot_runs: list[BotRun] = []
         self._snapshots: list[StrategySnapshot] = []
         self._fills: list[FillRecord] = []
@@ -57,6 +58,7 @@ class InMemoryBotStateRepository(BotStateRepository):
 
     def mark_signal_processed(self, signal: ProcessedSignal) -> None:
         self._processed.add(signal.signal_key)
+        self._processed_signals.append(signal)
 
     # -- order intents & responses ------------------------------------------
 
@@ -92,3 +94,29 @@ class InMemoryBotStateRepository(BotStateRepository):
 
     def append_audit_log(self, entry: AuditLogEntry) -> None:
         self._audit_log.append(entry)
+
+    # -- status queries ----------------------------------------------------
+
+    def get_latest_bot_run(self) -> BotRun | None:
+        return self._bot_runs[-1] if self._bot_runs else None
+
+    def get_last_signal(self) -> ProcessedSignal | None:
+        return self._processed_signals[-1] if self._processed_signals else None
+
+    def get_last_order_response(
+        self,
+    ) -> OrderResponseRecord | None:
+        for rid in reversed(list(self._responses.keys())):
+            resp = self._responses[rid].get("response")
+            if resp is not None:
+                return resp
+        return None
+
+    def count_signals(self) -> int:
+        return len(self._processed)
+
+    def count_orders(self) -> int:
+        return len(self._responses)
+
+    def count_fills(self) -> int:
+        return len(self._fills)

@@ -247,7 +247,73 @@ class SqliteBotStateRepository(BotStateRepository):
             ),
         )
 
-    # -- internal -----------------------------------------------------------
+    # -- status queries ----------------------------------------------------
+
+    def get_latest_bot_run(self) -> BotRun | None:
+        row = self._query_one(
+            "SELECT run_id, strategy_name, strategy_hash, symbol, "
+            "interval, mode, started_at, ended_at "
+            "FROM bot_runs ORDER BY started_at DESC LIMIT 1"
+        )
+        if row is None:
+            return None
+        return BotRun(
+            run_id=row[0],
+            strategy_name=row[1],
+            strategy_hash=row[2],
+            symbol=row[3],
+            interval=row[4],
+            mode=row[5],
+            started_at=datetime.fromisoformat(row[6]),
+            ended_at=(datetime.fromisoformat(row[7]) if row[7] else None),
+        )
+
+    def get_last_signal(self) -> ProcessedSignal | None:
+        row = self._query_one(
+            "SELECT signal_key, bot_run_id, signal_action, bar_timestamp, "
+            "created_at "
+            "FROM processed_signals ORDER BY created_at DESC LIMIT 1"
+        )
+        if row is None:
+            return None
+        return ProcessedSignal(
+            signal_key=row[0],
+            bot_run_id=row[1],
+            signal_action=row[2],
+            bar_timestamp=row[3],
+            created_at=datetime.fromisoformat(row[4]),
+        )
+
+    def get_last_order_response(
+        self,
+    ) -> OrderResponseRecord | None:
+        row = self._query_one(
+            "SELECT response_id, intent_id, bot_run_id, response_json, "
+            "status, created_at "
+            "FROM order_responses ORDER BY created_at DESC LIMIT 1"
+        )
+        if row is None:
+            return None
+        return OrderResponseRecord(
+            response_id=row[0],
+            intent_id=row[1],
+            bot_run_id=row[2],
+            response_json=row[3],
+            status=row[4],
+            created_at=datetime.fromisoformat(row[5]),
+        )
+
+    def count_signals(self) -> int:
+        row = self._query_one("SELECT COUNT(*) FROM processed_signals")
+        return row[0] if row else 0
+
+    def count_orders(self) -> int:
+        row = self._query_one("SELECT COUNT(*) FROM order_intents")
+        return row[0] if row else 0
+
+    def count_fills(self) -> int:
+        row = self._query_one("SELECT COUNT(*) FROM fills")
+        return row[0] if row else 0
 
     @property
     def _connection(self) -> sqlite3.Connection:

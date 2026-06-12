@@ -79,3 +79,31 @@ class BotStateRepository(ABC):
     @abstractmethod
     def append_audit_log(self, entry: AuditLogEntry) -> None:
         """Append an entry to the append-only audit log."""
+
+    # -- status queries (CQRS-lite reads) -----------------------------------
+
+    @abstractmethod
+    def get_latest_bot_run(self) -> BotRun | None:
+        """Return the most recently created bot run, or None."""
+
+    @abstractmethod
+    def get_last_signal(self) -> ProcessedSignal | None:
+        """Return the most recently processed signal, or None."""
+
+    @abstractmethod
+    def get_last_order_response(
+        self,
+    ) -> OrderResponseRecord | None:
+        """Return the most recent order response, or None."""
+
+    @abstractmethod
+    def count_signals(self) -> int:
+        """Total number of processed signals across all runs."""
+
+    @abstractmethod
+    def count_orders(self) -> int:
+        """Total number of recorded order intents."""
+
+    @abstractmethod
+    def count_fills(self) -> int:
+        """Total number of recorded fills."""

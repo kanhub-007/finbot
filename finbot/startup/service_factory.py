@@ -141,3 +141,10 @@ def create_in_memory_repository():
     )
 
     return InMemoryBotStateRepository()
+
+
+def create_status_use_case():
+    """Create a fully wired status use case."""
+    from finbot.core.application.use_cases.status import StatusUseCase
+
+    return StatusUseCase(repo=create_bot_state_repository())
