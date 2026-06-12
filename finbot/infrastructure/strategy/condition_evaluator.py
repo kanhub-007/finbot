@@ -56,6 +56,8 @@ class ConditionEvaluator:
             ]
             return all(results) if group.kind == "all" else any(results)
         if group.kind == "not":
+            if not group.children:
+                return False
             return not self._evaluate_group(
                 group.children[0], bar, previous_values, pending_values
             )
@@ -121,6 +123,8 @@ class ConditionEvaluator:
 
     @staticmethod
     def _to_float(value: Any) -> float | None:
+        # Booleans are ints in Python (True==1, False==0), so reject
+        # them explicitly — we don't want True > 0.5 to succeed.
         if value is None or isinstance(value, bool):
             return None
         try:

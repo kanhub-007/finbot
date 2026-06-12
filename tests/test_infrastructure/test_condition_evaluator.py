@@ -181,3 +181,68 @@ class TestConditionEvaluator:
     def test_none_group_returns_false(self) -> None:
         ev = _evaluator()
         assert ev.evaluate(None, _bar(), {}) is False
+
+    def test_equals_operator(self) -> None:
+        ev = _evaluator()
+        group = ConditionGroup(
+            kind="condition",
+            condition=Condition(
+                left=Operand(kind="literal", value=42),
+                operator="==",
+                right=Operand(kind="literal", value=42),
+            ),
+        )
+        assert ev.evaluate(group, _bar(), {}) is True
+
+        group2 = ConditionGroup(
+            kind="condition",
+            condition=Condition(
+                left=Operand(kind="indicator", value="close"),
+                operator="==",
+                right=Operand(kind="literal", value=100.0),
+            ),
+        )
+        assert ev.evaluate(group2, _bar(close=100.0), {}) is True
+        assert ev.evaluate(group2, _bar(close=101.0), {}) is False
+
+    def test_not_equals_operator(self) -> None:
+        ev = _evaluator()
+        group = ConditionGroup(
+            kind="condition",
+            condition=Condition(
+                left=Operand(kind="literal", value=1),
+                operator="!=",
+                right=Operand(kind="literal", value=2),
+            ),
+        )
+        assert ev.evaluate(group, _bar(), {}) is True
+
+    def test_nan_bar_value_is_treated_as_none(self) -> None:
+        ev = _evaluator()
+        group = ConditionGroup(
+            kind="condition",
+            condition=Condition(
+                left=Operand(kind="indicator", value="rsi"),
+                operator="is_true",
+            ),
+        )
+        assert ev.evaluate(group, _bar(rsi=float("nan")), {}) is False
+
+    def test_pending_values_reuses_existing_dict(self) -> None:
+        """When pending_values is provided, evaluate uses it and does
+        NOT commit — the caller owns the commit."""
+        ev = _evaluator()
+        condition = Condition(
+            left=Operand(kind="indicator", value="fast", label="fast"),
+            operator="crosses_above",
+            right=Operand(kind="indicator", value="slow", label="slow"),
+        )
+        group = ConditionGroup(kind="condition", condition=condition)
+        prev: dict = {}
+        pending: dict = {}
+
+        ev.evaluate(group, _bar(fast=10, slow=8), prev, pending_values=pending)
+        # Pending dict has the current values...
+        assert "fast:slow:crosses_above" in pending
+        # ...but prev dict does NOT (caller must commit).
+        assert "fast:slow:crosses_above" not in prev
