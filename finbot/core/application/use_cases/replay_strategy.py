@@ -91,14 +91,14 @@ class ReplayStrategyUseCase:
             errors.append(str(exc))
             return None
 
-    @staticmethod
-    def _load_bars(request, errors):
+    def _load_bars(self, request, errors):
         if request.bars_csv:
-            bars = _parse_csv_bars(request.bars_csv)
+            bars = self._bar_loader.load_bars(request.bars_csv)
             if bars:
                 return bars
-            # Headers-only CSV is allowed — just no signals produced.
-            return [{"timestamp": "0"}]
+            # Headers-only CSV — no bars, no signals. Use a dummy so
+            # the replay loop runs once and produces zero signals.
+            return [{"timestamp": 0}]
         errors.append("No bar data provided (bars_csv required)")
         return []
 
@@ -136,36 +136,6 @@ def _float_bar(bar: dict, key: str) -> float:
         return float(val)
     except (TypeError, ValueError):
         return 0.0
-
-
-def _parse_csv_bars(csv_text: str) -> list[dict]:
-    import csv
-    import io
-
-    reader = csv.DictReader(io.StringIO(csv_text))
-    bars = []
-    for row in reader:
-        bar: dict = {}
-        for key, val in row.items():
-            bar[key] = _coerce_csv_value(val)
-        bars.append(bar)
-    bars.sort(key=lambda b: str(b.get("timestamp", "")))
-    return bars
-
-
-def _coerce_csv_value(val: str):
-    stripped = val.strip()
-    if stripped.lower() in ("true", "false"):
-        return stripped.lower() == "true"
-    try:
-        return int(stripped)
-    except ValueError:
-        pass
-    try:
-        return float(stripped)
-    except ValueError:
-        pass
-    return stripped
 
 
 def _hash_content(content: str) -> str:
