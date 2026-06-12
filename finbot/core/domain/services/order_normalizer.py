@@ -10,6 +10,7 @@ from decimal import ROUND_DOWN, Decimal
 
 from finbot.core.domain.entities.market_metadata import MarketMetadata
 from finbot.core.domain.entities.order_intent import OrderIntent
+from finbot.core.domain.entities.order_side import OrderSide
 from finbot.core.domain.entities.order_type import OrderType
 
 
@@ -72,10 +73,13 @@ class OrderNormalizer:
         if stop_price is not None:
             stop_price = _round_price(stop_price, self._meta.price_tick)
 
+        target_price = intent.target_price
+        if target_price is not None:
+            target_price = _round_price(target_price, self._meta.price_tick)
+
         # Market-as-IOC-limit: apply slippage to the limit price.
         if intent.order_type == OrderType.MARKET and limit_price is None:
-            # Compute a limit price from reference ± slippage.
-            if intent.side.value == "buy":
+            if intent.side == OrderSide.BUY:
                 limit_price = _round_price(
                     reference_price * (1 + self._max_slippage),
                     self._meta.price_tick,
@@ -95,7 +99,7 @@ class OrderNormalizer:
             reduce_only=intent.reduce_only,
             limit_price=limit_price,
             stop_price=stop_price,
-            target_price=intent.target_price,
+            target_price=target_price,
             cloid=intent.cloid,
         )
 

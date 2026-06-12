@@ -13,6 +13,9 @@ from finbot.core.domain.interfaces.market_metadata_provider import (
 class HyperliquidMetadataProvider(MarketMetadataProvider):
     """Fetches per-symbol order constraints from Hyperliquid ``Info``.
 
+    The full universe is fetched once and cached.  Individual symbol
+    lookups never trigger additional HTTP requests.
+
     Parameters
     ----------
     base_url:
@@ -22,33 +25,33 @@ class HyperliquidMetadataProvider(MarketMetadataProvider):
     def __init__(self, base_url: str = "https://api.hyperliquid.xyz") -> None:
         self._base_url = base_url
         self._cache: dict[str, MarketMetadata] = {}
+        self._fetched = False
 
     def get_metadata(self, symbol: str) -> MarketMetadata | None:
-        if symbol in self._cache:
-            return self._cache[symbol]
+        key = symbol.upper()
+        if key in self._cache:
+            return self._cache[key]
+        if self._fetched:
+            return None
 
         from hyperliquid.info import Info
 
         info = Info(self._base_url, skip_ws=True)
-        try:
-            meta_list = info.meta()
-            universe = meta_list.get("universe", [])
-            for asset in universe:
-                name = asset.get("name", "")
-                if name.upper() == symbol.upper():
-                    md = MarketMetadata(
-                        symbol=name,
-                        sz_decimals=asset.get("szDecimals", 0),
-                        price_tick=_tick_to_decimal(
-                            asset.get("coinCdcDecimalPlaces", 0)
-                        ),
-                        max_leverage=asset.get("maxLeverage", 0),
-                    )
-                    self._cache[symbol] = md
-                    return md
-        finally:
-            pass
-        return None
+        meta_list = info.meta()
+        self._fetched = True
+
+        universe = meta_list.get("universe", [])
+        for asset in universe:
+            name = asset.get("name", "")
+            md = MarketMetadata(
+                symbol=name,
+                sz_decimals=asset.get("szDecimals", 0),
+                price_tick=_tick_to_decimal(asset.get("coinCdcDecimalPlaces", 0)),
+                max_leverage=asset.get("maxLeverage", 0),
+            )
+            self._cache[name.upper()] = md
+
+        return self._cache.get(key)
 
 
 def _tick_to_decimal(places: int) -> Decimal:
