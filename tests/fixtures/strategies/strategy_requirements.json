@@ -1,0 +1,46 @@
+{
+  "_description": "Minimum requirements to execute each strategy live. Used for automated compatibility checks and Phase 4 validation.",
+  "strategies": {
+    "amt_dip_buyer_final": {
+      "name": "amt_dip_buyer_final",
+      "schema_version": "2.0",
+      "primary_timeframe": "1h",
+      "sides": ["long"],
+      "indicators": [
+        "atr",
+        "vp_vah",
+        "vp_val",
+        "above_value",
+        "acceptance_into_value"
+      ],
+      "operators": ["is_true"],
+      "condition_groups": ["all", "any"],
+      "risk_types": {
+        "stop_loss": "atr",
+        "take_profit": "risk_reward"
+      },
+      "parameters": ["atr_stop_mult"]
+    },
+    "amt_v2_vol_filter": {
+      "name": "amt_v2_vol_filter",
+      "schema_version": "2.0",
+      "primary_timeframe": "1h",
+      "sides": ["long"],
+      "indicators": [
+        "atr",
+        "vp_vah",
+        "vp_val",
+        "above_value",
+        "value_area_width_pct",
+        "acceptance_into_value"
+      ],
+      "operators": ["is_true", "<"],
+      "condition_groups": ["all", "any"],
+      "risk_types": {
+        "stop_loss": "atr",
+        "take_profit": "risk_reward"
+      },
+      "parameters": ["atr_stop_mult"]
+    }
+  }
+}
