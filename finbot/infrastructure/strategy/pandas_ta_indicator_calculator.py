@@ -186,27 +186,25 @@ class PandasTaIndicatorCalculator(IndicatorCalculator):
                     continue
                 try:
                     result = handler(result, name, cache)
-                except Exception:
-                    logger.warning(
-                        "Failed to compute indicator '%s'", name, exc_info=True
-                    )
+                except Exception as exc:
+                    logger.warning("Failed to compute indicator '%s': %s", name, exc)
             elif _is_dynamic(name):
                 try:
                     result = _compute_dynamic(result, name)
-                except Exception:
+                except Exception as exc:
                     logger.warning(
-                        "Failed to compute dynamic indicator '%s'",
+                        "Failed to compute dynamic indicator '%s': %s",
                         name,
-                        exc_info=True,
+                        exc,
                     )
             elif _is_rolling_vp(name):
                 try:
                     result = _compute_rolling_vp_dynamic(result, name, cache)
-                except Exception:
+                except Exception as exc:
                     logger.warning(
-                        "Failed to compute rolling VP '%s'",
+                        "Failed to compute rolling VP '%s': %s",
                         name,
-                        exc_info=True,
+                        exc,
                     )
             else:
                 logger.warning("Unknown indicator: '%s'", name)
