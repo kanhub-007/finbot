@@ -3,6 +3,8 @@
 These helpers avoid duplicating composition logic across test modules.
 """
 
+from typing import Any
+
 from finbot.core.application.use_cases.run_bot import RunBotUseCase
 from finbot.core.domain.entities.bot_config import BotConfig
 from finbot.core.domain.entities.trading_mode import TradingMode
@@ -30,11 +32,11 @@ def create_dry_run_use_case(strategy_path: str = "strategy.yaml") -> RunBotUseCa
     )
 
 
-def create_dry_run_config(**overrides: object) -> BotConfig:
+def create_dry_run_config(**overrides: Any) -> BotConfig:
     """Return a BotConfig defaulting to dry-run, overridable by kwargs."""
-    defaults: dict[str, object] = {
+    kwargs: dict[str, Any] = {
         "mode": TradingMode.DRY_RUN,
         "live_trading_ack": False,
     }
-    defaults.update(overrides)
-    return BotConfig(**defaults)  # type: ignore[arg-type]
+    kwargs.update(overrides)
+    return BotConfig(**kwargs)

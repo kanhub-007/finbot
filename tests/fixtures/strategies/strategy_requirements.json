@@ -1,4 +1,5 @@
 {
+  "_schema_version": "1.0",
   "_description": "Minimum requirements to execute each strategy live. Used for automated compatibility checks and Phase 4 validation.",
   "strategies": {
     "amt_dip_buyer_final": {
