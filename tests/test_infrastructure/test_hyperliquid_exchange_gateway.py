@@ -28,7 +28,7 @@ class TestHyperliquidExchangeGateway:
             return_value=mock_exchange,
         ):
             gateway = HyperliquidExchangeGateway(
-                private_key="0xdead",
+                private_key="0x" + "a" * 64,
                 base_url="https://testnet",
             )
             intent = OrderIntent(
@@ -61,7 +61,7 @@ class TestHyperliquidExchangeGateway:
             return_value=mock_exchange,
         ):
             gateway = HyperliquidExchangeGateway(
-                private_key="0xdead",
+                private_key="0x" + "a" * 64,
             )
             intent = OrderIntent(
                 symbol="BTC",
@@ -90,7 +90,7 @@ class TestHyperliquidExchangeGateway:
             return_value=mock_exchange,
         ):
             gateway = HyperliquidExchangeGateway(
-                private_key="0xdead",
+                private_key="0x" + "a" * 64,
             )
             result = gateway.cancel_by_cloid("BTC", "cloid-1")
             mock_exchange.cancel_by_cloid.assert_called_once_with("BTC", "cloid-1")
@@ -110,7 +110,7 @@ class TestHyperliquidExchangeGateway:
             return_value=mock_exchange,
         ):
             gateway = HyperliquidExchangeGateway(
-                private_key="0xdead",
+                private_key="0x" + "a" * 64,
                 repo=repo,
             )
             intent = OrderIntent(
@@ -145,7 +145,7 @@ class TestHyperliquidExchangeGateway:
             return_value=mock_info,
         ):
             gateway = HyperliquidExchangeGateway(
-                private_key="0xdead",
+                private_key="0x" + "a" * 64,
             )
             pos = gateway.get_position("BTC")
             assert pos.direction.value == "long"
@@ -162,7 +162,7 @@ class TestHyperliquidExchangeGateway:
             return_value=mock_info,
         ):
             gateway = HyperliquidExchangeGateway(
-                private_key="0xdead",
+                private_key="0x" + "a" * 64,
             )
             pos = gateway.get_position("ETH")
             assert pos.direction.value == "flat"
@@ -191,7 +191,7 @@ class TestHyperliquidExchangeGateway:
             ),
         ):
             gateway = HyperliquidExchangeGateway(
-                private_key="0xdead",
+                private_key="0x" + "a" * 64,
             )
             result = gateway.cancel_all("BTC")
             mock_exchange.bulk_cancel.assert_called_once_with(

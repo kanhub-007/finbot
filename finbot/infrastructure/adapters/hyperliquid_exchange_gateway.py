@@ -21,6 +21,9 @@ from finbot.core.domain.interfaces.bot_state_repository import (
 )
 from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 from finbot.core.domain.services.retry_policy import RetryPolicy
+from finbot.infrastructure.services.log_redactor import (
+    validate_private_key,
+)
 
 if TYPE_CHECKING:
     from hyperliquid.exchange import Exchange
@@ -53,6 +56,7 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         repo: BotStateRepository | None = None,
         retry_policy: RetryPolicy | None = None,
     ) -> None:
+        validate_private_key(private_key)
         self._private_key = private_key
         self._base_url = base_url
         self._account_address = account_address or None
