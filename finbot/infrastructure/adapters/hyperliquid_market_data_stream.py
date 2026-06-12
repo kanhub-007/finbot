@@ -48,7 +48,10 @@ class HyperliquidMarketDataStream(MarketDataStream):
         self._sub_id: int | None = None
         self._symbol: str = ""
         self._interval: str = ""
-        self._last_timestamp_ms: int | None = None
+        # Candle close tracking
+        self._pending_bar: dict[str, Any] | None = None
+        self._current_candle_ts_ms: int = 0
+        self._last_emitted_ts_ms: int = 0
         self._last_update_at: float = 0.0
         self._user_callback: Callable[[dict[str, Any]], None] | None = None
         self._stop_event = threading.Event()
@@ -120,22 +123,39 @@ class HyperliquidMarketDataStream(MarketDataStream):
         if bar is None:
             return
 
-        ts_ms = data.get("t", 0)
-        if self._last_timestamp_ms is None:
-            # First candle after subscribe — might be partial; skip it.
-            self._last_timestamp_ms = ts_ms
+        ts_ms: int = data.get("t", 0)
+        cb = self._user_callback
+        if cb is None:
             return
 
-        if ts_ms > self._last_timestamp_ms:
-            # TODO(Phase 12.2): previous candle is now closed — emit it here.
-            pass
+        # First candle after subscribe — capture it, don't emit yet.
+        if self._current_candle_ts_ms == 0:
+            self._pending_bar = bar
+            self._current_candle_ts_ms = ts_ms
+            return
 
-        # Emit current bar to caller.
-        # Partial-candle filtering will be refined in Phase 12.2.
-        if self._user_callback is not None:
-            self._user_callback(bar)
+        # Same candle still forming — update pending bar silently.
+        if ts_ms == self._current_candle_ts_ms:
+            self._pending_bar = bar
+            return
 
-        self._last_timestamp_ms = ts_ms
+        # New candle started → previous is now closed.
+        if ts_ms > self._current_candle_ts_ms:
+            # Emit the closed bar if it hasn't been emitted already.
+            if (
+                self._pending_bar is not None
+                and self._current_candle_ts_ms > self._last_emitted_ts_ms
+            ):
+                closed = dict(self._pending_bar)
+                closed["_closed"] = True
+                cb(closed)
+                self._last_emitted_ts_ms = self._current_candle_ts_ms
+            # Start tracking the new candle.
+            self._pending_bar = bar
+            self._current_candle_ts_ms = ts_ms
+            return
+
+        # ts_ms < current — out-of-order; ignore.
 
     def _start_stale_checker(self) -> None:
         if self._stale_seconds <= 0:

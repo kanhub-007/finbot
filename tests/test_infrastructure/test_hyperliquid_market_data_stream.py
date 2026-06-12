@@ -65,7 +65,7 @@ class TestHyperliquidMarketDataStream:
             stream.stop()
 
     def test_partial_candle_is_ignored(self) -> None:
-        """First candle after subscribe is treated as potentially partial."""
+        """Same-timestamp updates are stored silently — no emission."""
         mock_info = MagicMock()
         mock_info.subscribe.return_value = 1
 
@@ -82,7 +82,7 @@ class TestHyperliquidMarketDataStream:
             stream = HyperliquidMarketDataStream(stale_data_seconds=0)
             stream.subscribe_candles("BTC", "1h", received.append)
 
-            # First candle → skipped (partial)
+            # First candle captured, not emitted
             stream._on_candle(
                 {
                     "channel": "candle",
@@ -98,9 +98,9 @@ class TestHyperliquidMarketDataStream:
                     },
                 }
             )
-            assert len(received) == 0  # first candle skipped
+            assert len(received) == 0  # forming candle → not emitted
 
-            # Same timestamp again → still partial, still skipped
+            # Same timestamp update — still forming
             stream._on_candle(
                 {
                     "channel": "candle",
@@ -116,11 +116,12 @@ class TestHyperliquidMarketDataStream:
                     },
                 }
             )
-            assert len(received) == 1  # emits current bar
+            assert len(received) == 0  # still partial
 
             stream.stop()
 
     def test_closed_candle_is_processed(self) -> None:
+        """Previous candle emitted as closed when new candle starts."""
         mock_info = MagicMock()
         mock_info.subscribe.return_value = 1
 
@@ -137,7 +138,7 @@ class TestHyperliquidMarketDataStream:
             stream = HyperliquidMarketDataStream(stale_data_seconds=0)
             stream.subscribe_candles("BTC", "1h", received.append)
 
-            # First candle (partial) → skipped
+            # First candle (forming) → captured
             stream._on_candle(
                 {
                     "channel": "candle",
@@ -155,9 +156,7 @@ class TestHyperliquidMarketDataStream:
             )
             assert len(received) == 0
 
-            # New candle timestamp means the one before IS a closed candle
-            # But we emit the current bar (which will become closed when
-            # the next timestamp arrives).
+            # New candle → previous one emitted as closed
             stream._on_candle(
                 {
                     "channel": "candle",
@@ -174,8 +173,10 @@ class TestHyperliquidMarketDataStream:
                 }
             )
             assert len(received) == 1
-            assert received[0]["close"] == 2.5
-            assert received[0]["timestamp"] == 1003  # ms→s
+            # Emitted bar is the *previous* candle (now closed)
+            assert received[0]["close"] == 1.5
+            assert received[0]["timestamp"] == 1000
+            assert received[0]["_closed"] is True
 
             stream.stop()
 
