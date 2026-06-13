@@ -136,6 +136,9 @@ class LiveTradingRuntimeUseCase:
         if warmup_bars:
             for bar in warmup_bars:
                 self._warmup.append(bar)
+        # Cached enriched frame so each candle appends one row instead of
+        # rebuilding the whole frame from the warmup window.
+        self._enriched_frame: Any = None
 
     # -- public API ----------------------------------------------------------
 
@@ -369,10 +372,36 @@ class LiveTradingRuntimeUseCase:
         self._started = True
 
     def _enrich_bars(self) -> Any:
-        """Convert warmup bars to a DataFrame and compute indicators."""
-        bars = self._warmup.bars
-        df = self._bar_converter.bars_to_frame(bars)
-        return self._indicator_calc.calculate(df, list(self._required_columns))
+        """Append the latest bar to the cached frame and recompute indicators.
+
+        On the first ready candle the frame is built once from the warmup
+        window; subsequent candles append a single row and recompute.  This
+        keeps frame construction O(1) amortised instead of rebuilding an
+        n-bar DataFrame every candle.  The frame is capped to the warmup
+        window length so it does not grow unbounded over a long session.
+        """
+        if self._enriched_frame is None or self._bar_converter.is_empty(
+            self._enriched_frame
+        ):
+            df = self._bar_converter.bars_to_frame(self._warmup.bars)
+        else:
+            df = self._bar_converter.append_bar(
+                self._enriched_frame, self._warmup.latest_bar
+            )
+            df = self._trim_frame(df)
+        enriched = self._indicator_calc.calculate(df, list(self._required_columns))
+        self._enriched_frame = enriched
+        return enriched
+
+    def _trim_frame(self, df: Any) -> Any:
+        """Cap the enriched frame to the warmup max length to bound memory."""
+        max_len = self._warmup.max_length
+        try:
+            if hasattr(df, "iloc") and len(df) > max_len:
+                return df.iloc[-max_len:]
+        except TypeError:
+            pass
+        return df
 
     def _handle_enrichment_rejection(
         self,
@@ -525,7 +554,7 @@ class LiveTradingRuntimeUseCase:
             return intent_id, False
 
         if self._mode in (TradingMode.TESTNET, TradingMode.LIVE):
-            bar = self._warmup.bars[-1] if self._warmup.bars else {}
+            bar = self._warmup.latest_bar
             ref_price = Decimal(str(bar.get("close", 0)))
             submitted = self._submitter.submit(
                 intent, intent_id, self._bot_run_id, ref_price

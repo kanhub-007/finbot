@@ -31,6 +31,7 @@ def _create_runtime(
     mode=TradingMode.DRY_RUN,
     warmup_bars=None,
     required_columns=None,
+    bar_frame_converter=None,
 ):
     from finbot.core.application.use_cases.live_trading_runtime import (
         LiveTradingRuntimeUseCase,
@@ -42,7 +43,7 @@ def _create_runtime(
         state_repository=repo or StubBotStateRepository(),
         indicator_calculator=indicator_engine or InMemoryIndicatorEngine(),
         enrichment_validator=EnrichmentValidator(),
-        bar_frame_converter=InMemoryBarFrameConverter(),
+        bar_frame_converter=bar_frame_converter or InMemoryBarFrameConverter(),
         mode=mode,
         warmup_bars=warmup_bars or closed_warmup_bars(100),
         required_columns=required_columns or set(),
@@ -355,3 +356,39 @@ def test_dry_run_stop_ends_session() -> None:
 
     run = repo.get_latest_bot_run()
     assert run is not None
+
+
+def test_enriched_frame_is_cached_between_candles() -> None:
+    """P1/P5: the frame is built once, then appended to, not rebuilt per candle."""
+
+    converter = CountingBarFrameConverter()
+    runtime = _create_runtime(
+        indicator_engine=InMemoryIndicatorEngine(latest_bar=indicator_bar(atr=1200.0)),
+        bar_frame_converter=converter,
+        required_columns={"atr"},
+    )
+    runtime._start_session("s", "h", "BTC", "1h")
+
+    runtime.process_closed_candle(new_closed_candle(offset=100))
+    runtime.process_closed_candle(new_closed_candle(offset=101))
+
+    # First candle builds the frame; the second must go through append_bar
+    # (the incremental path) rather than rebuilding from scratch.
+    assert converter.append_bar_calls == 1, "second candle did not append"
+
+
+class CountingBarFrameConverter(InMemoryBarFrameConverter):
+    """Wraps the fake converter to count rebuilds vs appends."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.bars_to_frame_calls = 0
+        self.append_bar_calls = 0
+
+    def bars_to_frame(self, bars):
+        self.bars_to_frame_calls += 1
+        return super().bars_to_frame(bars)
+
+    def append_bar(self, frame, bar):
+        self.append_bar_calls += 1
+        return super().append_bar(frame, bar)

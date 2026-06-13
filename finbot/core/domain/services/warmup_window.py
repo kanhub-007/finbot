@@ -63,6 +63,13 @@ class WarmupWindow:
         return [self._bars[k] for k in self._sorted_ts]
 
     @property
+    def latest_bar(self) -> dict[str, Any]:
+        """Return the most recent bar (O(1)); empty dict if none."""
+        if not self._sorted_ts:
+            return {}
+        return self._bars[self._sorted_ts[-1]]
+
+    @property
     def count(self) -> int:
         """Number of bars currently stored."""
         return len(self._bars)

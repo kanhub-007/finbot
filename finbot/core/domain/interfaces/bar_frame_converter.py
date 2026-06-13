@@ -22,6 +22,17 @@ class BarFrameConverter(ABC):
     def latest_bar(self, frame: Any) -> dict:
         """Return the last row of the frame as a dict."""
 
+    def append_bar(self, frame: Any, bar: dict) -> Any:
+        """Return a frame with one bar appended.
+
+        Default implementation rebuilds from ``frame_to_bars`` + the new bar.
+        Implementations backed by an in-memory frame should override this to
+        avoid reallocating the whole frame on the candle hot path.
+        """
+        bars = self.frame_to_bars(frame)
+        bars.append(bar)
+        return self.bars_to_frame(bars)
+
     @abstractmethod
     def is_empty(self, frame: Any) -> bool:
         """Return True if the frame has no rows or columns."""

@@ -111,3 +111,16 @@ class TestWarmupWindowStringTimestamps:
         w.append({"timestamp": "not-a-time"})
         w.append({"timestamp": "2025-01-01T10:00:00"})
         assert w.count == 1
+
+
+def test_latest_bar_returns_most_recent_in_o1() -> None:
+    """latest_bar reads the newest bar without rebuilding the whole list."""
+    w = WarmupWindow(min_bars=1, max_length=5)
+    w.append({"timestamp": 1000, "close": 1.0})
+    w.append({"timestamp": 2000, "close": 2.0})
+    assert w.latest_bar == {"timestamp": 2000, "close": 2.0}
+
+
+def test_latest_bar_empty_when_no_bars() -> None:
+    w = WarmupWindow()
+    assert w.latest_bar == {}

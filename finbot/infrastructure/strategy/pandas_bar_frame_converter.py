@@ -31,6 +31,22 @@ class PandasBarFrameConverter(BarFrameConverter):
         """Return the last row as a dict."""
         return frame.iloc[-1].to_dict()
 
+    def append_bar(self, frame: pd.DataFrame, bar: dict) -> pd.DataFrame:
+        """Append one bar to the frame without rebuilding it from scratch.
+
+        Keeps the candle hot path O(1) in frame allocation instead of O(n).
+        """
+        import pandas as pd
+
+        ts = bar.get("timestamp")
+        index_val = (
+            pd.Timestamp(ts, unit="s")
+            if isinstance(ts, (int, float))
+            else pd.Timestamp(ts)
+        )
+        row = pd.DataFrame([bar], index=pd.DatetimeIndex([index_val], name="timestamp"))
+        return pd.concat([frame, row])
+
     def is_empty(self, frame: pd.DataFrame) -> bool:
         """True when the DataFrame has no rows or columns."""
         return frame.empty
