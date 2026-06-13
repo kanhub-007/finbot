@@ -36,6 +36,8 @@ from finbot.core.domain.entities.reconciliation_record import (
     ReconciliationRecord,
 )
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
+from finbot.core.application.dto.run_bot_result import RunBotResult
+from finbot.core.domain.entities.bot_config import BotConfig
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.trading_mode import TradingMode
 from finbot.core.domain.interfaces.bar_frame_converter import (
@@ -141,6 +143,38 @@ class LiveTradingRuntimeUseCase:
             interval=interval,
         )
         return self._bot_run_id
+
+    def start_live(
+        self,
+        strategy_path: str,
+        symbol: str,
+        interval: str,
+        config: BotConfig,
+    ) -> RunBotResult:
+        """Start with live-mode safety gates. Returns a result with all blockers."""
+        from finbot.core.domain.services.live_mode_guard import check_live_mode
+
+        check = check_live_mode(
+            mode=config.mode.value,
+            live_trading_ack=config.live_trading_ack,
+            private_key=config.private_key,
+            max_position_usd=float(config.max_position_usd),
+            database_path=config.db_path,
+        )
+
+        if not check.allowed:
+            return RunBotResult(
+                status="rejected",
+                message="; ".join(check.reasons),
+            )
+
+        self._start_session(
+            strategy_name=strategy_path,
+            strategy_hash="",
+            symbol=symbol,
+            interval=interval,
+        )
+        return RunBotResult(status="running", message=self._bot_run_id)
 
     def stop(self) -> None:
         """Stop the runtime session and persist the end marker."""

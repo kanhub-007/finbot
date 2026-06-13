@@ -46,9 +46,10 @@ def check_live_mode(
     if max_position_usd <= 0:
         reasons.append("FINBOT_MAX_POSITION_USD must be > 0")
 
-    if not database_path or database_path == "data/finbot.db":
+    if not database_path or database_path in (":memory:", "data/finbot.db"):
         reasons.append(
-            "FINBOT_DATABASE_URL must be explicitly set " "(not left to default)"
+            "FINBOT_DATABASE_URL must be set to a durable path "
+            "(not :memory: or default)"
         )
 
     if reasons:

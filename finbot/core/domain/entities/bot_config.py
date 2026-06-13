@@ -16,3 +16,5 @@ class BotConfig:
     max_daily_loss_usd: Decimal = Decimal("25")
     max_open_orders: int = 3
     stale_data_seconds: int = 120
+    private_key: str = ""
+    db_path: str = ""
