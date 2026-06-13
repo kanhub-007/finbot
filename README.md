@@ -182,7 +182,7 @@ Finbot trades Hyperliquid perpetual futures by default. Spot trading is not
 supported. Authentication has two modes:
 
 - **Personal wallet**: set `FINBOT_HYPERLIQUID_PRIVATE_KEY` and `FINBOT_HYPERLIQUID_ACCOUNT_ADDRESS`
-- **HIP-3 vault agent**: also set `FINBOT_HYPERLIQUID_VAULT_ADDRESS` to trade on behalf of a vault.  The private key must belong to an authorized vault agent.
+- **Vault**: also set `FINBOT_HYPERLIQUID_VAULT_ADDRESS` to trade through a vault contract. The private key must belong to an authorized agent.
 
 ---
 
