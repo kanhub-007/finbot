@@ -245,6 +245,7 @@ class LiveTradingRuntimeUseCase:
             symbol=self._symbol,
             interval=self._interval,
             on_candle=self.process_closed_candle,
+            on_account_event=self.process_account_event,
         )
 
     def process_closed_candle(self, candle: dict[str, Any]) -> CandleProcessingResult:

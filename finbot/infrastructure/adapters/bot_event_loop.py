@@ -50,6 +50,7 @@ class BotEventLoop(BotLoop):
         self._interval: str = ""
         self._on_candle: Callable[[dict[str, Any]], None] | None = None
         self._on_stale: Callable[[dict[str, Any]], None] | None = None
+        self._on_account: Callable[[dict[str, Any]], None] | None = None
 
     # -- public API --------------------------------------------------------
 
@@ -59,12 +60,14 @@ class BotEventLoop(BotLoop):
         interval: str,
         on_candle: Callable[[dict[str, Any]], None],
         on_stale: Callable[[dict[str, Any]], None] | None = None,
+        on_account_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         """Subscribe to candles and begin processing events.  Blocks until stop()."""
         self._symbol = symbol
         self._interval = interval
         self._on_candle = on_candle
         self._on_stale = on_stale
+        self._on_account = on_account_event
         self._running = True
 
         try:
@@ -123,6 +126,9 @@ class BotEventLoop(BotLoop):
             self._on_candle(event.data)
         elif event.type == BotEventType.STALE and self._on_stale:
             self._on_stale(event.data)
+        elif event.type in (BotEventType.FILL, BotEventType.ORDER_UPDATE):
+            if self._on_account:
+                self._on_account(event.data)
         elif event.type == BotEventType.SHUTDOWN:
             self._running = False
 
