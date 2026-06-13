@@ -17,6 +17,7 @@ from finbot.infrastructure.adapters.hyperliquid_exchange_gateway import (
     HyperliquidExchangeGateway,
 )
 from finbot.startup.service_factory import (
+    create_live_trading_runtime_use_case,
     create_replay_strategy_use_case,
     create_run_bot_request,
     create_run_bot_use_case,
@@ -129,19 +130,59 @@ def _cmd_run(args) -> None:
         )
         sys.exit(1)
 
-    use_case = create_run_bot_use_case(
-        settings,
-        args.strategy,
-        live_data=args.live_data,
-    )
-    request = create_run_bot_request(
-        settings=settings,
-        strategy_path=args.strategy,
-        symbol=args.symbol,
-        interval=args.interval,
-    )
-    result = use_case.execute(request)
-    print(f"{result.status}: {result.message}")
+    if args.live_data:
+        # New runtime: blocking event loop with real pipeline
+        from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
+        from finbot.infrastructure.adapters.thread_safe_event_queue import (
+            ThreadSafeEventQueue,
+        )
+
+        queue = ThreadSafeEventQueue()
+        if args.live_data:
+            from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
+                HyperliquidMarketDataStream,
+            )
+            stream = HyperliquidMarketDataStream(
+                stale_data_seconds=settings.stale_data_seconds,
+            )
+        else:
+            from finbot.infrastructure.adapters.in_memory_market_data_stream import (
+                InMemoryMarketDataStream,
+            )
+            stream = InMemoryMarketDataStream()
+
+        bot_loop = BotEventLoop(queue, stream)
+        runtime = create_live_trading_runtime_use_case(
+            args.strategy,
+            args.symbol,
+            args.interval,
+            mode=settings.mode,
+            live_data=args.live_data,
+        )
+        runtime._bot_loop = bot_loop  # type: ignore[assignment]
+
+        runtime._start_session(args.strategy, "", args.symbol, args.interval)
+        print(f"running: {args.strategy} on {args.symbol}/{args.interval} [{settings.mode}]")
+        try:
+            runtime.run_forever()
+        except KeyboardInterrupt:
+            print("\nshutting down...")
+            runtime.stop()
+    else:
+        # Legacy: validate and exit
+        use_case = create_run_bot_use_case(
+            settings,
+            args.strategy,
+            live_data=False,
+        )
+        request = create_run_bot_request(
+            settings=settings,
+            strategy_path=args.strategy,
+            symbol=args.symbol,
+            interval=args.interval,
+        )
+        result = use_case.execute(request)
+        print(f"{result.status}: {result.message}")
 
 
 def _cmd_validate(args) -> None:
