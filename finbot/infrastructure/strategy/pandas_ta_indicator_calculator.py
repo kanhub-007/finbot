@@ -23,12 +23,20 @@ from finbot.infrastructure.strategy.indicator_registry import (
     MIN_BARS,
     logger,
 )
-from finbot.infrastructure.strategy.indicators.definitions import (
-    _compute_dynamic,
-    _compute_rolling_vp_dynamic,
-    _is_dynamic,
-    _is_rolling_vp,
+from finbot.infrastructure.strategy.indicators._shared import (
     enrich_dataframe_with_proxies,
+)
+from finbot.infrastructure.strategy.indicators.dynamic_periods import (
+    compute_dynamic as _compute_dynamic,
+)
+from finbot.infrastructure.strategy.indicators.dynamic_periods import (
+    is_dynamic as _is_dynamic,
+)
+from finbot.infrastructure.strategy.indicators.volume_profile import (
+    compute_rolling_vp_dynamic as _compute_rolling_vp_dynamic,
+)
+from finbot.infrastructure.strategy.indicators.volume_profile import (
+    is_rolling_vp as _is_rolling_vp,
 )
 
 _PROXY_CACHE_KEY = "__proxies_done"
