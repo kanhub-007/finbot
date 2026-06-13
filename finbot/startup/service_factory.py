@@ -251,6 +251,7 @@ def create_bot_loop(
             exchange=gateway.get_exchange(),
             queue=queue,
             user_address=settings.hyperliquid_account_address,
+            account_cache=gateway.account_cache(),
         )
     return BotEventLoop(queue, stream, account_stream=account_stream)
 

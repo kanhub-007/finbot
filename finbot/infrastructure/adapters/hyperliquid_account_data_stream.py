@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from finbot.core.domain.entities.bot_event import BotEvent
 from finbot.core.domain.entities.bot_event_type import BotEventType
 from finbot.core.domain.interfaces.event_queue import EventQueue
+from finbot.infrastructure.adapters.account_state_cache import AccountStateCache
 
 if TYPE_CHECKING:
 
@@ -47,10 +48,12 @@ class HyperliquidAccountDataStream:
         exchange: Exchange,
         queue: EventQueue,
         user_address: str = "",
+        account_cache: AccountStateCache | None = None,
     ) -> None:
         self._exchange = exchange
         self._queue = queue
         self._user_address = user_address or exchange.address
+        self._cache = account_cache
         self._fill_sub_id: int | None = None
         self._order_sub_id: int | None = None
 
@@ -112,6 +115,15 @@ class HyperliquidAccountDataStream:
         fill_data = data.get("data", data)
         normalized = _normalize_fill(fill_data)
         if normalized:
+            # A fill changes position and open-order state; invalidate the
+            # cached entries so the next read re-fetches authoritative state.
+            if self._cache is not None:
+                coin = normalized.get("coin") or normalized.get("symbol")
+                if coin:
+                    self._cache.clear_position(coin)
+                    self._cache.remove_open_order(
+                        coin, lambda o: o.get("oid") == normalized.get("order_id")
+                    )
             event = BotEvent(type=BotEventType.FILL, data=normalized)
             if not self._queue.enqueue(event):
                 logger.warning("Event queue full — dropping fill event")
@@ -123,6 +135,14 @@ class HyperliquidAccountDataStream:
             return
         normalized = _normalize_order_update(data)
         if normalized:
+            # Order-state changes invalidate the open-order cache for the coin
+            # so the candle loop does not act on a stale order list.
+            if self._cache is not None:
+                coin = normalized.get("coin")
+                if coin:
+                    self._cache.remove_open_order(
+                        coin, lambda o: o.get("oid") == normalized.get("order_id")
+                    )
             event = BotEvent(type=BotEventType.ORDER_UPDATE, data=normalized)
             if not self._queue.enqueue(event):
                 logger.warning("Event queue full — dropping order update event")
@@ -145,6 +165,7 @@ def _normalize_fill(data: dict[str, Any]) -> dict[str, Any] | None:
         "type": "fill",
         "order_id": str(fill.get("oid", "")),
         "fill_id": str(fill.get("tid", fill.get("hash", ""))),
+        "coin": str(fill.get("coin", "")),
         "side": str(fill.get("side", "")),
         "size": str(fill.get("sz", "0")),
         "price": str(fill.get("px", "0")),

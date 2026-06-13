@@ -21,6 +21,7 @@ from finbot.core.domain.interfaces.bot_state_repository import (
 )
 from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 from finbot.core.domain.services.retry_policy import RetryPolicy
+from finbot.infrastructure.adapters.account_state_cache import AccountStateCache
 from finbot.infrastructure.services.log_redactor import (
     validate_private_key,
 )
@@ -65,10 +66,28 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         self._retry = retry_policy or RetryPolicy()
         self._exchange: Exchange | None = None
         self._info: Info | None = None
+        # Hot-path cache for position/open-order state, fed by the account
+        # websocket stream and by successful order submissions.  Defaults to
+        # a short TTL so the candle loop reads the cache (O(1)) instead of a
+        # REST round-trip per candle.
+        self._account_cache = AccountStateCache(ttl_seconds=5.0)
+
+    def account_cache(self) -> AccountStateCache:
+        """Expose the account-state cache for the websocket stream to update."""
+        return self._account_cache
 
     # -- ExchangeGateway ---------------------------------------------------
 
     def get_position(self, symbol: str) -> PositionSnapshot:
+        cached = self._account_cache.get_position(symbol)
+        if cached is not None:
+            return cached
+        snapshot = self._fetch_position(symbol)
+        self._account_cache.set_position(snapshot)
+        return snapshot
+
+    def _fetch_position(self, symbol: str) -> PositionSnapshot:
+        """Fetch the position from the exchange (REST) and normalise it."""
         info = self._ensure_info()
         state = info.user_state(self._account_address or "")
         positions = state.get("assetPositions", [])
@@ -96,6 +115,15 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         )
 
     def list_open_orders(self, symbol: str) -> list[dict[str, Any]]:
+        cached = self._account_cache.get_open_orders(symbol)
+        if cached is not None:
+            return cached
+        orders = self._fetch_open_orders(symbol)
+        self._account_cache.set_open_orders(symbol, orders)
+        return orders
+
+    def _fetch_open_orders(self, symbol: str) -> list[dict[str, Any]]:
+        """Fetch open orders from the exchange (REST) filtered by symbol."""
         info = self._ensure_info()
         orders = info.open_orders(self._account_address or "")
         result = []
@@ -112,6 +140,12 @@ class HyperliquidExchangeGateway(ExchangeGateway):
             return _execute_order(exchange, intent)
 
         result = self._retry.execute(_submit, require_cloid=intent.cloid or "")
+        # Optimistically record the new open order in the cache so the next
+        # candle's list_open_orders() needn't re-fetch over REST.
+        if result.get("status") in ("ok", "success") and not intent.reduce_only:
+            self._account_cache.add_open_order(
+                intent.symbol, {"coin": intent.symbol, "side": intent.side.value}
+            )
         if self._repo:
             import json
 
@@ -137,11 +171,15 @@ class HyperliquidExchangeGateway(ExchangeGateway):
             return {"status": "ok", "cancelled": 0}
         # Use bulk_cancel for efficiency.
         cancels = [{"coin": symbol, "oid": o["oid"]} for o in open_orders if "oid" in o]
-        return exchange.bulk_cancel(cancels)  # type: ignore[no-any-return]
+        result = exchange.bulk_cancel(cancels)  # type: ignore[no-any-return]
+        self._account_cache.clear()
+        return result
 
     def cancel_by_cloid(self, symbol: str, cloid: str) -> dict[str, Any]:
         exchange = self._ensure_exchange()
-        return exchange.cancel_by_cloid(symbol, cloid)  # type: ignore[no-any-return]
+        result = exchange.cancel_by_cloid(symbol, cloid)  # type: ignore[no-any-return]
+        self._account_cache.remove_open_order(symbol, lambda o: o.get("cloid") == cloid)
+        return result
 
     def get_exchange(self) -> Exchange:
         """Return the underlying SDK ``Exchange`` (lazy-initialised).
