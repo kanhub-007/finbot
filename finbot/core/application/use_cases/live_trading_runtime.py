@@ -22,7 +22,10 @@ from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.enrichment_validation_result import (
     EnrichmentValidationResult,
 )
+from finbot.core.domain.entities.order_intent import OrderIntent
+from finbot.core.domain.entities.processed_signal import ProcessedSignal
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
+from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.trading_mode import TradingMode
 from finbot.core.domain.interfaces.bar_frame_converter import (
     BarFrameConverter,
@@ -41,6 +44,7 @@ from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
 )
+from finbot.core.domain.services.order_planner import OrderPlanner
 from finbot.core.domain.services.warmup_window import WarmupWindow
 
 logger = logging.getLogger(__name__)
@@ -67,6 +71,7 @@ class LiveTradingRuntimeUseCase:
         mode: TradingMode,
         warmup_bars: list[dict[str, Any]] | None = None,
         required_columns: set[str] | None = None,
+        order_planner: OrderPlanner | None = None,
     ) -> None:
         self._exchange = exchange_gateway
         self._stream = market_data_stream
@@ -76,6 +81,7 @@ class LiveTradingRuntimeUseCase:
         self._enrichment_validator = enrichment_validator
         self._bar_converter = bar_frame_converter
         self._mode = mode
+        self._order_planner = order_planner
         self._required_columns: set[str] = required_columns or set()
         self._bot_run_id: str = ""
         self._strategy_name: str = ""
@@ -153,12 +159,17 @@ class LiveTradingRuntimeUseCase:
         position = self._exchange.get_position(self._symbol or "DEFAULT")
         signal = self._evaluator.evaluate(latest, position)
 
-        return CandleProcessingResult(
-            candle_timestamp=ts,
-            enrichment_valid=True,
-            signal_action=signal.action.value,
-            message="processed",
-        )
+        # 5. If HOLD, no further processing
+        if signal.action == SignalAction.HOLD:
+            return CandleProcessingResult(
+                candle_timestamp=ts,
+                enrichment_valid=True,
+                signal_action=signal.action.value,
+                message="processed — HOLD",
+            )
+
+        # 6. Risk gates + order planning (delegated to OrderPlanner)
+        return self._plan_and_persist(signal, latest, position, ts)
 
     def process_account_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """Process an account websocket event (order update, fill, etc.).
@@ -237,6 +248,93 @@ class LiveTradingRuntimeUseCase:
                 + validation.invalid_type_columns
             ),
             message=validation.reason,
+        )
+
+    def _plan_and_persist(
+        self,
+        signal: SignalDecision,
+        bar: dict[str, Any],
+        position: Any,
+        candle_ts: int,
+    ) -> CandleProcessingResult:
+        """Run risk gates, persist signal/intent, submit if mode allows."""
+        # If no order planner is wired, skip ordering (backward compat).
+        if self._order_planner is None:
+            return CandleProcessingResult(
+                candle_timestamp=candle_ts,
+                enrichment_valid=True,
+                signal_action=signal.action.value,
+                message="processed — no order planner wired",
+            )
+
+        ctx = {
+            "bar": bar,
+            "symbol": self._symbol,
+            "bot_run_id": self._bot_run_id,
+            "mode": self._mode.value,
+            "position_size": position.size,
+        }
+
+        plan = self._order_planner.plan(signal, ctx)
+
+        # Persist risk decision
+        if plan.accepted:
+            self._repo.record_risk_event(
+                RiskEventRecord(
+                    bot_run_id=self._bot_run_id,
+                    event_type=plan.gate_name or "risk",
+                    signal_key=plan.signal_key,
+                    decision="accepted",
+                )
+            )
+        else:
+            self._repo.record_risk_event(
+                RiskEventRecord(
+                    bot_run_id=self._bot_run_id,
+                    event_type=plan.gate_name or "risk",
+                    signal_key=plan.signal_key,
+                    decision="rejected",
+                    reason=plan.reason,
+                )
+            )
+            return CandleProcessingResult(
+                candle_timestamp=candle_ts,
+                enrichment_valid=True,
+                signal_action=signal.action.value,
+                risk_decision="rejected",
+                message=plan.reason,
+            )
+
+        # Mark signal processed
+        self._repo.mark_signal_processed(
+            ProcessedSignal(
+                signal_key=plan.signal_key,
+                bot_run_id=self._bot_run_id,
+                signal_action=signal.action.value,
+                bar_timestamp=str(candle_ts),
+            )
+        )
+
+        # Persist order intent
+        intent = plan.intent
+        intent_id = ""
+        submitted = False
+        if intent is not None:
+            intent_id = self._repo.record_order_intent(intent)
+
+            # Dry-run: simulate position but do not submit
+            if self._mode == TradingMode.DRY_RUN:
+                self._exchange.submit_order(intent)
+                submitted = False  # still not a real submission
+
+        return CandleProcessingResult(
+            candle_timestamp=candle_ts,
+            enrichment_valid=True,
+            signal_action=signal.action.value,
+            risk_decision="accepted",
+            intent_id=intent_id,
+            submitted=submitted,
+            message="processed — order planned",
         )
 
 

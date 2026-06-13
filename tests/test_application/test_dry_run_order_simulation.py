@@ -1,0 +1,264 @@
+"""Tests for Slice 2 — dry-run position simulation and duplicate signal prevention."""
+
+from decimal import Decimal
+
+from finbot.core.domain.entities.order_side import OrderSide
+from finbot.core.domain.entities.position_direction import PositionDirection
+from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+from finbot.core.domain.entities.signal_action import SignalAction
+from finbot.core.domain.entities.signal_decision import SignalDecision
+from finbot.core.domain.entities.trading_mode import TradingMode
+from finbot.core.domain.services.enrichment_validator import (
+    EnrichmentValidator,
+)
+from finbot.core.domain.services.order_planner import OrderPlanner
+from finbot.core.domain.services.risk_gates.duplicate_signal_gate import (
+    DuplicateSignalGate,
+)
+from finbot.core.domain.services.risk_gates.max_position_gate import (
+    MaxPositionGate,
+)
+from finbot.core.domain.services.risk_gates.mode_gate import ModeGate
+from tests.fakes import (
+    FakeStrategyEvaluator,
+    InMemoryBarFrameConverter,
+    InMemoryExchangeGateway,
+    InMemoryIndicatorEngine,
+    StubBotStateRepository,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _closed_warmup_bars(count: int = 100) -> list[dict]:
+    base_ts = 1735689600
+    return [
+        {
+            "timestamp": base_ts + i * 3600,
+            "open": 50000.0 + i * 10,
+            "high": 50200.0 + i * 10,
+            "low": 49800.0 + i * 10,
+            "close": 50100.0 + i * 10,
+            "volume": 100.0,
+        }
+        for i in range(count)
+    ]
+
+
+def _new_candle(offset: int = 100) -> dict:
+    return {
+        "timestamp": 1735689600 + offset * 3600,
+        "open": 51000.0,
+        "high": 51100.0,
+        "low": 50900.0,
+        "close": 51050.0,
+        "volume": 50.0,
+    }
+
+
+def _indicator_bar(**extra) -> dict:
+    base = {
+        "timestamp": 1735689600,
+        "open": 50000.0,
+        "high": 51000.0,
+        "low": 49000.0,
+        "close": 50500.0,
+        "volume": 100.0,
+    }
+    base.update(extra)
+    return base
+
+
+# ---------------------------------------------------------------------------
+# TrackingDryRunExchange — exchange fake that simulates position changes
+# ---------------------------------------------------------------------------
+
+
+class TrackingDryRunExchange(InMemoryExchangeGateway):
+    """Dry-run exchange that simulates position changes locally."""
+
+    def __init__(self, symbol: str = "BTC") -> None:
+        super().__init__()
+        self._tracked_symbol = symbol
+        self._position = PositionSnapshot(
+            symbol=symbol, direction=PositionDirection.FLAT, size=Decimal("0")
+        )
+
+    def get_position(self, symbol: str) -> PositionSnapshot:
+        return self._position
+
+    def submit_order(self, intent) -> dict:
+        self.submitted_order_count += 1
+        if intent.side == OrderSide.BUY and not intent.reduce_only:
+            new_size = self._position.size + intent.size
+            direction = (
+                PositionDirection.LONG if new_size > 0 else PositionDirection.FLAT
+            )
+            self._position = PositionSnapshot(
+                symbol=self._tracked_symbol,
+                direction=direction,
+                size=new_size,
+                entry_price=intent.limit_price,
+            )
+        elif intent.side == OrderSide.SELL and intent.reduce_only:
+            new_size = max(Decimal("0"), self._position.size - intent.size)
+            direction = (
+                self._position.direction if new_size > 0 else PositionDirection.FLAT
+            )
+            self._position = PositionSnapshot(
+                symbol=self._tracked_symbol,
+                direction=direction,
+                size=new_size,
+                entry_price=self._position.entry_price,
+            )
+        return {"status": "dry_run_simulated"}
+
+
+# ---------------------------------------------------------------------------
+# Test helpers to build runtime instances
+# ---------------------------------------------------------------------------
+
+
+def _make_runtime(**overrides):
+    """Build a LiveTradingRuntimeUseCase with sensible dry-run defaults."""
+    from finbot.core.application.use_cases.live_trading_runtime import (
+        LiveTradingRuntimeUseCase,
+    )
+
+    repo = overrides.pop("state_repository", None) or StubBotStateRepository()
+    max_pos = overrides.pop("_max_position", Decimal("100000"))
+
+    kwargs = dict(
+        exchange_gateway=TrackingDryRunExchange("BTC"),
+        market_data_stream=None,
+        strategy_evaluator=FakeStrategyEvaluator(
+            signal=SignalDecision(
+                action=SignalAction.LONG_ENTRY,
+                symbol="BTC",
+                interval="1h",
+                candle_timestamp=1735689600,
+                strategy_hash="test-hash",
+            )
+        ),
+        state_repository=repo,
+        indicator_calculator=InMemoryIndicatorEngine(
+            latest_bar=_indicator_bar(atr=1200.0)
+        ),
+        enrichment_validator=EnrichmentValidator(),
+        bar_frame_converter=InMemoryBarFrameConverter(),
+        mode=TradingMode.DRY_RUN,
+        warmup_bars=_closed_warmup_bars(100),
+        required_columns={"atr"},
+        order_planner=OrderPlanner(
+            gates=[
+                ModeGate(),
+                DuplicateSignalGate(repo),
+                MaxPositionGate(max_notional_usd=max_pos),
+            ]
+        ),
+    )
+    kwargs.update(overrides)
+    return LiveTradingRuntimeUseCase(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Scenario: Dry-run simulates position state and prevents duplicate orders
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_accepts_signal_and_increments_position() -> None:
+    """Dry-run: accepted signal creates order intent and updates position."""
+    exchange = TrackingDryRunExchange("BTC")
+    runtime = _make_runtime(exchange_gateway=exchange)
+    runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
+
+    result = runtime.process_closed_candle(_new_candle())
+
+    assert result.enrichment_valid is True
+    assert result.signal_action == "long_entry"
+    assert runtime._repo.order_intent_count == 1  # type: ignore[union-attr]
+
+    pos = exchange.get_position("BTC")
+    assert pos.direction == PositionDirection.LONG
+    assert pos.size > Decimal("0")
+
+
+def test_dry_run_duplicate_signal_is_rejected() -> None:
+    """Replaying same signal after restart is rejected as duplicate."""
+    repo = StubBotStateRepository()
+    exchange = TrackingDryRunExchange("BTC")
+
+    first_runtime = _make_runtime(
+        state_repository=repo, exchange_gateway=exchange
+    )
+    first_runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
+    first_result = first_runtime.process_closed_candle(_new_candle())
+
+    assert first_result.signal_action == "long_entry"
+    first_intent_count = repo.order_intent_count
+    assert first_intent_count == 1
+
+    # Simulate restart: new runtime with same repository
+    second_runtime = _make_runtime(
+        state_repository=repo, exchange_gateway=exchange
+    )
+    second_runtime._start_session("test-strategy-2", "test-hash", "BTC", "1h")
+    second_result = second_runtime.process_closed_candle(_new_candle())
+
+    # Duplicate signal should be rejected — no new intent
+    assert repo.order_intent_count == first_intent_count
+
+
+def test_max_position_exceeded_rejects_entry() -> None:
+    """Max position exceeded -> risk rejected, no intent saved."""
+    repo = StubBotStateRepository()
+    runtime = _make_runtime(
+        state_repository=repo, _max_position=Decimal("1")
+    )
+    runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
+
+    result = runtime.process_closed_candle(_new_candle())
+
+    assert result.signal_action == "long_entry"
+    assert repo.order_intent_count == 0
+
+
+def test_hold_signal_creates_no_order_intent() -> None:
+    """HOLD signal creates no order intent."""
+    repo = StubBotStateRepository()
+    runtime = _make_runtime(
+        state_repository=repo,
+        strategy_evaluator=FakeStrategyEvaluator(
+            signal=SignalDecision(
+                action=SignalAction.HOLD,
+                symbol="BTC",
+                interval="1h",
+                candle_timestamp=1735689600,
+                strategy_hash="test-hash",
+            )
+        ),
+    )
+    runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
+
+    result = runtime.process_closed_candle(_new_candle())
+
+    assert result.signal_action == "hold"
+    assert repo.order_intent_count == 0
+
+
+def test_processed_signal_key_is_persisted() -> None:
+    """After a successful signal, the signal key is marked as processed."""
+    repo = StubBotStateRepository()
+    runtime = _make_runtime(state_repository=repo)
+    runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
+
+    result = runtime.process_closed_candle(_new_candle())
+
+    assert result.signal_action == "long_entry"
+    assert repo.count_signals() == 1
+    signal = repo.get_last_signal()
+    assert signal is not None
+    assert "BTC" in signal.signal_key
