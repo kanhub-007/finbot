@@ -27,6 +27,10 @@ from finbot.startup.service_factory import (
 
 def main() -> None:
     """Run the Finbot command-line interface."""
+    from finbot.infrastructure.services.log_redactor import setup_logging
+
+    setup_logging()
+
     parser = argparse.ArgumentParser(description="Finbot live trading runtime")
     sub = parser.add_subparsers(dest="command")
 
@@ -115,22 +119,15 @@ def _cmd_run(args) -> None:
     settings = Settings()
 
     # Live-mode safety gate.
-    if settings.mode == "live" or not settings.hyperliquid_testnet:
-        from finbot.core.domain.services.live_mode_guard import (
-            check_live_mode,
+    if settings.mode == "live":
+        _check_live_mode_gate(settings)
+    elif not settings.hyperliquid_testnet:
+        print(
+            "MAINNET REQUIRES LIVE MODE: set"
+            " FINBOT_MODE=live to trade on mainnet,"
+            " or FINBOT_HYPERLIQUID_TESTNET=true for testnet dry-run."
         )
-
-        check = check_live_mode(
-            mode=settings.mode,
-            live_trading_ack=settings.live_trading_ack,
-            private_key=settings.hyperliquid_private_key.get_secret_value(),
-            max_position_usd=float(settings.max_position_usd),
-            database_path=settings.database_path,
-        )
-        if not check.allowed:
-            for reason in check.reasons:
-                print(f"LIVE MODE BLOCKED: {reason}")
-            sys.exit(1)
+        sys.exit(1)
 
     use_case = create_run_bot_use_case(
         settings,
@@ -182,6 +179,23 @@ def _cmd_compat(args) -> None:
             indent=2,
         )
     )
+
+
+def _check_live_mode_gate(settings: Settings) -> None:
+    """Validate all live-mode preconditions and exit(1) if any fail."""
+    from finbot.core.domain.services.live_mode_guard import check_live_mode
+
+    check = check_live_mode(
+        mode=settings.mode,
+        live_trading_ack=settings.live_trading_ack,
+        private_key=settings.hyperliquid_private_key.get_secret_value(),
+        max_position_usd=float(settings.max_position_usd),
+        database_path=settings.database_path,
+    )
+    if not check.allowed:
+        for reason in check.reasons:
+            print(f"LIVE MODE BLOCKED: {reason}")
+        sys.exit(1)
 
 
 def _cmd_replay(args) -> None:
@@ -266,6 +280,14 @@ def _cmd_db(args) -> None:
 
 
 def _cmd_panic(args) -> None:
+    """Emergency kill-switch — cancels orders and closes positions.
+
+    ARCHITECTURE EXCEPTION: Panic bypasses use cases and repositories,
+    calling the exchange gateway directly.  This is intentional —
+    kill-switch operations must not go through risk gates, order
+    planning, or any other pipeline.  No audit events are persisted;
+    reconcile after panic.
+    """
     settings = Settings()
     if not settings.hyperliquid_private_key.get_secret_value():
         print("ERROR: FINBOT_HYPERLIQUID_PRIVATE_KEY not set")

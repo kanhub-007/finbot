@@ -1,5 +1,6 @@
 """Log redaction — strips secrets from log messages before emission."""
 
+import logging
 import re
 from typing import Any
 
@@ -31,6 +32,27 @@ def redact(value: Any, max_len: int = 200) -> str:
     if _SENTINEL_RE.search(text):
         return _REDACTED
     return _PK_RE.sub(_REDACTED, text)[:max_len]
+
+
+class SecretRedactingFilter(logging.Filter):
+    """Logging filter that redacts secrets from ``LogRecord.msg``."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = redact(record.msg, max_len=10_000)
+        return True
+
+
+def setup_logging(level: int = logging.INFO) -> None:
+    """Configure logging with secret redaction enabled.
+
+    Installs a :class:`SecretRedactingFilter` on the root logger so
+    every log message is scanned before emission.  Must be called once
+    at startup (idempotent — repeated calls are harmless).
+    """
+    root = logging.getLogger()
+    if not any(isinstance(f, SecretRedactingFilter) for f in root.filters):
+        root.addFilter(SecretRedactingFilter())
+        root.setLevel(level)
 
 
 def validate_private_key(key: str) -> str:

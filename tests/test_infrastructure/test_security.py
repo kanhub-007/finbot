@@ -5,7 +5,9 @@ from pydantic import SecretStr
 
 from finbot.config.settings import Settings
 from finbot.infrastructure.services.log_redactor import (
+    SecretRedactingFilter,
     redact,
+    setup_logging,
     validate_private_key,
 )
 
@@ -37,6 +39,37 @@ class TestLogRedaction:
     def test_normal_text_passes_through(self) -> None:
         result = redact("order submitted: BTC BUY 0.001 @ 50000")
         assert result == "order submitted: BTC BUY 0.001 @ 50000"
+
+    def test_filter_redacts_log_record(self) -> None:
+        import logging
+
+        filt = SecretRedactingFilter()
+        record = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="secret=0x" + "a" * 64,
+            args=(),
+            exc_info=None,
+        )
+        assert filt.filter(record) is True
+        assert "0x" + "a" * 64 not in str(record.msg)
+        assert "REDACTED" in str(record.msg)
+
+    def test_filter_installed_by_setup(self) -> None:
+        import logging
+
+        root = logging.getLogger()
+        was_empty = len(root.filters) == 0
+        setup_logging()
+        assert any(isinstance(f, SecretRedactingFilter) for f in root.filters)
+        # Idempotent.
+        before = len(root.filters)
+        setup_logging()
+        assert len(root.filters) == before
+        if was_empty:
+            root.filters.clear()
 
 
 class TestPrivateKeyValidation:

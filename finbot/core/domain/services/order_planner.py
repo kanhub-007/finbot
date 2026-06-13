@@ -90,8 +90,22 @@ class OrderPlanner:
             return None
 
         bar = ctx.get("bar", {})
-        close = Decimal(str(bar.get("close", 0)))
+        close_raw = bar.get("close", 0)
+        close = Decimal(str(close_raw))
         size = ctx.get("proposed_size", self._default_size)
+
+        # Fall back to MARKET when no valid close price is available.
+        if close <= 0:
+            return OrderIntent(
+                symbol=ctx.get("symbol", ""),
+                side=side,
+                size=size,
+                order_type=OrderType.MARKET,
+                signal_key=signal.signal_key,
+                reduce_only=reduce_only,
+                stop_price=signal.stop_price,
+                target_price=signal.target_price,
+            )
 
         return OrderIntent(
             symbol=ctx.get("symbol", ""),
