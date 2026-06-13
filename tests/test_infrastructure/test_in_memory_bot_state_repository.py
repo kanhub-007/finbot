@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+from finbot.core.domain.entities.fill_record import FillRecord
 from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_response_record import (
     OrderResponseRecord,
@@ -55,3 +56,22 @@ class TestInMemoryBotStateRepository:
         # Second mark should be harmless.
         self.repo.mark_signal_processed(sig)
         assert self.repo.has_processed_signal("sig1") is True
+
+
+def test_has_fill_is_o1_after_many_fills() -> None:
+    """P8: has_fill must stay O(1) as the fills list grows."""
+    repo = InMemoryBotStateRepository()
+    for i in range(1000):
+        repo.record_fill(
+            FillRecord(
+                bot_run_id="r",
+                order_id="o",
+                symbol="BTC",
+                side="buy",
+                size=Decimal("0.001"),
+                price=Decimal("1"),
+                fill_id=f"fill-{i}",
+            )
+        )
+    assert repo.has_fill("fill-999") is True
+    assert repo.has_fill("fill-missing") is False

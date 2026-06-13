@@ -32,6 +32,7 @@ class InMemoryBotStateRepository(BotStateRepository):
         self._bot_runs: list[BotRun] = []
         self._snapshots: list[StrategySnapshot] = []
         self._fills: list[FillRecord] = []
+        self._fill_ids: set[str] = set()
         self._reconciliations: list[ReconciliationRecord] = []
         self._risk_events: list[RiskEventRecord] = []
         self._audit_log: list[AuditLogEntry] = []
@@ -83,6 +84,7 @@ class InMemoryBotStateRepository(BotStateRepository):
 
     def record_fill(self, fill: FillRecord) -> None:
         self._fills.append(fill)
+        self._fill_ids.add(fill.fill_id)
 
     # -- reconciliation -----------------------------------------------------
 
@@ -128,7 +130,7 @@ class InMemoryBotStateRepository(BotStateRepository):
     # -- fill idempotency ----------------------------------------------------
 
     def has_fill(self, fill_id: str) -> bool:
-        return any(f.fill_id == fill_id for f in self._fills)
+        return fill_id in self._fill_ids
 
     # -- order lifecycle -----------------------------------------------------
 
