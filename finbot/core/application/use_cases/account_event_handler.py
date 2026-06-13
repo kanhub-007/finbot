@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 _STATUS_TO_STATE: dict[str, OrderState] = {
     "accepted": OrderState.ACCEPTED,
     "open": OrderState.OPEN,
-    "cancelled": OrderState.CANCEL_REQUESTED,
+    "cancelled": OrderState.CANCELLED,
     "rejected": OrderState.REJECTED,
     "expired": OrderState.EXPIRED,
 }
@@ -121,9 +121,22 @@ class AccountEventHandler:
             return {"status": "duplicate", "reason": f"fill {fill_id} already recorded"}
 
         size = Decimal(str(event.get("size", "0")))
+        # Apply the lifecycle transition and record the fill atomically so a
+        # failure between them cannot double-count the fill size on retry.
+        tx = getattr(self._repo, "transaction", None)
+        if tx is not None:
+            with tx():
+                if not self._apply_fill_transition(order_id, size):
+                    return {"status": "transition_rejected"}
+                self._repo.record_fill(
+                    self._build_fill_record(
+                        order_id, event, bot_run_id, symbol, fill_id, size
+                    )
+                )
+            return {"status": "processed"}
+        # In-memory repos have no fsync cost; apply directly.
         if not self._apply_fill_transition(order_id, size):
             return {"status": "transition_rejected"}
-
         self._repo.record_fill(
             self._build_fill_record(order_id, event, bot_run_id, symbol, fill_id, size)
         )
@@ -133,9 +146,11 @@ class AccountEventHandler:
         """Advance the lifecycle for a fill; return False on transition failure."""
         lifecycle = self._get_or_create_lifecycle(order_id)
         new_filled = lifecycle.filled_size + size
+        # Only mark FILLED when we know the original size; a stub (original_size
+        # == 0) is an unknown order, so a fill can't be proven complete.
         target = (
             OrderState.FILLED
-            if new_filled >= lifecycle.original_size
+            if lifecycle.original_size > 0 and new_filled >= lifecycle.original_size
             else OrderState.PARTIALLY_FILLED
         )
         try:

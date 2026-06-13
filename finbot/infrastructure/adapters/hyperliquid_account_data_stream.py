@@ -189,5 +189,6 @@ def _normalize_order_update(data: dict[str, Any]) -> dict[str, Any] | None:
         "type": "order_update",
         "order_id": str(order.get("oid", "")),
         "cloid": str(order.get("cloid", "")),
+        "coin": str(order.get("coin", "")),
         "status": status.lower(),
     }

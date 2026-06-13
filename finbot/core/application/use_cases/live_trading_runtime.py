@@ -460,7 +460,11 @@ class LiveTradingRuntimeUseCase:
                 message="processed — no order planner wired",
             )
 
-        ctx = self._build_risk_context(bar, position)
+        # The enriched bar dict omits the timestamp (it is the DataFrame
+        # index), so inject the normalized candle timestamp for any gate
+        # (e.g. StaleDataGate) that needs it.
+        bar_with_ts = {**bar, "timestamp": candle_ts}
+        ctx = self._build_risk_context(bar_with_ts, position)
         plan = self._order_planner.plan(signal, ctx)
 
         self._persist_risk_decision(plan)

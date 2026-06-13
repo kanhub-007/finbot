@@ -227,8 +227,9 @@ def test_cancelled_update_marks_lifecycle_cancelled() -> None:
         }
     )
 
-    # CANCELLED requires CANCEL_REQUESTED transition first (state machine)
-    assert repo._lifecycles["intent-7"].state == OrderState.CANCEL_REQUESTED
+    # A "cancelled" exchange status means the order is done — it reaches
+    # the terminal CANCELLED state directly (not stuck in CANCEL_REQUESTED).
+    assert repo._lifecycles["intent-7"].state == OrderState.CANCELLED
 
 
 def test_unknown_order_update_blocks_new_orders() -> None:

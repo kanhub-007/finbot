@@ -32,11 +32,13 @@ class OrderStateMachine:
             OrderState.PARTIALLY_FILLED,
             OrderState.FILLED,
             OrderState.CANCEL_REQUESTED,
+            OrderState.CANCELLED,
         },
         OrderState.PARTIALLY_FILLED: {
             OrderState.PARTIALLY_FILLED,  # idempotent partial fill
             OrderState.FILLED,
             OrderState.CANCEL_REQUESTED,
+            OrderState.CANCELLED,
         },
         OrderState.FILLED: set(),
         OrderState.CANCEL_REQUESTED: {OrderState.CANCELLED},

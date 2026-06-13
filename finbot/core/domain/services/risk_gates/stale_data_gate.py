@@ -29,8 +29,16 @@ class StaleDataGate(RiskGate):
     def check(self, signal: SignalDecision, context: dict[str, Any]) -> RiskDecision:
         bar = context.get("bar", {})
         bar_ts = bar.get("timestamp", 0)
-        if isinstance(bar_ts, int) and bar_ts > 0:
-            age = self._now() - bar_ts
+        # Coerce numerics (int, numpy int64, float, numeric str) so the gate
+        # works regardless of how the bar's timestamp was serialised.  A
+        # non-numeric/missing timestamp is treated as "unknown age" and the
+        # gate accepts (it cannot prove staleness).
+        try:
+            ts = int(float(bar_ts))
+        except (TypeError, ValueError):
+            return RiskDecision(accepted=True, gate_name="stale_data")
+        if ts > 0:
+            age = self._now() - ts
             if age > self._max_age:
                 return RiskDecision(
                     accepted=False,

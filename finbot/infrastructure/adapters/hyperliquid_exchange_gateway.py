@@ -134,7 +134,6 @@ class HyperliquidExchangeGateway(ExchangeGateway):
 
     def submit_order(self, intent: OrderIntent) -> dict[str, Any]:
         exchange = self._ensure_exchange()
-        intent_id = self._repo.record_order_intent(intent) if self._repo else ""
 
         def _submit() -> dict[str, Any]:
             return _execute_order(exchange, intent)
@@ -146,28 +145,19 @@ class HyperliquidExchangeGateway(ExchangeGateway):
             self._account_cache.add_open_order(
                 intent.symbol, {"coin": intent.symbol, "side": intent.side.value}
             )
-        if self._repo:
-            import json
-
-            from finbot.core.domain.entities.order_response_record import (
-                OrderResponseRecord,
-            )
-
-            self._repo.record_order_response(
-                OrderResponseRecord(
-                    intent_id=intent_id,
-                    bot_run_id="",
-                    response_json=json.dumps(result),
-                    status=result.get("status", "unknown"),
-                )
-            )
+        # Persistence (intent + response) is the application layer's
+        # responsibility (OrderSubmitter / the runtime) — recording here too
+        # would duplicate every intent and response row.
         return result
 
     def cancel_all(self, symbol: str) -> dict[str, Any]:
         exchange = self._ensure_exchange()
-        # Collect open orders for the symbol and cancel them.
-        open_orders = self.list_open_orders(symbol)
+        # A kill switch must operate on authoritative exchange state, not the
+        # account cache: cached entries from submit_order omit "oid" and would
+        # cause bulk_cancel([]) to silently no-op.  Always fetch fresh.
+        open_orders = self._fetch_open_orders(symbol)
         if not open_orders:
+            self._account_cache.clear()
             return {"status": "ok", "cancelled": 0}
         # Use bulk_cancel for efficiency.
         cancels = [{"coin": symbol, "oid": o["oid"]} for o in open_orders if "oid" in o]

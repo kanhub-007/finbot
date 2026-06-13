@@ -96,7 +96,10 @@ class TestHyperliquidExchangeGateway:
             mock_exchange.cancel_by_cloid.assert_called_once_with("BTC", "cloid-1")
             assert result["status"] == "ok"
 
-    def test_exchange_response_is_persisted(self) -> None:
+    def test_gateway_does_not_persist_submission(self) -> None:
+        """The gateway is a pure execution adapter — persistence is the
+        application layer's job (OrderSubmitter), so submit_order must NOT
+        record intents or responses (would duplicate every row)."""
         repo = InMemoryBotStateRepository()
         mock_exchange = MagicMock()
         mock_exchange.market_open.return_value = {
@@ -120,10 +123,12 @@ class TestHyperliquidExchangeGateway:
                 order_type=OrderType.MARKET,
                 cloid="cloid-1",
             )
-            gateway.submit_order(intent)
+            result = gateway.submit_order(intent)
 
-            # Verify the response was persisted
-            assert len(repo._responses) >= 1
+            # The response is returned to the caller for it to persist.
+            assert result["status"] == "ok"
+            # The gateway must not persist anything itself.
+            assert len(repo._responses) == 0
 
     def test_reconciliation_detects_position_mismatch(self) -> None:
         mock_info = MagicMock()
@@ -279,3 +284,29 @@ class TestHyperliquidExchangeGateway:
                 ]
             )
             assert result["status"] == "ok"
+
+
+def test_cancel_all_bypasses_cache_to_cancel_real_orders() -> None:
+    """C1: cancel_all must fetch fresh (with oid), not trust oid-less cache."""
+    repo = InMemoryBotStateRepository()
+    mock_exchange = MagicMock()
+    mock_exchange.open_orders.return_value = [{"coin": "BTC", "oid": 42}]
+    mock_exchange.bulk_cancel.return_value = {"status": "ok", "cancelled": 1}
+
+    with (
+        patch.object(
+            HyperliquidExchangeGateway, "_ensure_info", return_value=mock_exchange
+        ),
+        patch.object(
+            HyperliquidExchangeGateway, "_ensure_exchange", return_value=mock_exchange
+        ),
+    ):
+        gateway = HyperliquidExchangeGateway(private_key="0x" + "a" * 64, repo=repo)
+        # Poison the cache with an oid-less entry (as submit_order does).
+        gateway.account_cache().add_open_order("BTC", {"coin": "BTC", "side": "buy"})
+
+        result = gateway.cancel_all("BTC")
+
+        # bulk_cancel must have received the real oid from a fresh fetch.
+        mock_exchange.bulk_cancel.assert_called_once_with([{"coin": "BTC", "oid": 42}])
+        assert result["cancelled"] == 1

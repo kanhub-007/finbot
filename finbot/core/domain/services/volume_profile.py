@@ -137,6 +137,17 @@ def _distribute_bars_volume_vectorised(
     above_high = (buckets_row - half_bucket) > highs_f.reshape(-1, 1)
     pdf = np.where(below_low | above_high, pdf * 0.1, pdf)
 
+    # Degenerate bars (sigma <= 0, i.e. high == low) have no spread.  The
+    # per-bar reference returns early — BEFORE truncation — placing ALL volume
+    # at the nearest bucket, so do the same here AFTER truncation to override
+    # any attenuation applied to the nearest bucket.
+    degenerate = (sigma <= 0).reshape(-1)
+    if degenerate.any():
+        deg_tp = tp[degenerate].reshape(-1, 1)
+        nearest = np.argmin(np.abs(price_buckets.reshape(1, -1) - deg_tp), axis=1)
+        for row, idx in zip(np.nonzero(degenerate)[0], nearest, strict=True):
+            pdf[row, idx] = 1.0
+
     # Normalise each bar's distribution to sum to 1, then scale by volume.
     totals = pdf.sum(axis=1, keepdims=True)
     totals_safe = np.where(totals > 0, totals, 1.0)

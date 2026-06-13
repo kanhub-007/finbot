@@ -6,6 +6,7 @@ that rolling-window VP fills the right rows.
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from finbot.core.domain.services.volume_profile import (
     _distribute_bar_volume,
@@ -72,3 +73,27 @@ def test_rolling_window_vp_fills_trailing_rows_only() -> None:
     assert col in result.columns
     assert result[col].iloc[:9].isna().all()
     assert result[col].iloc[9:].notna().all()
+
+
+def test_vectorised_handles_degenerate_flat_bars() -> None:
+    """M3: flat bars (high==low) must keep their volume at the nearest bucket,
+    matching the per-bar reference, instead of dropping it."""
+    price_buckets = np.linspace(95, 105, 50)
+    bucket_size = price_buckets[1] - price_buckets[0]
+
+    # Two flat bars at 100.0, each with volume 50.
+    highs = np.array([100.0, 100.0])
+    lows = np.array([100.0, 100.0])
+    closes = np.array([100.0, 100.0])
+    volumes = np.array([50.0, 50.0])
+
+    vec = _distribute_bars_volume_vectorised(
+        highs, lows, closes, volumes, price_buckets, bucket_size
+    )
+    # Total volume preserved (100), concentrated in one bucket per bar.
+    assert vec.sum() == pytest.approx(100.0)
+    # Each flat bar's volume sits in a single bucket.
+    for row in vec:
+        nonzero = row[row > 0]
+        assert len(nonzero) == 1
+        assert nonzero[0] == pytest.approx(50.0)

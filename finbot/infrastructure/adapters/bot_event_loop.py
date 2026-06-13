@@ -108,7 +108,13 @@ class BotEventLoop(BotLoop):
         self._flush()
 
     def _drain_account_events(self) -> None:
-        """Process any already-queued account events without blocking."""
+        """Process any already-queued account events without blocking.
+
+        Non-account events (e.g. queued candles) are re-enqueued at the tail.
+        If the queue is full and a re-enqueue fails, the event is dispatched
+        immediately rather than silently dropped — losing a candle would skip
+        a strategy evaluation.
+        """
         for _ in range(self._queue.size()):
             event = self._queue.dequeue(timeout=0)
             if event is None:
@@ -116,8 +122,10 @@ class BotEventLoop(BotLoop):
             if event.type in (BotEventType.FILL, BotEventType.ORDER_UPDATE):
                 self._dispatch(event)
             else:
-                # Put non-account events back at the tail by re-enqueueing.
-                self._queue.enqueue(event)
+                # Put non-account events back at the tail; dispatch on failure
+                # (e.g. queue full) so the event is never silently lost.
+                if not self._queue.enqueue(event):
+                    self._dispatch(event)
 
     def _dispatch_with_deadline(self, event: BotEvent) -> None:
         """Dispatch an event, logging a warning if candle work stalls the loop."""
