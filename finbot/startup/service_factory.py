@@ -197,6 +197,9 @@ def create_live_trading_runtime_use_case(
     from finbot.core.application.use_cases.live_trading_runtime import (
         LiveTradingRuntimeUseCase,
     )
+    from finbot.core.application.use_cases.validate_strategy_definition import (
+        ValidateStrategyUseCase,
+    )
     from finbot.core.domain.entities.trading_mode import TradingMode
     from finbot.core.domain.services.enrichment_validator import (
         EnrichmentValidator,
@@ -276,6 +279,9 @@ def create_live_trading_runtime_use_case(
             ]
         ),
         bot_loop=bot_loop,
+        strategy_validator=ValidateStrategyUseCase(
+            YamlStrategyDefinitionLoader()
+        ),
     )
 
 

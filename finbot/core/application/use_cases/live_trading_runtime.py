@@ -61,6 +61,9 @@ from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
 )
+from finbot.core.domain.interfaces.strategy_validator import (
+    StrategyValidator,
+)
 from finbot.core.domain.interfaces.cloid_generator import CloidGenerator
 from finbot.core.domain.interfaces.order_normalizer import OrderNormalizer
 from finbot.core.domain.interfaces.order_planner import OrderPlanner
@@ -101,6 +104,7 @@ class LiveTradingRuntimeUseCase:
         order_normalizer: OrderNormalizer | None = None,
         cloid_generator: CloidGenerator | None = None,
         bot_loop: BotLoop | None = None,
+        strategy_validator: StrategyValidator | None = None,
     ) -> None:
         self._exchange = exchange_gateway
         self._stream = market_data_stream
@@ -115,6 +119,7 @@ class LiveTradingRuntimeUseCase:
         self._order_normalizer = order_normalizer
         self._cloid_gen = cloid_generator
         self._bot_loop = bot_loop
+        self._strategy_validator = strategy_validator
         self._required_columns: set[str] = required_columns or set()
         self._bot_run_id: str = ""
         self._strategy_name: str = ""
@@ -154,7 +159,7 @@ class LiveTradingRuntimeUseCase:
         interval: str,
         config: BotConfig,
     ) -> RunBotResult:
-        """Start with live-mode safety gates. Returns a result with all blockers."""
+        """Start with live-mode safety gates plus strategy compatibility."""
         from finbot.core.domain.services.live_mode_guard import check_live_mode
 
         check = check_live_mode(
@@ -171,6 +176,11 @@ class LiveTradingRuntimeUseCase:
                 message="; ".join(check.reasons),
             )
 
+        # Strategy compatibility gate — reject unsupported features
+        compat = self._check_strategy_compat(strategy_path, config.mode.value)
+        if compat is not None:
+            return compat
+
         self._start_session(
             strategy_name=strategy_path,
             strategy_hash="",
@@ -178,6 +188,40 @@ class LiveTradingRuntimeUseCase:
             interval=interval,
         )
         return RunBotResult(status="running", message=self._bot_run_id)
+
+    def _check_strategy_compat(
+        self, strategy_path: str, mode: str
+    ) -> RunBotResult | None:
+        """Return a rejection result if strategy has unsupported features."""
+        if self._strategy_validator is None:
+            return None
+        try:
+            from finbot.core.application.dto.validate_strategy_request import (
+                ValidateStrategyRequest,
+            )
+            from pathlib import Path
+
+            content = Path(strategy_path).read_text(encoding="utf-8")
+            result = self._strategy_validator.compatibility(
+                ValidateStrategyRequest(
+                    strategy_path=strategy_path, strategy_content=content
+                )
+            )
+            mode_info = result.modes.get(mode, {})
+            blockers: list[str] = []
+            for feature, status in mode_info.items():
+                if status not in ("supported", "parse"):
+                    blockers.append(f"{feature}: {status}")
+            if "parse" in mode_info and mode_info["parse"] == "error":
+                blockers.insert(0, "strategy parsing failed")
+            if blockers:
+                return RunBotResult(
+                    status="rejected",
+                    message="strategy compatibility: " + "; ".join(blockers),
+                )
+        except Exception as e:
+            logger.warning("Strategy compatibility check failed: %s", e)
+        return None
 
     def stop(self) -> None:
         """Stop the runtime session and persist the end marker."""
