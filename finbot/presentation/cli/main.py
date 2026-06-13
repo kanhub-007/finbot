@@ -136,32 +136,24 @@ def _cmd_run(args) -> None:
         from finbot.infrastructure.adapters.thread_safe_event_queue import (
             ThreadSafeEventQueue,
         )
+        from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
+            HyperliquidMarketDataStream,
+        )
 
-        queue = ThreadSafeEventQueue()
-        if args.live_data:
-            from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
-                HyperliquidMarketDataStream,
-            )
-            stream = HyperliquidMarketDataStream(
-                stale_data_seconds=settings.stale_data_seconds,
-            )
-        else:
-            from finbot.infrastructure.adapters.in_memory_market_data_stream import (
-                InMemoryMarketDataStream,
-            )
-            stream = InMemoryMarketDataStream()
+        stream = HyperliquidMarketDataStream(
+            stale_data_seconds=settings.stale_data_seconds,
+        )
+        bot_loop = BotEventLoop(ThreadSafeEventQueue(), stream)
 
-        bot_loop = BotEventLoop(queue, stream)
         runtime = create_live_trading_runtime_use_case(
             args.strategy,
             args.symbol,
             args.interval,
             mode=settings.mode,
-            live_data=args.live_data,
+            live_data=True,
+            bot_loop=bot_loop,
         )
-        runtime._bot_loop = bot_loop  # type: ignore[assignment]
-
-        runtime._start_session(args.strategy, "", args.symbol, args.interval)
+        runtime.start(args.strategy, args.symbol, args.interval)
         print(f"running: {args.strategy} on {args.symbol}/{args.interval} [{settings.mode}]")
         try:
             runtime.run_forever()

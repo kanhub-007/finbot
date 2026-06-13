@@ -48,8 +48,8 @@ class BotEventLoop(BotLoop):
         self._running = False
         self._symbol: str = ""
         self._interval: str = ""
-        self._on_candle: Callable[[dict[str, Any]], object] | None = None
-        self._on_stale: Callable[[dict[str, Any]], object] | None = None
+        self._on_candle: Callable[[dict[str, Any]], None] | None = None
+        self._on_stale: Callable[[dict[str, Any]], None] | None = None
 
     # -- public API --------------------------------------------------------
 
@@ -57,8 +57,8 @@ class BotEventLoop(BotLoop):
         self,
         symbol: str,
         interval: str,
-        on_candle: Callable[[dict[str, Any]], object],
-        on_stale: Callable[[dict[str, Any]], object] | None = None,
+        on_candle: Callable[[dict[str, Any]], None],
+        on_stale: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         """Subscribe to candles and begin processing events.  Blocks until stop()."""
         self._symbol = symbol

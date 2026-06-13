@@ -18,8 +18,8 @@ class BotLoop(ABC):
         self,
         symbol: str,
         interval: str,
-        on_candle: Callable[[dict[str, Any]], object],
-        on_stale: Callable[[dict[str, Any]], object] | None = None,
+        on_candle: Callable[[dict[str, Any]], None],
+        on_stale: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         """Block the calling thread and process events until stopped."""
 

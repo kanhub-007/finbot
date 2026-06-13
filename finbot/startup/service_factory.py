@@ -183,12 +183,16 @@ def create_live_trading_runtime_use_case(
     mode: str = "dry_run",
     live_data: bool = False,
     warmup_bars: list | None = None,
+    bot_loop=None,
 ):
     """Create a fully wired LiveTradingRuntimeUseCase.
 
     Loads the YAML strategy, creates a real ``RuleBasedStrategyEvaluator``
     via the factory, and wires all adapters.  Never uses the placeholder
     ``FinbarStrategyEvaluator`` in the live path.
+
+    When *bot_loop* is provided, the stream is owned by the bot loop
+    and ``market_data_stream`` is set to ``None`` on the use case.
     """
     from finbot.core.application.use_cases.live_trading_runtime import (
         LiveTradingRuntimeUseCase,
@@ -220,7 +224,11 @@ def create_live_trading_runtime_use_case(
         repo = create_bot_state_repository()
     else:
         repo = create_in_memory_repository()
-    if live_data:
+
+    # When a bot_loop is provided, it owns the stream — don't create a second one.
+    if bot_loop is not None:
+        stream = None  # type: ignore[assignment]
+    elif live_data:
         from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
             HyperliquidMarketDataStream,
         )
@@ -267,6 +275,7 @@ def create_live_trading_runtime_use_case(
                 DuplicateSignalGate(repo),
             ]
         ),
+        bot_loop=bot_loop,
     )
 
 
