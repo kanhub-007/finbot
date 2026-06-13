@@ -122,6 +122,7 @@ class BotEventLoop(BotLoop):
             logger.warning("Event queue full — dropping %s event", event.type)
 
     def _dispatch(self, event: BotEvent) -> None:
+        logger.debug("Dispatching event type=%s", event.type)
         if event.type == BotEventType.CANDLE and self._on_candle:
             self._on_candle(event.data)
         elif event.type == BotEventType.STALE and self._on_stale:

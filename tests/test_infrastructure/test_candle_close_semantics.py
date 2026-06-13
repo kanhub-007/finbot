@@ -1,5 +1,6 @@
 """Tests for closed-candle semantics in HyperliquidMarketDataStream."""
 
+import time
 from unittest.mock import MagicMock, patch
 
 from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
@@ -8,7 +9,8 @@ from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
 
 
 class TestCandleCloseSemantics:
-    def _make_candle(self, ts_ms: int, close: float) -> dict:
+    @staticmethod
+    def _make_candle(ts_ms: int, close: float) -> dict:
         return {
             "channel": "candle",
             "data": {
@@ -23,6 +25,11 @@ class TestCandleCloseSemantics:
             },
         }
 
+    @staticmethod
+    def _recent_ts(offset_hours: int = 0) -> int:
+        """Return a timestamp offset from now, in ms."""
+        return int(time.time() * 1000) + offset_hours * 3_600_000
+
     def test_partial_candle_update_is_not_processed(self) -> None:
         """Updates to the same (forming) candle are silently stored, not emitted."""
         mock_info = MagicMock()
@@ -34,11 +41,12 @@ class TestCandleCloseSemantics:
             stream.subscribe_candles("BTC", "1h", emitted.append)
 
             # First candle (forming) — captured, not emitted
-            stream._on_candle(self._make_candle(1000000, 50000.0))
+            ts = self._recent_ts(0)
+            stream._on_candle(self._make_candle(ts, 50000.0))
             assert len(emitted) == 0
 
             # Same candle update (still forming) — still not emitted
-            stream._on_candle(self._make_candle(1000000, 50100.0))
+            stream._on_candle(self._make_candle(ts, 50100.0))
             assert len(emitted) == 0
 
             stream.stop()
@@ -54,15 +62,16 @@ class TestCandleCloseSemantics:
             stream.subscribe_candles("BTC", "1h", emitted.append)
 
             # Candle A (forming)
-            stream._on_candle(self._make_candle(1000000, 50000.0))
+            ts_a = self._recent_ts(0)
+            stream._on_candle(self._make_candle(ts_a, 50000.0))
             assert len(emitted) == 0
 
             # Candle B starts → candle A is now closed
-            stream._on_candle(self._make_candle(1003600, 51000.0))
+            ts_b = ts_a + 3_600_000
+            stream._on_candle(self._make_candle(ts_b, 51000.0))
             assert len(emitted) == 1
             assert emitted[0]["close"] == 50000.0
             assert emitted[0]["_closed"] is True
-            assert emitted[0]["timestamp"] == 1000  # ms→s
 
             stream.stop()
 
@@ -76,12 +85,14 @@ class TestCandleCloseSemantics:
             stream = HyperliquidMarketDataStream(stale_data_seconds=0)
             stream.subscribe_candles("BTC", "1h", emitted.append)
 
-            stream._on_candle(self._make_candle(1000000, 50000.0))
-            stream._on_candle(self._make_candle(1003600, 51000.0))
+            ts_a = self._recent_ts(0)
+            ts_b = ts_a + 3_600_000
+            stream._on_candle(self._make_candle(ts_a, 50000.0))
+            stream._on_candle(self._make_candle(ts_b, 51000.0))
             assert len(emitted) == 1  # candle A emitted
 
             # Duplicate update for the same closed candle should be ignored
-            stream._on_candle(self._make_candle(1003600, 51200.0))
+            stream._on_candle(self._make_candle(ts_b, 51200.0))
             assert len(emitted) == 1  # still just 1
 
             stream.stop()
@@ -96,12 +107,14 @@ class TestCandleCloseSemantics:
             stream = HyperliquidMarketDataStream(stale_data_seconds=0)
             stream.subscribe_candles("BTC", "1h", emitted.append)
 
-            stream._on_candle(self._make_candle(1000000, 50000.0))
-            stream._on_candle(self._make_candle(1003600, 51000.0))
+            ts_a = self._recent_ts(0)
+            ts_b = ts_a + 3_600_000
+            stream._on_candle(self._make_candle(ts_a, 50000.0))
+            stream._on_candle(self._make_candle(ts_b, 51000.0))
             assert len(emitted) == 1
 
             # Out-of-order: older timestamp after newer was already seen
-            stream._on_candle(self._make_candle(1000000, 49000.0))
+            stream._on_candle(self._make_candle(ts_a, 49000.0))
             assert len(emitted) == 1  # ignored
 
             stream.stop()

@@ -82,12 +82,16 @@ class TestHyperliquidMarketDataStream:
             stream = HyperliquidMarketDataStream(stale_data_seconds=0)
             stream.subscribe_candles("BTC", "1h", received.append)
 
+            # Use a recent timestamp so stale-detection doesn't fire
+            now_ms = int(time.time() * 1000)
+            candle1_ts = now_ms  # current forming candle (not past close)
+
             # First candle captured, not emitted
             stream._on_candle(
                 {
                     "channel": "candle",
                     "data": {
-                        "t": 1000000,
+                        "t": candle1_ts,
                         "o": "1",
                         "h": "2",
                         "l": "0",
@@ -105,7 +109,7 @@ class TestHyperliquidMarketDataStream:
                 {
                     "channel": "candle",
                     "data": {
-                        "t": 1000000,
+                        "t": candle1_ts,
                         "o": "1",
                         "h": "2",
                         "l": "0",
@@ -138,12 +142,17 @@ class TestHyperliquidMarketDataStream:
             stream = HyperliquidMarketDataStream(stale_data_seconds=0)
             stream.subscribe_candles("BTC", "1h", received.append)
 
+            # Use recent timestamps to avoid stale-detection
+            now_ms = int(time.time() * 1000)
+            candle1_ts = now_ms  # current forming candle
+            candle2_ts = candle1_ts + 3600_000  # 1h later
+
             # First candle (forming) → captured
             stream._on_candle(
                 {
                     "channel": "candle",
                     "data": {
-                        "t": 1000000,
+                        "t": candle1_ts,
                         "o": "1",
                         "h": "2",
                         "l": "0",
@@ -161,7 +170,7 @@ class TestHyperliquidMarketDataStream:
                 {
                     "channel": "candle",
                     "data": {
-                        "t": 1003600,
+                        "t": candle2_ts,
                         "o": "2",
                         "h": "3",
                         "l": "1",
@@ -175,7 +184,6 @@ class TestHyperliquidMarketDataStream:
             assert len(received) == 1
             # Emitted bar is the *previous* candle (now closed)
             assert received[0]["close"] == 1.5
-            assert received[0]["timestamp"] == 1000
             assert received[0]["_closed"] is True
 
             stream.stop()

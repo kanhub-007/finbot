@@ -79,7 +79,14 @@ class HyperliquidMarketDataStream(MarketDataStream):
 
         from hyperliquid.info import Info
 
-        self._info = Info(self._base_url, skip_ws=False)
+        # For HIP-3 tokens (dex:COIN), Info needs perp_dexs to
+        # recognise the coin name during subscription remapping.
+        perp_dexs: list[str] | None = None
+        if ":" in symbol:
+            dex = symbol.split(":")[0]
+            perp_dexs = [dex]
+
+        self._info = Info(self._base_url, skip_ws=False, perp_dexs=perp_dexs)
         self._sub_id = self._info.subscribe(
             {"type": "candle", "coin": symbol, "interval": interval},
             self._on_candle,
@@ -133,9 +140,17 @@ class HyperliquidMarketDataStream(MarketDataStream):
             return
 
         # First candle after subscribe — capture it, don't emit yet.
+        # Unless the candle's close time (T) is already in the past
+        # (low-volume HIP-3 tokens where we joined after close).
         if self._current_candle_ts_ms == 0:
             self._pending_bar = bar
             self._current_candle_ts_ms = ts_ms
+            t_close = data.get("T", 0)
+            if t_close and int(time.time() * 1000) > t_close:
+                closed = dict(bar)
+                closed["_closed"] = True
+                cb(closed)
+                self._last_emitted_ts_ms = ts_ms
             return
 
         # Same candle still forming — update pending bar silently.
