@@ -122,13 +122,15 @@ def _cmd_run(args) -> None:
     # Live-mode safety gate.
     if settings.mode == "live":
         _check_live_mode_gate(settings)
+    elif settings.mode == "testnet":
+        if not settings.hyperliquid_testnet:
+            print(
+                "TESTNET REQUIRES TESTNET FLAG: set"
+                " FINBOT_HYPERLIQUID_TESTNET=true for testnet mode."
+            )
+            sys.exit(1)
     elif not settings.hyperliquid_testnet:
-        print(
-            "MAINNET REQUIRES LIVE MODE: set"
-            " FINBOT_MODE=live to trade on mainnet,"
-            " or FINBOT_HYPERLIQUID_TESTNET=true for testnet dry-run."
-        )
-        sys.exit(1)
+        print("DRY-RUN on mainnet — websocket only, no orders placed.")
 
     if args.live_data:
         # New runtime: blocking event loop with real pipeline
