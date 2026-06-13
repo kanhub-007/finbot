@@ -43,6 +43,7 @@ from finbot.core.domain.entities.trading_mode import TradingMode
 from finbot.core.domain.interfaces.bar_frame_converter import (
     BarFrameConverter,
 )
+from finbot.core.domain.interfaces.bot_loop import BotLoop
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
@@ -99,6 +100,7 @@ class LiveTradingRuntimeUseCase:
         market_metadata_provider: MarketMetadataProvider | None = None,
         order_normalizer: OrderNormalizer | None = None,
         cloid_generator: CloidGenerator | None = None,
+        bot_loop: BotLoop | None = None,
     ) -> None:
         self._exchange = exchange_gateway
         self._stream = market_data_stream
@@ -112,6 +114,7 @@ class LiveTradingRuntimeUseCase:
         self._metadata_provider = market_metadata_provider
         self._order_normalizer = order_normalizer
         self._cloid_gen = cloid_generator
+        self._bot_loop = bot_loop
         self._required_columns: set[str] = required_columns or set()
         self._bot_run_id: str = ""
         self._strategy_name: str = ""
@@ -179,8 +182,26 @@ class LiveTradingRuntimeUseCase:
     def stop(self) -> None:
         """Stop the runtime session and persist the end marker."""
         if self._started:
+            if self._bot_loop:
+                self._bot_loop.stop()
             self._repo.end_bot_run(self._bot_run_id)
             self._started = False
+
+    def run_forever(self) -> None:
+        """Start the event loop and block until stopped.
+
+        Requires a ``BotLoop`` to be injected.  The loop subscribes to
+        market data and calls ``process_closed_candle`` for each candle.
+        """
+        if self._bot_loop is None:
+            raise RuntimeError("No BotLoop injected — cannot run forever")
+        if not self._started:
+            raise RuntimeError("Session not started — call start() or start_live() first")
+        self._bot_loop.start(
+            symbol=self._symbol,
+            interval=self._interval,
+            on_candle=self.process_closed_candle,
+        )
 
     def process_closed_candle(self, candle: dict[str, Any]) -> CandleProcessingResult:
         """Process a single closed candle through the full pipeline."""

@@ -76,16 +76,17 @@ class TestBotEventLoop:
         stream = StubStream()
         strategy_calls: list[dict] = []
 
-        loop = BotEventLoop(q, stream, on_candle=strategy_calls.append)
+        loop = BotEventLoop(q, stream)
 
-        # Start in background thread
-        t = threading.Thread(target=loop.start, args=("BTC", "1h"))
+        # Start in background thread with on_candle callback
+        t = threading.Thread(
+            target=loop.start,
+            args=("BTC", "1h", strategy_calls.append),
+        )
         t.start()
 
-        # Fire from "SDK" thread → must enqueue, not call strategy directly
+        # Fire from "SDK" thread
         stream.fire({"close": 50000, "symbol": "BTC"})
-
-        # Give the event loop time to dequeue
         time.sleep(0.1)
 
         # Strategy callback was called on main loop thread
@@ -100,12 +101,14 @@ class TestBotEventLoop:
         stream = StubStream()
         received: list[dict] = []
 
-        loop = BotEventLoop(q, stream, on_candle=received.append)
+        loop = BotEventLoop(q, stream)
 
-        t = threading.Thread(target=loop.start, args=("BTC", "1h"))
+        t = threading.Thread(
+            target=loop.start,
+            args=("BTC", "1h", received.append),
+        )
         t.start()
 
-        # Enqueue a few events then stop
         stream.fire({"close": 1})
         stream.fire({"close": 2})
         time.sleep(0.1)
@@ -113,30 +116,24 @@ class TestBotEventLoop:
         loop.stop()
         t.join(timeout=2)
 
-        # All events should have been flushed
         assert len(received) == 2
         assert stream.stopped
 
     def test_reconnect_resubscribes_after_stream_failure(self) -> None:
-        """When subscribe fails with an error, the loop reconnects."""
         q = ThreadSafeEventQueue()
         stream = MagicMock(spec=MarketDataStream)
         stream.subscribe_candles.side_effect = [
             ConnectionError("fail"),
-            1,  # second try succeeds
+            1,
         ]
         stream.stop = MagicMock()
 
-        # Use a very short backoff for testing
-        loop = BotEventLoop(
-            q,
-            stream,
-            on_candle=lambda _: None,
-            reconnect_backoff=0.01,
-        )
+        loop = BotEventLoop(q, stream, reconnect_backoff=0.01)
 
-        # Start, let it attempt reconnect, then stop
-        t = threading.Thread(target=loop.start, args=("BTC", "1h"))
+        t = threading.Thread(
+            target=loop.start,
+            args=("BTC", "1h", lambda _: None),
+        )
         t.start()
         time.sleep(0.3)
         loop.stop()
@@ -150,11 +147,12 @@ class TestBotEventLoop:
         stream = StubStream()
         stale_events: list[dict] = []
 
-        loop = BotEventLoop(
-            q, stream, on_candle=lambda _: None, on_stale=stale_events.append
-        )
+        loop = BotEventLoop(q, stream)
 
-        t = threading.Thread(target=loop.start, args=("ETH", "4h"))
+        t = threading.Thread(
+            target=loop.start,
+            args=("ETH", "4h", lambda _: None, stale_events.append),
+        )
         t.start()
 
         stream.fire({"_stale": True, "elapsed_seconds": 30})
@@ -167,22 +165,22 @@ class TestBotEventLoop:
         t.join(timeout=2)
 
     def test_queue_backpressure_does_not_crash(self) -> None:
-        """When queue is full, enqueue rejects silently — no crash."""
         q = ThreadSafeEventQueue(maxsize=2)
         stream = StubStream()
         received: list[dict] = []
 
-        loop = BotEventLoop(q, stream, on_candle=received.append)
+        loop = BotEventLoop(q, stream)
 
-        t = threading.Thread(target=loop.start, args=("BTC", "1h"))
+        t = threading.Thread(
+            target=loop.start,
+            args=("BTC", "1h", received.append),
+        )
         t.start()
 
-        # Fire more events than queue capacity
         for i in range(5):
             stream.fire({"close": i})
         time.sleep(0.2)
 
-        # Some events dropped, but no crash
         assert 1 <= len(received) <= 5
 
         loop.stop()

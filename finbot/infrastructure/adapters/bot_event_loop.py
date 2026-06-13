@@ -14,13 +14,14 @@ from typing import Any
 
 from finbot.core.domain.entities.bot_event import BotEvent
 from finbot.core.domain.entities.bot_event_type import BotEventType
+from finbot.core.domain.interfaces.bot_loop import BotLoop
 from finbot.core.domain.interfaces.event_queue import EventQueue
 from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 
 logger = logging.getLogger(__name__)
 
 
-class BotEventLoop:
+class BotEventLoop(BotLoop):
     """Main event loop for the live trading bot.
 
     Parameters
@@ -29,13 +30,8 @@ class BotEventLoop:
         Thread-safe event queue shared with SDK callbacks.
     stream:
         Market data stream that feeds candle events.
-    on_candle:
-        Called for each candle event (bar dict).
-    on_stale:
-        Called when stale data is detected.
     reconnect_backoff:
-        Initial backoff seconds for reconnect attempts (doubles
-        on each retry, capped at 60 s).
+        Initial backoff seconds for reconnect attempts.
     """
 
     MAX_BACKOFF = 60.0
@@ -44,28 +40,31 @@ class BotEventLoop:
         self,
         queue: EventQueue,
         stream: MarketDataStream,
-        on_candle: Callable[[dict[str, Any]], None],
-        on_stale: Callable[[dict[str, Any]], None] | None = None,
         reconnect_backoff: float = 2.0,
     ) -> None:
         self._queue = queue
         self._stream = stream
-        self._on_candle = on_candle
-        self._on_stale = on_stale
         self._reconnect_backoff = reconnect_backoff
         self._running = False
         self._symbol: str = ""
         self._interval: str = ""
+        self._on_candle: Callable[[dict[str, Any]], object] | None = None
+        self._on_stale: Callable[[dict[str, Any]], object] | None = None
 
     # -- public API --------------------------------------------------------
 
-    def start(self, symbol: str, interval: str) -> None:
-        """Subscribe to candles and begin processing events.
-
-        Blocks the calling thread until :meth:`stop` is called.
-        """
+    def start(
+        self,
+        symbol: str,
+        interval: str,
+        on_candle: Callable[[dict[str, Any]], object],
+        on_stale: Callable[[dict[str, Any]], object] | None = None,
+    ) -> None:
+        """Subscribe to candles and begin processing events.  Blocks until stop()."""
         self._symbol = symbol
         self._interval = interval
+        self._on_candle = on_candle
+        self._on_stale = on_stale
         self._running = True
 
         try:
@@ -80,7 +79,6 @@ class BotEventLoop:
                 continue
             self._dispatch(event)
 
-        # Graceful shutdown: flush remaining events.
         self._flush()
 
     def stop(self) -> None:
@@ -90,7 +88,6 @@ class BotEventLoop:
     # -- internal -----------------------------------------------------------
 
     def _subscribe(self) -> None:
-        """Subscribe to candles, routing events through the queue."""
         self._stream.subscribe_candles(
             self._symbol,
             self._interval,
@@ -98,7 +95,6 @@ class BotEventLoop:
         )
 
     def _reconnect(self) -> None:
-        """Stop the stream, back off, and re-subscribe."""
         backoff = self._reconnect_backoff
         while self._running:
             try:
@@ -115,7 +111,6 @@ class BotEventLoop:
                 logger.warning("Reconnect failed: %s", exc)
 
     def _enqueue_from_callback(self, raw: dict[str, Any]) -> None:
-        """SDK callback — runs on websocket thread."""
         if raw.get("_stale"):
             event = BotEvent(type=BotEventType.STALE, data=raw)
         else:
@@ -124,16 +119,14 @@ class BotEventLoop:
             logger.warning("Event queue full — dropping %s event", event.type)
 
     def _dispatch(self, event: BotEvent) -> None:
-        if event.type == BotEventType.CANDLE:
+        if event.type == BotEventType.CANDLE and self._on_candle:
             self._on_candle(event.data)
-        elif event.type == BotEventType.STALE:
-            if self._on_stale:
-                self._on_stale(event.data)
+        elif event.type == BotEventType.STALE and self._on_stale:
+            self._on_stale(event.data)
         elif event.type == BotEventType.SHUTDOWN:
             self._running = False
 
     def _flush(self) -> None:
-        """Process all remaining events before shutting down."""
         for _ in range(self._queue.size()):
             event = self._queue.dequeue(timeout=0)
             if event is not None:
