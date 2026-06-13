@@ -1,4 +1,4 @@
-"""Domain DTO for the outcome of processing one closed candle.
+"""Application DTO for the outcome of processing one closed candle.
 
 Crosses the application → presentation boundary.
 """

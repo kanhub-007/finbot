@@ -1,4 +1,4 @@
-"""Enrichment validator — pure domain service that gates strategy evaluation.
+"""Enrichment quality gate — pure domain service.
 
 Checks that an enriched bar is safe to pass to a strategy evaluator:
 required columns present, latest values finite, valid types, warmup
@@ -13,9 +13,12 @@ from typing import Any
 from finbot.core.domain.entities.enrichment_validation_result import (
     EnrichmentValidationResult,
 )
+from finbot.core.domain.interfaces.enrichment_validator import (
+    EnrichmentValidator as EnrichmentValidatorInterface,
+)
 
 
-class EnrichmentValidator:
+class EnrichmentValidator(EnrichmentValidatorInterface):
     """Validates enriched bar quality before strategy evaluation.
 
     This is a pure domain service with no I/O or framework dependencies.
@@ -30,29 +33,23 @@ class EnrichmentValidator:
         warmup_ready: bool,
         has_gap: bool,
     ) -> EnrichmentValidationResult:
-        """Validate the latest enriched bar against strategy requirements.
-
-        Args:
-            enriched_bar: Latest enriched bar dict with indicator columns.
-            required_columns: Set of column names the strategy requires.
-            warmup_ready: True when the warmup window has enough bars.
-            has_gap: True when a gap was detected in the warmup window.
-
-        Returns:
-            An ``EnrichmentValidationResult`` describing whether the bar
-            is safe for strategy evaluation and, if not, why.
-        """
         if not warmup_ready:
             return EnrichmentValidationResult(
-                valid=False,
-                reason="warmup window is not ready",
+                valid=False, reason="warmup window is not ready"
             )
         if has_gap:
             return EnrichmentValidationResult(
-                valid=False,
-                reason="warmup window has gaps",
+                valid=False, reason="warmup window has gaps"
             )
+        return self._check_columns(enriched_bar, required_columns)
 
+    # -- internal -----------------------------------------------------------
+
+    def _check_columns(
+        self,
+        enriched_bar: dict[str, Any],
+        required_columns: set[str],
+    ) -> EnrichmentValidationResult:
         missing: list[str] = []
         non_finite: list[str] = []
         bad_type: list[str] = []
@@ -76,32 +73,32 @@ class EnrichmentValidator:
                     non_finite.append(col)
                 continue
 
-            # String, dict, list, etc. — may be acceptable depending
-            # on strategy expectations.  Strings that cannot be parsed
-            # as numbers or booleans are flagged.
             if isinstance(value, str):
                 bad_type.append(col)
-            # Other non-primitive types are accepted for now as the
-            # strategy evaluator is responsible for interpreting them.
 
-        if missing or non_finite or bad_type:
-            parts: list[str] = []
-            if missing:
-                parts.append(f"missing columns: {', '.join(missing)}")
-            if non_finite:
-                parts.append(
-                    f"non-finite values: {', '.join(non_finite)}"
-                )
-            if bad_type:
-                parts.append(
-                    f"invalid type columns: {', '.join(bad_type)}"
-                )
-            return EnrichmentValidationResult(
-                valid=False,
-                missing_columns=missing,
-                non_finite_columns=non_finite,
-                invalid_type_columns=bad_type,
-                reason="; ".join(parts),
-            )
+        return self._build_result(missing, non_finite, bad_type)
 
-        return EnrichmentValidationResult(valid=True)
+    @staticmethod
+    def _build_result(
+        missing: list[str],
+        non_finite: list[str],
+        bad_type: list[str],
+    ) -> EnrichmentValidationResult:
+        if not (missing or non_finite or bad_type):
+            return EnrichmentValidationResult(valid=True)
+
+        parts: list[str] = []
+        if missing:
+            parts.append(f"missing columns: {', '.join(missing)}")
+        if non_finite:
+            parts.append(f"non-finite values: {', '.join(non_finite)}")
+        if bad_type:
+            parts.append(f"invalid type columns: {', '.join(bad_type)}")
+
+        return EnrichmentValidationResult(
+            valid=False,
+            missing_columns=missing,
+            non_finite_columns=non_finite,
+            invalid_type_columns=bad_type,
+            reason="; ".join(parts),
+        )

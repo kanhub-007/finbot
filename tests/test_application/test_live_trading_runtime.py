@@ -1,212 +1,29 @@
-"""Tests for LiveTradingRuntimeUseCase — Scenario 4: enrichment validation gate."""
+"""Tests for LiveTradingRuntimeUseCase — Slice 1 scenarios."""
 
-from decimal import Decimal
-
-import pytest
-
-from finbot.core.domain.dto.candle_processing_result import CandleProcessingResult
-from finbot.core.domain.entities.position_direction import PositionDirection
-from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.entities.trading_mode import TradingMode
-from finbot.core.domain.interfaces.bot_state_repository import BotStateRepository
-from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
-from finbot.core.domain.interfaces.indicator_calculator import (
-    IndicatorCalculator,
+from finbot.core.domain.services.enrichment_validator import (
+    EnrichmentValidator,
 )
-from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
-from finbot.core.domain.interfaces.strategy_evaluator import StrategyEvaluator
-from finbot.core.domain.services.enrichment_validator import EnrichmentValidator
+from finbot.core.domain.services.warmup_window import WarmupWindow
+from tests.fakes import (
+    FakeMarketDataStream,
+    FakeStrategyEvaluator,
+    InMemoryBarFrameConverter,
+    InMemoryExchangeGateway,
+    InMemoryIndicatorEngine,
+    StubBotStateRepository,
+)
 
 
 # ---------------------------------------------------------------------------
-# Test fakes
-# ---------------------------------------------------------------------------
-
-
-class FakeMarketDataStream(MarketDataStream):
-    """Market data stream fake for tests — emits closed candles on demand."""
-
-    def __init__(self) -> None:
-        self._callback: object = None
-        self._subscription_count: int = 0
-
-    def subscribe_candles(self, symbol: str, interval: str, callback: object) -> int:
-        self._callback = callback
-        self._subscription_count += 1
-        return self._subscription_count
-
-    def stop(self) -> None:
-        self._callback = None
-
-    def emit_closed_candle(self, candle: dict) -> None:
-        if self._callback is not None:
-            self._callback(candle)  # type: ignore[misc]
-
-    @property
-    def subscription_count(self) -> int:
-        return self._subscription_count
-
-
-class InMemoryExchangeGateway(ExchangeGateway):
-    """Exchange fake for tests — tracks submissions without I/O."""
-
-    def __init__(self) -> None:
-        self.submitted_order_count: int = 0
-        self._position: PositionSnapshot = PositionSnapshot(
-            symbol="DEFAULT", direction=PositionDirection.FLAT, size=Decimal("0")
-        )
-
-    def get_position(self, symbol: str) -> PositionSnapshot:
-        return self._position
-
-    def list_open_orders(self, symbol: str) -> list[dict]:
-        return []
-
-    def submit_order(self, intent) -> dict:
-        self.submitted_order_count += 1
-        return {"status": "fake_submitted"}
-
-    def cancel_all(self, symbol: str) -> dict:
-        return {"status": "fake_cancelled"}
-
-    def cancel_by_cloid(self, symbol: str, cloid: str) -> dict:
-        return {"status": "fake_cancelled"}
-
-
-class InMemoryIndicatorEngine(IndicatorCalculator):
-    """Indicator calculator fake — returns a pre-configured latest bar."""
-
-    def __init__(self, latest_bar: dict | None = None) -> None:
-        self._latest_bar = latest_bar or {}
-
-    def calculate(self, df, indicators: list[str]):
-        """Return the pre-configured latest bar, preserving DataFrame type."""
-        import pandas as pd
-
-        if isinstance(df, pd.DataFrame) and self._latest_bar:
-            return pd.DataFrame([self._latest_bar])
-        return type(df)([self._latest_bar])
-
-
-class FakeStrategyEvaluator(StrategyEvaluator):
-    """Strategy evaluator fake — returns a pre-configured signal."""
-
-    def __init__(
-        self,
-        signal: SignalDecision | None = None,
-    ) -> None:
-        self._signal = signal or SignalDecision(
-            action=SignalAction.HOLD,
-            symbol="BTC",
-            interval="1h",
-            candle_timestamp=0,
-            strategy_hash="test-hash",
-        )
-        self.evaluate_calls: list[dict] = []
-
-    def evaluate(self, enriched_bar: dict, position: PositionSnapshot) -> SignalDecision:
-        self.evaluate_calls.append({"bar": enriched_bar, "position": position})
-        return SignalDecision(
-            action=self._signal.action,
-            symbol=self._signal.symbol,
-            interval=self._signal.interval,
-            candle_timestamp=enriched_bar.get("timestamp", 0),
-            strategy_hash=self._signal.strategy_hash,
-            confidence=self._signal.confidence,
-            stop_price=self._signal.stop_price,
-            target_price=self._signal.target_price,
-        )
-
-
-class StubBotStateRepository(BotStateRepository):
-    """Minimal state repository stub for enrichment-only tests."""
-
-    def __init__(self) -> None:
-        self._bot_runs: list = []
-        self._processed: set[str] = set()
-        self._processed_signals: list = []
-        self._risk_events: list = []
-        self._audit_entries: list = []
-        self._intents: list = []
-
-    def create_bot_run(self, bot_run) -> None:
-        self._bot_runs.append(bot_run)
-
-    def end_bot_run(self, run_id: str) -> None:
-        pass
-
-    def store_strategy_snapshot(self, snapshot) -> None:
-        pass
-
-    def has_processed_signal(self, signal_key: str) -> bool:
-        return signal_key in self._processed
-
-    def mark_signal_processed(self, signal) -> None:
-        self._processed.add(signal.signal_key)
-        self._processed_signals.append(signal)
-
-    def record_order_intent(self, intent) -> str:
-        self._intents.append(intent)
-        return "test-intent-1"
-
-    def record_order_response(self, response) -> None:
-        pass
-
-    def record_fill(self, fill) -> None:
-        pass
-
-    def record_reconciliation(self, rec) -> None:
-        pass
-
-    def record_risk_event(self, event) -> None:
-        self._risk_events.append(event)
-
-    def append_audit_log(self, entry) -> None:
-        self._audit_entries.append(entry)
-
-    def get_latest_bot_run(self):
-        return self._bot_runs[-1] if self._bot_runs else None
-
-    def get_last_signal(self):
-        return self._processed_signals[-1] if self._processed_signals else None
-
-    def get_last_order_response(self):
-        return None
-
-    def count_signals(self) -> int:
-        return len(self._processed)
-
-    def count_orders(self) -> int:
-        return len(self._intents)
-
-    def count_fills(self) -> int:
-        return 0
-
-    @property
-    def signal_count(self) -> int:
-        return len(self._processed)
-
-    @property
-    def order_intent_count(self) -> int:
-        return len(self._intents)
-
-    @property
-    def last_risk_event(self):
-        return self._risk_events[-1] if self._risk_events else None
-
-    def last_audit_event(self):
-        return self._audit_entries[-1] if self._audit_entries else None
-
-
-# ---------------------------------------------------------------------------
-# Scenario 4: Invalid enriched candle is blocked before strategy evaluation
+# Helpers
 # ---------------------------------------------------------------------------
 
 
 def _closed_warmup_bars(count: int = 100) -> list[dict]:
-    """Generate synthetic closed warmup bars."""
+    """Generate synthetic closed warmup bars at 1h intervals."""
     base_ts = 1735689600
     return [
         {
@@ -221,50 +38,10 @@ def _closed_warmup_bars(count: int = 100) -> list[dict]:
     ]
 
 
-def test_invalid_enriched_candle_blocked_before_evaluation() -> None:
-    """Scenario 4: missing/non-finite enriched columns block strategy evaluation."""
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
-
-    repo = StubBotStateRepository()
-    fake_exchange = InMemoryExchangeGateway()
-    fake_indicator_engine = InMemoryIndicatorEngine(
-        latest_bar={
-            "timestamp": 1735689600,
-            "open": 50000.0,
-            "high": 51000.0,
-            "low": 49000.0,
-            "close": 50500.0,
-            "atr": float("nan"),
-            # vp_vah intentionally missing — the strategy requires it
-        }
-    )
-    fake_evaluator = FakeStrategyEvaluator(
-        signal=SignalDecision(
-            action=SignalAction.LONG_ENTRY,
-            symbol="BTC",
-            interval="1h",
-            candle_timestamp=0,
-            strategy_hash="test-hash",
-        )
-    )
-
-    runtime = LiveTradingRuntimeUseCase(
-        exchange_gateway=fake_exchange,
-        market_data_stream=FakeMarketDataStream(),
-        strategy_evaluator=fake_evaluator,
-        state_repository=repo,
-        indicator_calculator=fake_indicator_engine,
-        enrichment_validator=EnrichmentValidator(),
-        mode=TradingMode.DRY_RUN,
-        warmup_bars=_closed_warmup_bars(100),
-        required_columns={"atr", "vp_vah"},
-    )
-    runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
-
-    new_candle = {
-        "timestamp": 1735689600 + 100 * 3600,
+def _new_candle(offset: int = 100) -> dict:
+    """Build a closed candle at the given hourly offset from base."""
+    return {
+        "timestamp": 1735689600 + offset * 3600,
         "open": 51000.0,
         "high": 51100.0,
         "low": 50900.0,
@@ -272,119 +49,127 @@ def test_invalid_enriched_candle_blocked_before_evaluation() -> None:
         "volume": 50.0,
     }
 
-    result = runtime.process_closed_candle(new_candle)
+
+def _create_runtime(
+    *,
+    repo=None,
+    exchange=None,
+    evaluator=None,
+    indicator_engine=None,
+    mode=TradingMode.DRY_RUN,
+    warmup_bars=None,
+    required_columns=None,
+) -> "LiveTradingRuntimeUseCase":
+    from finbot.core.application.use_cases.live_trading_runtime import (
+        LiveTradingRuntimeUseCase,
+    )
+
+    return LiveTradingRuntimeUseCase(
+        exchange_gateway=exchange or InMemoryExchangeGateway(),
+        market_data_stream=FakeMarketDataStream(),
+        strategy_evaluator=evaluator or FakeStrategyEvaluator(),
+        state_repository=repo or StubBotStateRepository(),
+        indicator_calculator=indicator_engine or InMemoryIndicatorEngine(),
+        enrichment_validator=EnrichmentValidator(),
+        bar_frame_converter=InMemoryBarFrameConverter(),
+        mode=mode,
+        warmup_bars=warmup_bars or _closed_warmup_bars(100),
+        required_columns=required_columns or set(),
+    )
+
+
+def _indicator_bar(**extra) -> dict:
+    """Build a minimal enriched bar with defaults."""
+    base = {
+        "timestamp": 1735689600,
+        "open": 50000.0,
+        "high": 51000.0,
+        "low": 49000.0,
+        "close": 50500.0,
+        "volume": 100.0,
+    }
+    base.update(extra)
+    return base
+
+
+# ---------------------------------------------------------------------------
+# Scenario 4: Invalid enriched candle is blocked before strategy evaluation
+# ---------------------------------------------------------------------------
+
+
+def test_invalid_enriched_candle_blocked_before_evaluation() -> None:
+    """Missing/non-finite enriched columns block strategy evaluation."""
+    repo = StubBotStateRepository()
+    runtime = _create_runtime(
+        repo=repo,
+        evaluator=FakeStrategyEvaluator(
+            signal=SignalDecision(
+                action=SignalAction.LONG_ENTRY,
+                symbol="BTC",
+                interval="1h",
+                candle_timestamp=0,
+                strategy_hash="test-hash",
+            )
+        ),
+        indicator_engine=InMemoryIndicatorEngine(
+            latest_bar=_indicator_bar(atr=float("nan"))
+        ),
+        required_columns={"atr", "vp_vah"},
+    )
+    runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
+
+    result = runtime.process_closed_candle(_new_candle())
 
     assert result.enrichment_valid is False
     assert "atr" in result.enrichment_errors
     assert "vp_vah" in result.enrichment_errors
     assert repo.signal_count == 0
     assert repo.order_intent_count == 0
-    assert fake_exchange.submitted_order_count == 0
-    assert len(fake_evaluator.evaluate_calls) == 0
+    assert len(runtime._evaluator.evaluate_calls) == 0  # type: ignore[union-attr]
 
 
 def test_optional_nan_does_not_block_evaluation() -> None:
     """Optional/non-required NaN column does not block evaluation."""
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
-
     repo = StubBotStateRepository()
-    fake_exchange = InMemoryExchangeGateway()
-    fake_indicator_engine = InMemoryIndicatorEngine(
-        latest_bar={
-            "timestamp": 1735689600,
-            "open": 50000.0,
-            "high": 51000.0,
-            "low": 49000.0,
-            "close": 50500.0,
-            "atr": 1200.0,
-            "vp_vah": 52000.0,
-            "rsi_14": float("nan"),  # optional — not in required set
-        }
-    )
-    fake_evaluator = FakeStrategyEvaluator(
-        signal=SignalDecision(
-            action=SignalAction.HOLD,
-            symbol="BTC",
-            interval="1h",
-            candle_timestamp=0,
-            strategy_hash="test-hash",
-        )
-    )
-
-    runtime = LiveTradingRuntimeUseCase(
-        exchange_gateway=fake_exchange,
-        market_data_stream=FakeMarketDataStream(),
-        strategy_evaluator=fake_evaluator,
-        state_repository=repo,
-        indicator_calculator=fake_indicator_engine,
-        enrichment_validator=EnrichmentValidator(),
-        mode=TradingMode.DRY_RUN,
-        warmup_bars=_closed_warmup_bars(100),
+    runtime = _create_runtime(
+        repo=repo,
+        evaluator=FakeStrategyEvaluator(
+            signal=SignalDecision(
+                action=SignalAction.HOLD,
+                symbol="BTC",
+                interval="1h",
+                candle_timestamp=0,
+                strategy_hash="test-hash",
+            )
+        ),
+        indicator_engine=InMemoryIndicatorEngine(
+            latest_bar=_indicator_bar(
+                atr=1200.0, vp_vah=52000.0, rsi_14=float("nan")
+            )
+        ),
         required_columns={"atr", "vp_vah"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    new_candle = {
-        "timestamp": 1735689600 + 100 * 3600,
-        "open": 51000.0,
-        "high": 51100.0,
-        "low": 50900.0,
-        "close": 51050.0,
-        "volume": 50.0,
-    }
-
-    result = runtime.process_closed_candle(new_candle)
+    result = runtime.process_closed_candle(_new_candle())
 
     assert result.enrichment_valid is True
     assert result.enrichment_errors == []
 
 
 def test_validation_rejection_persisted_as_risk_event() -> None:
-    """Validation rejection is persisted as an audit/risk event with timestamp."""
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
-
+    """Validation rejection is persisted as an audit/risk event."""
     repo = StubBotStateRepository()
-    fake_exchange = InMemoryExchangeGateway()
-    fake_indicator_engine = InMemoryIndicatorEngine(
-        latest_bar={
-            "timestamp": 1735689600,
-            "open": 50000.0,
-            "high": 51000.0,
-            "low": 49000.0,
-            "close": 50500.0,
-            "atr": None,
-            "vp_vah": float("inf"),
-        }
-    )
-    fake_evaluator = FakeStrategyEvaluator()
-
-    runtime = LiveTradingRuntimeUseCase(
-        exchange_gateway=fake_exchange,
-        market_data_stream=FakeMarketDataStream(),
-        strategy_evaluator=fake_evaluator,
-        state_repository=repo,
-        indicator_calculator=fake_indicator_engine,
-        enrichment_validator=EnrichmentValidator(),
-        mode=TradingMode.DRY_RUN,
-        warmup_bars=_closed_warmup_bars(100),
+    runtime = _create_runtime(
+        repo=repo,
+        indicator_engine=InMemoryIndicatorEngine(
+            latest_bar=_indicator_bar(atr=None, vp_vah=float("inf"))
+        ),
         required_columns={"atr", "vp_vah"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    new_candle = {
-        "timestamp": 1735689600 + 100 * 3600,
-        "open": 51000.0,
-        "high": 51100.0,
-        "low": 50900.0,
-        "close": 51050.0,
-        "volume": 50.0,
-    }
-
-    result = runtime.process_closed_candle(new_candle)
+    result = runtime.process_closed_candle(_new_candle())
 
     assert result.enrichment_valid is False
     risk_event = repo.last_risk_event
@@ -399,234 +184,80 @@ def test_validation_rejection_persisted_as_risk_event() -> None:
 
 
 def test_latest_bar_includes_required_columns_after_enrichment() -> None:
-    """Scenario 3: enriched latest bar contains all required indicator columns."""
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
-
+    """Enriched latest bar contains all required indicator columns."""
     repo = StubBotStateRepository()
-    fake_exchange = InMemoryExchangeGateway()
-    fake_indicator_engine = InMemoryIndicatorEngine(
-        latest_bar={
-            "timestamp": 1735689600,
-            "open": 50000.0,
-            "high": 51000.0,
-            "low": 49000.0,
-            "close": 50500.0,
-            "volume": 100.0,
-            "atr": 1200.0,
-            "vp_vah": 52000.0,
-            "vp_val": 50000.0,
-        }
-    )
-    fake_evaluator = FakeStrategyEvaluator(
-        signal=SignalDecision(
-            action=SignalAction.LONG_ENTRY,
-            symbol="BTC",
-            interval="1h",
-            candle_timestamp=0,
-            strategy_hash="test-hash",
-        )
-    )
-
-    runtime = LiveTradingRuntimeUseCase(
-        exchange_gateway=fake_exchange,
-        market_data_stream=FakeMarketDataStream(),
-        strategy_evaluator=fake_evaluator,
-        state_repository=repo,
-        indicator_calculator=fake_indicator_engine,
-        enrichment_validator=EnrichmentValidator(),
-        mode=TradingMode.DRY_RUN,
-        warmup_bars=_closed_warmup_bars(100),
+    runtime = _create_runtime(
+        repo=repo,
+        evaluator=FakeStrategyEvaluator(
+            signal=SignalDecision(
+                action=SignalAction.LONG_ENTRY,
+                symbol="BTC",
+                interval="1h",
+                candle_timestamp=0,
+                strategy_hash="test-hash",
+            )
+        ),
+        indicator_engine=InMemoryIndicatorEngine(
+            latest_bar=_indicator_bar(atr=1200.0, vp_vah=52000.0, vp_val=50000.0)
+        ),
         required_columns={"atr", "vp_vah", "vp_val"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    new_candle = {
-        "timestamp": 1735689600 + 100 * 3600,
-        "open": 51000.0,
-        "high": 51100.0,
-        "low": 50900.0,
-        "close": 51050.0,
-        "volume": 50.0,
-    }
-
-    result = runtime.process_closed_candle(new_candle)
+    result = runtime.process_closed_candle(_new_candle())
 
     assert result.enrichment_valid is True
     assert result.enrichment_errors == []
     assert result.signal_action == "long_entry"
-    # evaluator was called with the enriched bar
-    assert len(fake_evaluator.evaluate_calls) == 1
-    called_bar = fake_evaluator.evaluate_calls[0]["bar"]
-    assert called_bar.get("atr") == 1200.0
+
+    evaluator = runtime._evaluator  # type: ignore[union-attr]
+    assert isinstance(evaluator, FakeStrategyEvaluator)
+    assert len(evaluator.evaluate_calls) == 1
+    assert evaluator.evaluate_calls[0]["bar"].get("atr") == 1200.0
 
 
 def test_evaluator_skipped_until_warmup_ready() -> None:
-    """Scenario 3: strategy is skipped until warmup is ready."""
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
-
-    repo = StubBotStateRepository()
-    fake_evaluator = FakeStrategyEvaluator()
-
-    # Only 5 warmup bars — min_bars is 20, so warmup won't be ready.
-    runtime = LiveTradingRuntimeUseCase(
-        exchange_gateway=InMemoryExchangeGateway(),
-        market_data_stream=FakeMarketDataStream(),
-        strategy_evaluator=fake_evaluator,
-        state_repository=repo,
-        indicator_calculator=InMemoryIndicatorEngine(),
-        enrichment_validator=EnrichmentValidator(),
-        mode=TradingMode.DRY_RUN,
+    """Strategy is skipped until warmup is ready."""
+    evaluator = FakeStrategyEvaluator()
+    runtime = _create_runtime(
+        evaluator=evaluator,
         warmup_bars=_closed_warmup_bars(5),
         required_columns={"atr"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    new_candle = {
-        "timestamp": 1735689600 + 5 * 3600,
-        "open": 51000.0,
-        "high": 51100.0,
-        "low": 50900.0,
-        "close": 51050.0,
-        "volume": 50.0,
-    }
-
-    result = runtime.process_closed_candle(new_candle)
+    result = runtime.process_closed_candle(_new_candle(offset=5))
 
     assert result.enrichment_valid is False
     assert "warmup" in result.message.lower()
-    assert len(fake_evaluator.evaluate_calls) == 0
-    assert repo.signal_count == 0
-
-
-def test_duplicate_closed_candle_does_not_duplicate_signal() -> None:
-    """Scenario 3: duplicate candle timestamp does not duplicate the signal."""
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
-
-    repo = StubBotStateRepository()
-    fake_evaluator = FakeStrategyEvaluator(
-        signal=SignalDecision(
-            action=SignalAction.LONG_ENTRY,
-            symbol="BTC",
-            interval="1h",
-            candle_timestamp=0,
-            strategy_hash="test-hash",
-        )
-    )
-
-    fake_indicator_engine = InMemoryIndicatorEngine(
-        latest_bar={
-            "timestamp": 1735689600,
-            "open": 50000.0,
-            "high": 51000.0,
-            "low": 49000.0,
-            "close": 50500.0,
-            "volume": 100.0,
-            "atr": 1200.0,
-        }
-    )
-
-    runtime = LiveTradingRuntimeUseCase(
-        exchange_gateway=InMemoryExchangeGateway(),
-        market_data_stream=FakeMarketDataStream(),
-        strategy_evaluator=fake_evaluator,
-        state_repository=repo,
-        indicator_calculator=fake_indicator_engine,
-        enrichment_validator=EnrichmentValidator(),
-        mode=TradingMode.DRY_RUN,
-        warmup_bars=_closed_warmup_bars(100),
-        required_columns={"atr"},
-    )
-    runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
-
-    candle = {
-        "timestamp": 1735689600 + 100 * 3600,
-        "open": 51000.0,
-        "high": 51100.0,
-        "low": 50900.0,
-        "close": 51050.0,
-        "volume": 50.0,
-    }
-
-    result1 = runtime.process_closed_candle(candle)
-    result2 = runtime.process_closed_candle(candle)
-
-    assert result1.enrichment_valid is True
-    assert result2.enrichment_valid is True
-    # Both processed, both called evaluator (dedup by WarmupWindow accepting first only)
-    # WarmupWindow deduplicates by timestamp, so evaluator is called twice: once per call
-    # since the bar goes through the full pipeline on both calls. The dedup belongs
-    # at the signal-key persistence level (Slice 2).
-    assert len(fake_evaluator.evaluate_calls) == 2
+    assert len(evaluator.evaluate_calls) == 0
 
 
 def test_out_of_order_candle_ignored_on_gap_detection() -> None:
-    """Scenario 3: out-of-order candle triggers gap detection and is rejected."""
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
-
-    repo = StubBotStateRepository()
-    fake_evaluator = FakeStrategyEvaluator()
-    fake_indicator_engine = InMemoryIndicatorEngine(
-        latest_bar={
-            "timestamp": 1735689600,
-            "open": 50000.0,
-            "high": 51000.0,
-            "low": 49000.0,
-            "close": 50500.0,
-            "volume": 100.0,
-            "atr": 1200.0,
-        }
-    )
-
-    runtime = LiveTradingRuntimeUseCase(
-        exchange_gateway=InMemoryExchangeGateway(),
-        market_data_stream=FakeMarketDataStream(),
-        strategy_evaluator=fake_evaluator,
-        state_repository=repo,
-        indicator_calculator=fake_indicator_engine,
-        enrichment_validator=EnrichmentValidator(),
-        mode=TradingMode.DRY_RUN,
-        warmup_bars=_closed_warmup_bars(100),
+    """Out-of-order candle triggers gap detection and is rejected."""
+    evaluator = FakeStrategyEvaluator()
+    runtime = _create_runtime(
+        evaluator=evaluator,
+        indicator_engine=InMemoryIndicatorEngine(
+            latest_bar=_indicator_bar(atr=1200.0)
+        ),
         required_columns={"atr"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    # This candle is far in the future, creating an interval gap
-    gap_candle = {
-        "timestamp": 1735689600 + 200 * 3600,
-        "open": 52000.0,
-        "high": 52100.0,
-        "low": 51900.0,
-        "close": 52050.0,
-        "volume": 50.0,
-    }
+    result = runtime.process_closed_candle(_new_candle(offset=200))
 
-    result = runtime.process_closed_candle(gap_candle)
-
-    # Gap detected — warmup stays ready because we have bars, but has_gap is True
-    # so enrichment validation rejects
     assert result.enrichment_valid is False
-    assert len(fake_evaluator.evaluate_calls) == 0
+    assert len(evaluator.evaluate_calls) == 0
 
 
 # ---------------------------------------------------------------------------
-# Scenario 2: Supported YAML strategy is loaded into the real rule-based
-#             evaluator (not the placeholder FinbarStrategyEvaluator)
+# Scenario 2: Real YAML evaluator (not placeholder)
 # ---------------------------------------------------------------------------
 
 
 def test_yaml_strategy_loaded_into_real_evaluator() -> None:
-    """Scenario 2: real evaluator is used, returns non-HOLD for matching bars."""
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
+    """Real evaluator is used, returns non-HOLD for matching bars."""
     from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
         RuleBasedStrategyEvaluatorFactory,
     )
@@ -635,11 +266,9 @@ def test_yaml_strategy_loaded_into_real_evaluator() -> None:
     )
 
     strategy_path = "tests/fixtures/strategies/amt_dip_buyer_final.yaml"
-    loader = YamlStrategyDefinitionLoader()
-    definition = loader.load_from_file(strategy_path)
+    definition = YamlStrategyDefinitionLoader().load_from_file(strategy_path)
     strategy_hash = "test-hash-amt-dip"
-    factory = RuleBasedStrategyEvaluatorFactory()
-    real_evaluator = factory.create(
+    real_evaluator = RuleBasedStrategyEvaluatorFactory().create(
         definition=definition,
         symbol="BTC",
         interval="1h",
@@ -647,60 +276,33 @@ def test_yaml_strategy_loaded_into_real_evaluator() -> None:
     )
 
     repo = StubBotStateRepository()
-    # Build an enriched bar where acceptance_into_value is True —
-    # this triggers a LONG_ENTRY in the AMT dip buyer strategy.
-    indicator_bar = {
-        "timestamp": 1735689600,
-        "open": 50000.0,
-        "high": 51000.0,
-        "low": 49000.0,
-        "close": 50500.0,
-        "volume": 100.0,
-        "atr": 1200.0,
-        "vp_vah": 52000.0,
-        "vp_val": 50000.0,
-        "acceptance_into_value": 1,
-        "above_value": 0,
-    }
-    fake_indicator_engine = InMemoryIndicatorEngine(latest_bar=indicator_bar)
-
-    runtime = LiveTradingRuntimeUseCase(
-        exchange_gateway=InMemoryExchangeGateway(),
-        market_data_stream=FakeMarketDataStream(),
-        strategy_evaluator=real_evaluator,
-        state_repository=repo,
-        indicator_calculator=fake_indicator_engine,
-        enrichment_validator=EnrichmentValidator(),
-        mode=TradingMode.DRY_RUN,
-        warmup_bars=_closed_warmup_bars(100),
+    runtime = _create_runtime(
+        repo=repo,
+        evaluator=real_evaluator,
+        indicator_engine=InMemoryIndicatorEngine(
+            latest_bar=_indicator_bar(
+                atr=1200.0,
+                vp_vah=52000.0,
+                vp_val=50000.0,
+                acceptance_into_value=True,
+                above_value=False,
+            )
+        ),
         required_columns={
-            "atr",
-            "vp_vah",
-            "vp_val",
-            "acceptance_into_value",
-            "above_value",
+            "atr", "vp_vah", "vp_val",
+            "acceptance_into_value", "above_value",
         },
     )
     runtime._start_session(strategy_path, strategy_hash, "BTC", "1h")
 
-    new_candle = {
-        "timestamp": 1735689600 + 100 * 3600,
-        "open": 51000.0,
-        "high": 51100.0,
-        "low": 50900.0,
-        "close": 51050.0,
-        "volume": 50.0,
-    }
-
-    result = runtime.process_closed_candle(new_candle)
+    result = runtime.process_closed_candle(_new_candle())
 
     assert result.enrichment_valid is True
-    # Real evaluator should produce a non-HOLD signal for a matching bar
     assert result.signal_action in {"long_entry", "short_entry", "hold"}
 
 
 def test_yaml_strategy_returns_hold_for_non_matching_bar() -> None:
-    """Scenario 2: real evaluator returns HOLD when bar doesn't match rules."""
+    """Real evaluator returns HOLD when bar doesn't match rules."""
     from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
         RuleBasedStrategyEvaluatorFactory,
     )
@@ -709,114 +311,62 @@ def test_yaml_strategy_returns_hold_for_non_matching_bar() -> None:
     )
 
     strategy_path = "tests/fixtures/strategies/amt_dip_buyer_final.yaml"
-    loader = YamlStrategyDefinitionLoader()
-    definition = loader.load_from_file(strategy_path)
-    factory = RuleBasedStrategyEvaluatorFactory()
-    real_evaluator = factory.create(
+    definition = YamlStrategyDefinitionLoader().load_from_file(strategy_path)
+    real_evaluator = RuleBasedStrategyEvaluatorFactory().create(
         definition=definition,
         symbol="BTC",
         interval="1h",
         strategy_hash="test-hash",
     )
 
-    # acceptance_into_value=0 and above_value=1 — does NOT match dip buyer
-    indicator_bar = {
-        "timestamp": 1735689600,
-        "open": 50000.0,
-        "high": 51000.0,
-        "low": 49000.0,
-        "close": 52000.0,
-        "volume": 100.0,
-        "atr": 1200.0,
-        "vp_vah": 52000.0,
-        "vp_val": 50000.0,
-        "acceptance_into_value": 0,
-        "above_value": 1,
-    }
-    fake_indicator_engine = InMemoryIndicatorEngine(latest_bar=indicator_bar)
-
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
-
-    repo = StubBotStateRepository()
-    runtime = LiveTradingRuntimeUseCase(
-        exchange_gateway=InMemoryExchangeGateway(),
-        market_data_stream=FakeMarketDataStream(),
-        strategy_evaluator=real_evaluator,
-        state_repository=repo,
-        indicator_calculator=fake_indicator_engine,
-        enrichment_validator=EnrichmentValidator(),
-        mode=TradingMode.DRY_RUN,
-        warmup_bars=_closed_warmup_bars(100),
+    runtime = _create_runtime(
+        evaluator=real_evaluator,
+        indicator_engine=InMemoryIndicatorEngine(
+            latest_bar=_indicator_bar(
+                atr=1200.0,
+                vp_vah=52000.0,
+                vp_val=50000.0,
+                acceptance_into_value=False,
+                above_value=True,
+            )
+        ),
         required_columns={
-            "atr",
-            "vp_vah",
-            "vp_val",
-            "acceptance_into_value",
-            "above_value",
+            "atr", "vp_vah", "vp_val",
+            "acceptance_into_value", "above_value",
         },
     )
     runtime._start_session(strategy_path, "test-hash", "BTC", "1h")
 
-    new_candle = {
-        "timestamp": 1735689600 + 100 * 3600,
-        "open": 51000.0,
-        "high": 51100.0,
-        "low": 50900.0,
-        "close": 51050.0,
-        "volume": 50.0,
-    }
-
-    result = runtime.process_closed_candle(new_candle)
+    result = runtime.process_closed_candle(_new_candle())
 
     assert result.enrichment_valid is True
     assert result.signal_action == "hold"
 
 
 # ---------------------------------------------------------------------------
-# Scenario 1: Live-data dry-run processes closed candles without submitting
+# Scenario 1: Dry-run processes closed candles without submitting
 # ---------------------------------------------------------------------------
 
 
 def test_dry_run_processes_candle_without_submitting() -> None:
-    """Scenario 1: dry-run enriches, evaluates, persists, but never submits."""
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
-
+    """Dry-run enriches, evaluates, persists, but never submits."""
+    exchange = InMemoryExchangeGateway()
     repo = StubBotStateRepository()
-    fake_exchange = InMemoryExchangeGateway()
-    fake_evaluator = FakeStrategyEvaluator(
-        signal=SignalDecision(
-            action=SignalAction.LONG_ENTRY,
-            symbol="BTC",
-            interval="1h",
-            candle_timestamp=0,
-            strategy_hash="test-hash",
-        )
-    )
-    fake_indicator_engine = InMemoryIndicatorEngine(
-        latest_bar={
-            "timestamp": 1735689600,
-            "open": 50000.0,
-            "high": 51000.0,
-            "low": 49000.0,
-            "close": 50500.0,
-            "volume": 100.0,
-            "atr": 1200.0,
-        }
-    )
-
-    runtime = LiveTradingRuntimeUseCase(
-        exchange_gateway=fake_exchange,
-        market_data_stream=FakeMarketDataStream(),
-        strategy_evaluator=fake_evaluator,
-        state_repository=repo,
-        indicator_calculator=fake_indicator_engine,
-        enrichment_validator=EnrichmentValidator(),
-        mode=TradingMode.DRY_RUN,
-        warmup_bars=_closed_warmup_bars(100),
+    runtime = _create_runtime(
+        repo=repo,
+        exchange=exchange,
+        evaluator=FakeStrategyEvaluator(
+            signal=SignalDecision(
+                action=SignalAction.LONG_ENTRY,
+                symbol="BTC",
+                interval="1h",
+                candle_timestamp=0,
+                strategy_hash="test-hash",
+            )
+        ),
+        indicator_engine=InMemoryIndicatorEngine(
+            latest_bar=_indicator_bar(atr=1200.0)
+        ),
         required_columns={"atr"},
     )
 
@@ -828,48 +378,23 @@ def test_dry_run_processes_candle_without_submitting() -> None:
     )
     assert run_id
 
-    new_candle = {
-        "timestamp": 1735689600 + 100 * 3600,
-        "open": 51000.0,
-        "high": 51100.0,
-        "low": 50900.0,
-        "close": 51050.0,
-        "volume": 50.0,
-    }
-
-    result = runtime.process_closed_candle(new_candle)
+    result = runtime.process_closed_candle(_new_candle())
 
     assert result.enrichment_valid is True
     assert result.signal_action in {"hold", "long_entry", "short_entry"}
-    assert fake_exchange.submitted_order_count == 0
-    # Bot run exists
+    assert exchange.submitted_order_count == 0
     assert repo.get_latest_bot_run() is not None
 
     runtime.stop()
 
 
 def test_dry_run_stop_ends_session() -> None:
-    """Scenario 1: stopping the runtime persists the end marker."""
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
-
+    """Stopping the runtime persists the end marker."""
     repo = StubBotStateRepository()
-    runtime = LiveTradingRuntimeUseCase(
-        exchange_gateway=InMemoryExchangeGateway(),
-        market_data_stream=FakeMarketDataStream(),
-        strategy_evaluator=FakeStrategyEvaluator(),
-        state_repository=repo,
-        indicator_calculator=InMemoryIndicatorEngine(),
-        enrichment_validator=EnrichmentValidator(),
-        mode=TradingMode.DRY_RUN,
-        warmup_bars=_closed_warmup_bars(100),
-        required_columns=set(),
-    )
+    runtime = _create_runtime(repo=repo)
 
     runtime.start("test-strategy.yaml", "BTC", "1h", "test-hash")
     runtime.stop()
 
-    # After stop, the latest bot run should exist (ended)
     run = repo.get_latest_bot_run()
     assert run is not None

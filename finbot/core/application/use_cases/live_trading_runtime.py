@@ -10,37 +10,36 @@ but delegates to domain services and infrastructure adapters.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
-from finbot.core.domain.dto.candle_processing_result import (
+from finbot.core.application.dto.candle_processing_result import (
     CandleProcessingResult,
 )
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
-from finbot.core.domain.entities.bot_event_type import BotEventType
 from finbot.core.domain.entities.bot_run import BotRun
-from finbot.core.domain.entities.position_direction import PositionDirection
-from finbot.core.domain.entities.position_snapshot import PositionSnapshot
-from finbot.core.domain.entities.processed_signal import ProcessedSignal
+from finbot.core.domain.entities.enrichment_validation_result import (
+    EnrichmentValidationResult,
+)
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
-from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.trading_mode import TradingMode
+from finbot.core.domain.interfaces.bar_frame_converter import (
+    BarFrameConverter,
+)
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
+)
+from finbot.core.domain.interfaces.enrichment_validator import (
+    EnrichmentValidator,
 )
 from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 from finbot.core.domain.interfaces.indicator_calculator import (
     IndicatorCalculator,
 )
-from finbot.core.domain.interfaces.bar_frame_converter import (
-    BarFrameConverter,
-)
 from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
-)
-from finbot.core.domain.services.enrichment_validator import (
-    EnrichmentValidator,
 )
 from finbot.core.domain.services.warmup_window import WarmupWindow
 
@@ -64,8 +63,8 @@ class LiveTradingRuntimeUseCase:
         state_repository: BotStateRepository,
         indicator_calculator: IndicatorCalculator,
         enrichment_validator: EnrichmentValidator,
+        bar_frame_converter: BarFrameConverter,
         mode: TradingMode,
-        bar_frame_converter: BarFrameConverter | None = None,
         warmup_bars: list[dict[str, Any]] | None = None,
         required_columns: set[str] | None = None,
     ) -> None:
@@ -100,10 +99,7 @@ class LiveTradingRuntimeUseCase:
         interval: str,
         strategy_hash: str = "",
     ) -> str:
-        """Start the runtime session.
-
-        Returns the bot run id.
-        """
+        """Start the runtime session. Returns the bot run id."""
         self._start_session(
             strategy_name=strategy_path,
             strategy_hash=strategy_hash,
@@ -119,22 +115,11 @@ class LiveTradingRuntimeUseCase:
             self._started = False
 
     def process_closed_candle(self, candle: dict[str, Any]) -> CandleProcessingResult:
-        """Process a single closed candle through the full pipeline.
-
-        1. Append to WarmupWindow.
-        2. Enrich with indicators.
-        3. Validate enriched bar quality.
-        4. If valid, evaluate strategy.
-        5. If signal (not HOLD), plan order and run risk gates.
-        6. Persist decisions.
-        """
-        ts = candle.get("timestamp", 0)
-        if isinstance(ts, float):
-            ts = int(ts)
+        """Process a single closed candle through the full pipeline."""
+        ts = _normalize_ts(candle)
 
         # 1. Warmup
         self._warmup.append(candle)
-
         if not self._warmup.is_ready():
             return CandleProcessingResult(
                 candle_timestamp=ts,
@@ -144,16 +129,7 @@ class LiveTradingRuntimeUseCase:
             )
 
         # 2. Enrich
-        bars = self._warmup.bars
-        if self._bar_converter is not None:
-            df = self._bar_converter.bars_to_frame(bars)
-        else:
-            import pandas as pd
-
-            df = pd.DataFrame(bars)
-        enriched = self._indicator_calc.calculate(
-            df, list(self._required_columns)
-        )
+        enriched = self._enrich_bars()
         if enriched.empty:
             return CandleProcessingResult(
                 candle_timestamp=ts,
@@ -161,7 +137,6 @@ class LiveTradingRuntimeUseCase:
                 enrichment_errors=["indicator engine returned empty result"],
                 message="enrichment failed — empty result",
             )
-
         latest = enriched.iloc[-1].to_dict()
 
         # 3. Validate enrichment
@@ -171,19 +146,8 @@ class LiveTradingRuntimeUseCase:
             warmup_ready=self._warmup.is_ready(),
             has_gap=self._warmup.has_gap,
         )
-
         if not validation.valid:
-            self._persist_enrichment_rejection(ts, validation)
-            return CandleProcessingResult(
-                candle_timestamp=ts,
-                enrichment_valid=False,
-                enrichment_errors=(
-                    validation.missing_columns
-                    + validation.non_finite_columns
-                    + validation.invalid_type_columns
-                ),
-                message=validation.reason,
-            )
+            return self._handle_enrichment_rejection(ts, validation)
 
         # 4. Evaluate strategy
         position = self._exchange.get_position(self._symbol or "DEFAULT")
@@ -203,7 +167,7 @@ class LiveTradingRuntimeUseCase:
         """
         return {"status": "acknowledged", "event": str(event)[:80]}
 
-    # -- internal ------------------------------------------------------------
+    # -- internal pipeline steps ---------------------------------------------
 
     def _start_session(
         self,
@@ -228,29 +192,27 @@ class LiveTradingRuntimeUseCase:
         self._bot_run_id = bot_run.run_id
         self._started = True
 
-    def _persist_enrichment_rejection(
+    def _enrich_bars(self) -> Any:
+        """Convert warmup bars to a DataFrame and compute indicators."""
+        bars = self._warmup.bars
+        df = self._bar_converter.bars_to_frame(bars)
+        return self._indicator_calc.calculate(df, list(self._required_columns))
+
+    def _handle_enrichment_rejection(
         self,
         candle_ts: int,
-        validation: object,
-    ) -> None:
-        """Record an enrichment validation failure as a risk and audit event."""
-        from finbot.core.domain.entities.enrichment_validation_result import (
-            EnrichmentValidationResult,
+        validation: EnrichmentValidationResult,
+    ) -> CandleProcessingResult:
+        """Persist rejection and return a failed processing result."""
+        self._repo.record_risk_event(
+            RiskEventRecord(
+                bot_run_id=self._bot_run_id,
+                event_type="enrichment_validation",
+                signal_key="",
+                decision="rejected",
+                reason=validation.reason,
+            )
         )
-
-        if not isinstance(validation, EnrichmentValidationResult):
-            return
-        risk_event = RiskEventRecord(
-            bot_run_id=self._bot_run_id,
-            event_type="enrichment_validation",
-            signal_key="",
-            decision="rejected",
-            reason=validation.reason,
-        )
-        self._repo.record_risk_event(risk_event)
-
-        import json
-
         self._repo.append_audit_log(
             AuditLogEntry(
                 bot_run_id=self._bot_run_id,
@@ -266,3 +228,23 @@ class LiveTradingRuntimeUseCase:
                 ),
             )
         )
+        return CandleProcessingResult(
+            candle_timestamp=candle_ts,
+            enrichment_valid=False,
+            enrichment_errors=(
+                validation.missing_columns
+                + validation.non_finite_columns
+                + validation.invalid_type_columns
+            ),
+            message=validation.reason,
+        )
+
+
+# -- module-level helpers -----------------------------------------------------
+
+
+def _normalize_ts(candle: dict[str, Any]) -> int:
+    ts = candle.get("timestamp", 0)
+    if isinstance(ts, float):
+        return int(ts)
+    return int(ts)
