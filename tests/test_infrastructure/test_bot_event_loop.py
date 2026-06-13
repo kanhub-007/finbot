@@ -185,3 +185,35 @@ class TestBotEventLoop:
 
         loop.stop()
         t.join(timeout=2)
+
+
+def test_stop_enqueues_shutdown_sentinel() -> None:
+    """P11: stop() wakes a blocked loop immediately via a SHUTDOWN event."""
+    from finbot.core.domain.entities.bot_event_type import BotEventType
+    from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
+    from tests.fakes import FakeMarketDataStream
+
+    queue = _CountingQueue()
+    loop = BotEventLoop(queue, FakeMarketDataStream())
+    loop.stop()
+
+    assert queue.enqueued, "stop() must enqueue a SHUTDOWN event"
+    assert queue.enqueued[-1].type == BotEventType.SHUTDOWN
+
+
+class _CountingQueue:
+    def __init__(self) -> None:
+        self.enqueued: list = []
+
+    def enqueue(self, event) -> bool:
+        self.enqueued.append(event)
+        return True
+
+    def dequeue(self, timeout=None):
+        return None
+
+    def size(self) -> int:
+        return 0
+
+    def clear(self) -> None:
+        pass

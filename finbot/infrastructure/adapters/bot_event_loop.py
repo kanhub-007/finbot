@@ -101,8 +101,17 @@ class BotEventLoop(BotLoop):
         self._flush()
 
     def stop(self) -> None:
-        """Signal the event loop to shut down gracefully."""
+        """Signal the event loop to shut down gracefully.
+
+        Enqueues a sentinel ``SHUTDOWN`` event so a loop blocked on
+        ``dequeue(timeout=1.0)`` wakes immediately instead of waiting up
+        to 1 second for the next poll.
+        """
         self._running = False
+        from finbot.core.domain.entities.bot_event import BotEvent
+        from finbot.core.domain.entities.bot_event_type import BotEventType
+
+        self._queue.enqueue(BotEvent(type=BotEventType.SHUTDOWN, data={}))
 
     # -- internal -----------------------------------------------------------
 
