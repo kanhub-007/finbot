@@ -176,25 +176,13 @@ finbot run --strategy dip.yaml --symbol ETH  --interval 1h &
 
 ---
 
-## HIP-3 Vault Support
-
-HIP-3 vault trading is supported via `FINBOT_HYPERLIQUID_VAULT_ADDRESS`.
-When set, the exchange gateway authenticates as the vault address for order
-submission. Set it in `.env`:
-
-```env
-FINBOT_HYPERLIQUID_VAULT_ADDRESS=0x...
-```
-
-The private key must belong to an authorized vault agent.
-
----
-
 ## Perpetuals (Perps)
 
-Finbot trades Hyperliquid perps by default — the `Exchange` SDK class handles
-perpetual futures. No additional configuration needed. Spot trading is not
-currently supported.
+Finbot trades Hyperliquid perpetual futures by default. Spot trading is not
+supported. Authentication has two modes:
+
+- **Personal wallet**: set `FINBOT_HYPERLIQUID_PRIVATE_KEY` and `FINBOT_HYPERLIQUID_ACCOUNT_ADDRESS`
+- **HIP-3 vault agent**: also set `FINBOT_HYPERLIQUID_VAULT_ADDRESS` to trade on behalf of a vault.  The private key must belong to an authorized vault agent.
 
 ---
 
