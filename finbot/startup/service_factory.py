@@ -223,7 +223,11 @@ def create_live_trading_runtime_use_case(
     )
 
     trading_mode = TradingMode(mode)
+    settings = Settings()
     if trading_mode in (TradingMode.TESTNET, TradingMode.LIVE):
+        repo = create_bot_state_repository()
+    elif settings.database_path and settings.database_path not in ("data/finbot.db", ""):
+        # Dry-run with explicit database path — use SQLite for persistent audit
         repo = create_bot_state_repository()
     else:
         repo = create_in_memory_repository()
@@ -236,7 +240,6 @@ def create_live_trading_runtime_use_case(
             HyperliquidMarketDataStream,
         )
 
-        settings = Settings()
         stream = HyperliquidMarketDataStream(
             stale_data_seconds=settings.stale_data_seconds,
         )
@@ -262,7 +265,7 @@ def create_live_trading_runtime_use_case(
     required_columns = {ind.name for ind in definition.indicators}
 
     return LiveTradingRuntimeUseCase(
-        exchange_gateway=_build_exchange_gateway(Settings(), trading_mode),
+        exchange_gateway=_build_exchange_gateway(settings, trading_mode),
         market_data_stream=stream,
         strategy_evaluator=evaluator,
         state_repository=repo,

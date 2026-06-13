@@ -91,6 +91,13 @@ Unsupported strategy features are rejected at startup with a clear explanation.
 | `testnet` | Yes (Hyperliquid testnet) | Private key | Live testnet execution |
 | `live` | Yes (Hyperliquid mainnet) | Private key + ACK | Real-money trading |
 
+**Dry-run persistence**: by default dry-run uses in-memory storage (lost on exit).
+To persist signals and audit trail across runs, set a custom database path:
+
+```env
+FINBOT_DATABASE_URL=sqlite:///data/finbot_dry.db
+```
+
 ---
 
 ## Commands
