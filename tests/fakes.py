@@ -58,6 +58,11 @@ from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
+from finbot.core.domain.entities.order_intent import OrderIntent
+from finbot.core.domain.entities.position_direction import PositionDirection
+from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+from finbot.core.domain.entities.signal_action import SignalAction
+from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.interfaces.bar_frame_converter import (
     BarFrameConverter,
 )
@@ -69,6 +74,9 @@ from finbot.core.domain.interfaces.indicator_calculator import (
     IndicatorCalculator,
 )
 from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
+from finbot.core.domain.interfaces.market_metadata_provider import (
+    MarketMetadataProvider,
+)
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
 )
@@ -313,3 +321,64 @@ class StubBotStateRepository(BotStateRepository):
 
     def last_audit_event(self):
         return self._audit_entries[-1] if self._audit_entries else None
+
+
+# ---------------------------------------------------------------------------
+# Market metadata provider fake
+# ---------------------------------------------------------------------------
+
+
+class InMemoryMarketMetadataProvider(MarketMetadataProvider):
+    """Fake market metadata provider with pre-configured symbol info."""
+
+    def __init__(self, metadata: dict | None = None) -> None:
+        from finbot.core.domain.entities.market_metadata import MarketMetadata
+        self._data: dict[str, MarketMetadata] = metadata or {}
+
+    def get_metadata(self, symbol: str):
+        return self._data.get(symbol)
+
+    @classmethod
+    def for_btc(cls) -> "InMemoryMarketMetadataProvider":
+        from decimal import Decimal
+        from finbot.core.domain.entities.market_metadata import MarketMetadata
+
+        return cls(
+            {
+                "BTC": MarketMetadata(
+                    symbol="BTC",
+                    sz_decimals=5,
+                    price_tick=Decimal("0.1"),
+                    min_size=Decimal("0.00001"),
+                    max_leverage=50,
+                )
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
+# Exchange gateway fake for testnet
+# ---------------------------------------------------------------------------
+
+
+class FakeExchangeGateway(InMemoryExchangeGateway):
+    """Exchange fake for testnet — records submitted intents with responses."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.submitted_intents: list = []
+        self.submitted_responses: list[dict] = []
+
+    def submit_order(self, intent) -> dict:
+        self.submitted_order_count += 1
+        self.submitted_intents.append(intent)
+        resp = {
+            "status": "ok",
+            "symbol": intent.symbol,
+            "side": intent.side.value,
+            "size": str(intent.size),
+            "order_id": f"test-oid-{self.submitted_order_count}",
+            "cloid": intent.cloid or "",
+        }
+        self.submitted_responses.append(resp)
+        return resp

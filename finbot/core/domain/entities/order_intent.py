@@ -1,6 +1,6 @@
 """Domain entity describing a desired exchange order."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from finbot.core.domain.entities.order_side import OrderSide
@@ -21,3 +21,10 @@ class OrderIntent:
     stop_price: Decimal | None = None
     target_price: Decimal | None = None
     cloid: str | None = None
+
+    def with_cloid(self, cloid: str) -> "OrderIntent":
+        """Return a copy of this intent with *cloid* set.
+
+        Safe for frozen dataclasses — uses ``dataclasses.replace``.
+        """
+        return replace(self, cloid=cloid)

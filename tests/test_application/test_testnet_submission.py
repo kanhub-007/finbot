@@ -1,24 +1,11 @@
 """Tests for Slice 3 — testnet order normalization, cloid, and submission."""
 
-import json
 from decimal import Decimal
 
 from finbot.core.domain.entities.market_metadata import MarketMetadata
-from finbot.core.domain.entities.order_intent import OrderIntent
-from finbot.core.domain.entities.order_response_record import (
-    OrderResponseRecord,
-)
-from finbot.core.domain.entities.order_side import OrderSide
-from finbot.core.domain.entities.order_type import OrderType
-from finbot.core.domain.entities.position_direction import PositionDirection
-from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.entities.trading_mode import TradingMode
-from finbot.core.domain.interfaces.market_metadata_provider import (
-    MarketMetadataProvider,
-)
-from finbot.core.domain.services.cloid_generator import CloidGenerator
 from finbot.core.domain.services.enrichment_validator import (
     EnrichmentValidator,
 )
@@ -29,72 +16,18 @@ from finbot.core.domain.services.risk_gates.duplicate_signal_gate import (
 )
 from finbot.core.domain.services.risk_gates.mode_gate import ModeGate
 from tests.fakes import (
+    FakeExchangeGateway,
     FakeStrategyEvaluator,
     InMemoryBarFrameConverter,
-    InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
+    InMemoryMarketMetadataProvider,
     StubBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     new_closed_candle,
 )
 
-
-# ---------------------------------------------------------------------------
-# Fake metadata provider
-# ---------------------------------------------------------------------------
-
-
-class InMemoryMarketMetadataProvider(MarketMetadataProvider):
-    """Fake market metadata provider with pre-configured symbol info."""
-
-    def __init__(self, metadata: dict[str, MarketMetadata] | None = None) -> None:
-        self._data = metadata or {}
-
-    def get_metadata(self, symbol: str) -> MarketMetadata | None:
-        return self._data.get(symbol)
-
-    @classmethod
-    def for_btc(cls) -> "InMemoryMarketMetadataProvider":
-        return cls(
-            {
-                "BTC": MarketMetadata(
-                    symbol="BTC",
-                    sz_decimals=5,
-                    price_tick=Decimal("0.1"),
-                    min_size=Decimal("0.00001"),
-                    max_leverage=50,
-                )
-            }
-        )
-
-
-# ---------------------------------------------------------------------------
-# Fake exchange for testnet — records submissions and returns structured responses
-# ---------------------------------------------------------------------------
-
-
-class FakeExchangeGateway(InMemoryExchangeGateway):
-    """Exchange fake for testnet — records submissions with structured responses."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.submitted_intents: list[OrderIntent] = []
-        self.submitted_responses: list[dict] = []
-
-    def submit_order(self, intent: OrderIntent) -> dict:
-        self.submitted_order_count += 1
-        self.submitted_intents.append(intent)
-        resp = {
-            "status": "ok",
-            "symbol": intent.symbol,
-            "side": intent.side.value,
-            "size": str(intent.size),
-            "order_id": f"test-oid-{self.submitted_order_count}",
-            "cloid": intent.cloid or "",
-        }
-        self.submitted_responses.append(resp)
-        return resp
+from finbot.core.domain.services.cloid_generator import CloidGenerator
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +52,7 @@ def _make_runtime(**overrides):
         if meta is not None:
             normalizer = OrderNormalizer(metadata=meta)
 
-    # Map short test keys to constructor parameter names
+    # Map test override keys to constructor parameter names
     key_map = {
         "metadata_provider": "market_metadata_provider",
         "normalizer": "order_normalizer",
@@ -154,8 +87,7 @@ def _make_runtime(**overrides):
         cloid_generator=CloidGenerator(),
     )
     for k, v in overrides.items():
-        if k in key_map or not k.startswith("_"):
-            kwargs[key_map.get(k, k)] = v
+        kwargs[key_map.get(k, k)] = v
     return LiveTradingRuntimeUseCase(**kwargs)
 
 
@@ -273,8 +205,7 @@ def test_reconciliation_record_persisted_after_testnet_submit() -> None:
     result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.submitted is True
-    # Reconciliation should be recorded
+    # Reconciliation should be recorded (placeholder, not yet fully reconciled)
     rec = repo.last_reconciliation()
     assert rec is not None
-    # Dry-run: position_matches should reflect current state
     assert isinstance(rec.position_matches, bool)

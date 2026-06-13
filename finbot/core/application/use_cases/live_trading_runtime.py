@@ -23,6 +23,7 @@ from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.enrichment_validation_result import (
     EnrichmentValidationResult,
 )
+from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_response_record import (
     OrderResponseRecord,
 )
@@ -54,9 +55,12 @@ from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
 )
+from finbot.core.domain.interfaces.cloid_generator import CloidGenerator
+from finbot.core.domain.interfaces.order_normalizer import OrderNormalizer
 from finbot.core.domain.interfaces.order_planner import OrderPlanner
-from finbot.core.domain.services.cloid_generator import CloidGenerator
-from finbot.core.domain.services.order_normalizer import OrderNormalizer
+from finbot.core.domain.services.order_normalizer import (
+    OrderNormalizationError,
+)
 from finbot.core.domain.services.warmup_window import WarmupWindow
 
 logger = logging.getLogger(__name__)
@@ -338,10 +342,10 @@ class LiveTradingRuntimeUseCase:
         intent_id = ""
         submitted = False
         if intent is not None:
-            # Generate cloid
+            # Generate cloid and stamp onto intent
             if self._cloid_gen is not None:
                 cloid = self._cloid_gen.generate(plan.signal_key)
-                intent = self._cloid_intent(intent, cloid)
+                intent = intent.with_cloid(cloid)
 
             intent_id = self._repo.record_order_intent(intent)
 
@@ -366,7 +370,7 @@ class LiveTradingRuntimeUseCase:
 
     def _submit_to_exchange(
         self,
-        intent: Any,
+        intent: OrderIntent,
         intent_id: str,
         candle_ts: int,
     ) -> bool:
@@ -381,7 +385,10 @@ class LiveTradingRuntimeUseCase:
         ref_price = Decimal(str(bar.get("close", 0)))
         try:
             normalized = self._order_normalizer.normalize(intent, ref_price)
-        except Exception:
+        except OrderNormalizationError as e:
+            logger.warning(
+                "Order normalization failed for intent %s: %s", intent_id, e
+            )
             return False
 
         # Submit
@@ -398,33 +405,17 @@ class LiveTradingRuntimeUseCase:
             )
         )
 
-        # Reconcile
+        # Reconcile — placeholder until actual exchange state comparison
         self._repo.record_reconciliation(
             ReconciliationRecord(
                 bot_run_id=self._bot_run_id,
-                position_matches=True,
-                open_orders_match=True,
-                details=f"post-submit for {intent_id}",
+                position_matches=False,
+                open_orders_match=False,
+                details=f"post-submit for {intent_id} (not yet reconciled)",
             )
         )
 
         return True
-
-    @staticmethod
-    def _cloid_intent(intent: Any, cloid: str) -> Any:
-        """Return a copy of intent with cloid set (works for frozen dataclass)."""
-        return type(intent)(
-            symbol=intent.symbol,
-            side=intent.side,
-            size=intent.size,
-            order_type=intent.order_type,
-            signal_key=intent.signal_key,
-            reduce_only=intent.reduce_only,
-            limit_price=intent.limit_price,
-            stop_price=intent.stop_price,
-            target_price=intent.target_price,
-            cloid=cloid,
-        )
 
 
 # -- module-level helpers -----------------------------------------------------

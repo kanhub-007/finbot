@@ -12,13 +12,16 @@ from finbot.core.domain.entities.market_metadata import MarketMetadata
 from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_side import OrderSide
 from finbot.core.domain.entities.order_type import OrderType
+from finbot.core.domain.interfaces.order_normalizer import (
+    OrderNormalizer as OrderNormalizerInterface,
+)
 
 
 class OrderNormalizationError(ValueError):
     """Raised when an order cannot be normalized to exchange requirements."""
 
 
-class OrderNormalizer:
+class OrderNormalizer(OrderNormalizerInterface):
     """Adjust order sizes and prices to meet exchange precision rules.
 
     Parameters

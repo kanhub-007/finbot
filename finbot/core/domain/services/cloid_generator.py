@@ -4,10 +4,12 @@ Pure domain service — produces collision-resistant, idempotent
 order IDs so the exchange gateway can safely retry submissions.
 """
 
-from uuid import uuid4
+from finbot.core.domain.interfaces.cloid_generator import (
+    CloidGenerator as CloidGeneratorInterface,
+)
 
 
-class CloidGenerator:
+class CloidGenerator(CloidGeneratorInterface):
     """Generate deterministic client order IDs for idempotent submission.
 
     Each call to ``generate()`` produces a unique ID.  When a strategy
@@ -16,14 +18,13 @@ class CloidGenerator:
     """
 
     def generate(self, signal_key: str = "", attempt: int = 0) -> str:
-        """Return a cloid string.
+        """Return a cloid string derived from the signal key.
 
         Args:
-            signal_key: Optional signal key to seed the cloid for
-                        deterministic reuse.
+            signal_key: Signal key used as the cloid prefix for
+                        deterministic reuse. Must be non-empty to
+                        guarantee idempotent retries.
             attempt: Retry attempt number appended as suffix.
         """
-        if signal_key:
-            safe = signal_key.replace(":", "_").replace(" ", "_")[:80]
-            return f"finbot_{safe}_{attempt}"
-        return f"finbot_{uuid4().hex[:8]}"
+        safe = signal_key.replace(":", "_").replace(" ", "_")[:80]
+        return f"finbot_{safe}_{attempt}"
