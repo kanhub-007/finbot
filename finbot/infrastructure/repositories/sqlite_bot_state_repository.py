@@ -325,6 +325,22 @@ class SqliteBotStateRepository(BotStateRepository):
         row = self._query_one("SELECT COUNT(*) FROM fills")
         return row[0] if row else 0
 
+    def has_fill(self, fill_id: str) -> bool:
+        row = self._query_one(
+            "SELECT 1 FROM fills WHERE fill_id = ?", (fill_id,)
+        )
+        return row is not None
+
+    def get_order_lifecycle(self, order_id: str):
+        raise NotImplementedError(
+            "Order lifecycle queries not yet supported in SQLite repository"
+        )
+
+    def save_order_lifecycle(self, lifecycle) -> None:
+        raise NotImplementedError(
+            "Order lifecycle persistence not yet supported in SQLite repository"
+        )
+
     @property
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:

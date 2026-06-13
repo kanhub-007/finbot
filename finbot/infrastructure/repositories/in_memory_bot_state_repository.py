@@ -34,6 +34,7 @@ class InMemoryBotStateRepository(BotStateRepository):
         self._reconciliations: list[ReconciliationRecord] = []
         self._risk_events: list[RiskEventRecord] = []
         self._audit_log: list[AuditLogEntry] = []
+        self._lifecycles: dict[str, object] = {}
 
     # -- bot run lifecycle --------------------------------------------------
 
@@ -120,3 +121,16 @@ class InMemoryBotStateRepository(BotStateRepository):
 
     def count_fills(self) -> int:
         return len(self._fills)
+
+    # -- fill idempotency ----------------------------------------------------
+
+    def has_fill(self, fill_id: str) -> bool:
+        return any(f.fill_id == fill_id for f in self._fills)
+
+    # -- order lifecycle -----------------------------------------------------
+
+    def get_order_lifecycle(self, order_id: str):
+        return self._lifecycles.get(order_id)
+
+    def save_order_lifecycle(self, lifecycle) -> None:
+        self._lifecycles[lifecycle.order_id] = lifecycle

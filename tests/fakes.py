@@ -276,12 +276,10 @@ class StubBotStateRepository(BotStateRepository):
         self._order_responses.append(response)
 
     def record_fill(self, fill) -> None:
-        from finbot.core.domain.entities.fill_record import FillRecord
-        if isinstance(fill, FillRecord) and fill.fill_id in self._fill_ids:
+        if fill.fill_id in self._fill_ids:
             return  # idempotent
         self._fills.append(fill)
-        if hasattr(fill, 'fill_id'):
-            self._fill_ids.add(fill.fill_id)
+        self._fill_ids.add(fill.fill_id)
 
     def record_reconciliation(self, rec) -> None:
         self._reconciliations.append(rec)

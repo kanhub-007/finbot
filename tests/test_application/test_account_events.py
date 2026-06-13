@@ -12,9 +12,6 @@ from finbot.core.domain.entities.trading_mode import TradingMode
 from finbot.core.domain.services.enrichment_validator import (
     EnrichmentValidator,
 )
-from finbot.core.domain.services.order_state_machine import (
-    OrderStateMachine,
-)
 from finbot.core.domain.services.risk_gates.duplicate_signal_gate import (
     DuplicateSignalGate,
 )

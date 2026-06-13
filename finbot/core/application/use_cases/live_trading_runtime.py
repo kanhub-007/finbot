@@ -242,8 +242,10 @@ class LiveTradingRuntimeUseCase:
                     OrderState.UNKNOWN_RECONCILE_REQUIRED,
                     f"unknown order status: {status}",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "Unknown status transition failed for %s: %s", order_id, e
+                )
             return {"status": "unknown_status", "reason": str(status)}
 
         try:
@@ -282,15 +284,21 @@ class LiveTradingRuntimeUseCase:
             OrderStateMachine.transition(
                 lifecycle, target, str(size)
             )
-        except Exception:
+        except Exception as e:
+            logger.warning("Fill transition failed for %s: %s", order_id, e)
             return {"status": "transition_rejected"}
+
+        # Derive side from lifecycle; fall back to event field
+        side = event.get("side", lifecycle.side if lifecycle.side != "unknown" else "")
+        if not side:
+            side = ""
 
         # Persist fill record
         fill = FillRecord(
             bot_run_id=self._bot_run_id,
             order_id=order_id,
             symbol=self._symbol or "DEFAULT",
-            side="buy",
+            side=side,
             size=size,
             price=price,
             fee=fee,
@@ -300,7 +308,7 @@ class LiveTradingRuntimeUseCase:
 
         return {"status": "processed"}
 
-    def _get_or_create_lifecycle(self, order_id: str) -> Any:
+    def _get_or_create_lifecycle(self, order_id: str) -> OrderLifecycle:
         """Return existing lifecycle or create a stub for reconciliation."""
         lifecycle = self._repo.get_order_lifecycle(order_id)
         if lifecycle is not None:

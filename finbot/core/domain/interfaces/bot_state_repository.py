@@ -107,3 +107,19 @@ class BotStateRepository(ABC):
     @abstractmethod
     def count_fills(self) -> int:
         """Total number of recorded fills."""
+
+    # -- fill idempotency ----------------------------------------------------
+
+    @abstractmethod
+    def has_fill(self, fill_id: str) -> bool:
+        """Return True if *fill_id* has already been recorded."""
+
+    # -- order lifecycle -----------------------------------------------------
+
+    @abstractmethod
+    def get_order_lifecycle(self, order_id: str):
+        """Return the lifecycle for *order_id*, or None."""
+
+    @abstractmethod
+    def save_order_lifecycle(self, lifecycle) -> None:
+        """Persist an order lifecycle state update."""
