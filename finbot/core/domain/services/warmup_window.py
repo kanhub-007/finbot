@@ -7,6 +7,7 @@ minimum number of bars has been accumulated with no gaps.
 
 from __future__ import annotations
 
+import bisect
 import statistics
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +37,7 @@ class WarmupWindow:
         self._max_length = max_length
         self._min_bars = min_bars
         self._bars: dict[int, dict[str, Any]] = {}
+        self._sorted_ts: list[int] = []
         self._has_gap = False
 
     # -- public API --------------------------------------------------------
@@ -45,6 +47,8 @@ class WarmupWindow:
         ts = self._normalise_timestamp(bar)
         if ts is None:
             return
+        if ts not in self._bars:
+            bisect.insort(self._sorted_ts, ts)
         self._bars[ts] = bar
         self._evict_oldest()
         self._detect_gap()
@@ -56,7 +60,7 @@ class WarmupWindow:
     @property
     def bars(self) -> list[dict[str, Any]]:
         """Return bars in ascending timestamp order."""
-        return [self._bars[k] for k in sorted(self._bars)]
+        return [self._bars[k] for k in self._sorted_ts]
 
     @property
     def count(self) -> int:
@@ -102,8 +106,9 @@ class WarmupWindow:
 
     def _evict_oldest(self) -> None:
         while len(self._bars) > self._max_length:
-            oldest = min(self._bars)
+            oldest = self._sorted_ts[0]
             del self._bars[oldest]
+            self._sorted_ts.pop(0)
 
     def _detect_gap(self) -> None:
         """Scan sorted timestamps; flag irregular intervals as gaps.
@@ -112,12 +117,11 @@ class WarmupWindow:
         expected cadence.  Any interval that deviates 50% or more from
         the median is treated as a gap.
         """
-        n = len(self._bars)
+        n = len(self._sorted_ts)
         if n < 2:
             self._has_gap = False
             return
-        timestamps = sorted(self._bars)
-        intervals = [timestamps[i + 1] - timestamps[i] for i in range(n - 1)]
+        intervals = [self._sorted_ts[i + 1] - self._sorted_ts[i] for i in range(n - 1)]
         expected = _median(intervals)
         if expected <= 0:
             self._has_gap = False
