@@ -39,6 +39,9 @@ class WarmupWindow:
         self._bars: dict[int, dict[str, Any]] = {}
         self._sorted_ts: list[int] = []
         self._has_gap = False
+        # Cached gap analysis — recomputed only when the window content changes
+        # (append/evict), not on every is_ready()/has_gap read on the hot path.
+        self._gap_dirty = True
 
     # -- public API --------------------------------------------------------
 
@@ -50,11 +53,13 @@ class WarmupWindow:
         if ts not in self._bars:
             bisect.insort(self._sorted_ts, ts)
         self._bars[ts] = bar
+        self._gap_dirty = True
         self._evict_oldest()
-        self._detect_gap()
+        self._detect_gap_if_dirty()
 
     def is_ready(self) -> bool:
         """True when at least ``min_bars`` consecutive bars exist."""
+        self._detect_gap_if_dirty()
         return len(self._bars) >= self._min_bars and not self._has_gap
 
     @property
@@ -85,6 +90,7 @@ class WarmupWindow:
     @property
     def has_gap(self) -> bool:
         """True when a non-consecutive interval was detected."""
+        self._detect_gap_if_dirty()
         return self._has_gap
 
     # -- internal -----------------------------------------------------------
@@ -112,10 +118,20 @@ class WarmupWindow:
             return None
 
     def _evict_oldest(self) -> None:
+        evicted = False
         while len(self._bars) > self._max_length:
             oldest = self._sorted_ts[0]
             del self._bars[oldest]
             self._sorted_ts.pop(0)
+            evicted = True
+        if evicted:
+            self._gap_dirty = True
+
+    def _detect_gap_if_dirty(self) -> None:
+        """Recompute the gap flag only when the window changed since last call."""
+        if self._gap_dirty:
+            self._detect_gap()
+            self._gap_dirty = False
 
     def _detect_gap(self) -> None:
         """Scan sorted timestamps; flag irregular intervals as gaps.
