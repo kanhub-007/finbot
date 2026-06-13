@@ -1,8 +1,55 @@
-"""Shared test fakes for live trading runtime tests.
+"""Shared test fakes and helpers for live trading runtime tests.
 
 Classical-school fakes: in-memory implementations with no mocks,
 suitable for outcome-based assertions.
 """
+
+
+# ---------------------------------------------------------------------------
+# Shared bar helpers
+# ---------------------------------------------------------------------------
+
+
+def closed_warmup_bars(count: int = 100) -> list[dict]:
+    """Generate synthetic closed warmup bars at 1h intervals."""
+    base_ts = 1735689600
+    return [
+        {
+            "timestamp": base_ts + i * 3600,
+            "open": 50000.0 + i * 10,
+            "high": 50200.0 + i * 10,
+            "low": 49800.0 + i * 10,
+            "close": 50100.0 + i * 10,
+            "volume": 100.0,
+        }
+        for i in range(count)
+    ]
+
+
+def new_closed_candle(offset: int = 100) -> dict:
+    """Build a closed candle at the given hourly offset from base."""
+    return {
+        "timestamp": 1735689600 + offset * 3600,
+        "open": 51000.0,
+        "high": 51100.0,
+        "low": 50900.0,
+        "close": 51050.0,
+        "volume": 50.0,
+    }
+
+
+def indicator_bar(**extra) -> dict:
+    """Build a minimal enriched bar with defaults, plus optional extras."""
+    base = {
+        "timestamp": 1735689600,
+        "open": 50000.0,
+        "high": 51000.0,
+        "low": 49000.0,
+        "close": 50500.0,
+        "volume": 100.0,
+    }
+    base.update(extra)
+    return base
 
 from decimal import Decimal
 from typing import Any
@@ -121,6 +168,18 @@ class InMemoryBarFrameConverter(BarFrameConverter):
 
     def frame_to_bars(self, frame) -> list[dict]:
         return frame.to_dict(orient="records")
+
+    def latest_bar(self, frame) -> dict:
+        import pandas as pd
+        if isinstance(frame, pd.DataFrame):
+            return frame.iloc[-1].to_dict()
+        return frame[-1] if isinstance(frame, list) and frame else {}
+
+    def is_empty(self, frame) -> bool:
+        import pandas as pd
+        if isinstance(frame, pd.DataFrame):
+            return frame.empty
+        return len(frame) == 0 if hasattr(frame, '__len__') else False
 
 
 # ---------------------------------------------------------------------------

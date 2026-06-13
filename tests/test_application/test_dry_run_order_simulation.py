@@ -25,51 +25,10 @@ from tests.fakes import (
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
     StubBotStateRepository,
+    closed_warmup_bars,
+    indicator_bar,
+    new_closed_candle,
 )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _closed_warmup_bars(count: int = 100) -> list[dict]:
-    base_ts = 1735689600
-    return [
-        {
-            "timestamp": base_ts + i * 3600,
-            "open": 50000.0 + i * 10,
-            "high": 50200.0 + i * 10,
-            "low": 49800.0 + i * 10,
-            "close": 50100.0 + i * 10,
-            "volume": 100.0,
-        }
-        for i in range(count)
-    ]
-
-
-def _new_candle(offset: int = 100) -> dict:
-    return {
-        "timestamp": 1735689600 + offset * 3600,
-        "open": 51000.0,
-        "high": 51100.0,
-        "low": 50900.0,
-        "close": 51050.0,
-        "volume": 50.0,
-    }
-
-
-def _indicator_bar(**extra) -> dict:
-    base = {
-        "timestamp": 1735689600,
-        "open": 50000.0,
-        "high": 51000.0,
-        "low": 49000.0,
-        "close": 50500.0,
-        "volume": 100.0,
-    }
-    base.update(extra)
-    return base
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +77,7 @@ class TrackingDryRunExchange(InMemoryExchangeGateway):
 
 
 # ---------------------------------------------------------------------------
-# Test helpers to build runtime instances
+# Test helper
 # ---------------------------------------------------------------------------
 
 
@@ -128,8 +87,8 @@ def _make_runtime(**overrides):
         LiveTradingRuntimeUseCase,
     )
 
-    repo = overrides.pop("state_repository", None) or StubBotStateRepository()
-    max_pos = overrides.pop("_max_position", Decimal("100000"))
+    repo = overrides.get("state_repository") or StubBotStateRepository()
+    max_pos = overrides.get("_max_position", Decimal("100000"))
 
     kwargs = dict(
         exchange_gateway=TrackingDryRunExchange("BTC"),
@@ -145,12 +104,12 @@ def _make_runtime(**overrides):
         ),
         state_repository=repo,
         indicator_calculator=InMemoryIndicatorEngine(
-            latest_bar=_indicator_bar(atr=1200.0)
+            latest_bar=indicator_bar(atr=1200.0)
         ),
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=TradingMode.DRY_RUN,
-        warmup_bars=_closed_warmup_bars(100),
+        warmup_bars=closed_warmup_bars(100),
         required_columns={"atr"},
         order_planner=OrderPlanner(
             gates=[
@@ -160,7 +119,10 @@ def _make_runtime(**overrides):
             ]
         ),
     )
-    kwargs.update(overrides)
+    # Apply overrides, filtering out internal-only keys
+    for k, v in overrides.items():
+        if not k.startswith("_"):
+            kwargs[k] = v
     return LiveTradingRuntimeUseCase(**kwargs)
 
 
@@ -172,14 +134,17 @@ def _make_runtime(**overrides):
 def test_dry_run_accepts_signal_and_increments_position() -> None:
     """Dry-run: accepted signal creates order intent and updates position."""
     exchange = TrackingDryRunExchange("BTC")
-    runtime = _make_runtime(exchange_gateway=exchange)
+    repo = StubBotStateRepository()
+    runtime = _make_runtime(
+        exchange_gateway=exchange, state_repository=repo
+    )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle())
+    result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.enrichment_valid is True
     assert result.signal_action == "long_entry"
-    assert runtime._repo.order_intent_count == 1  # type: ignore[union-attr]
+    assert repo.order_intent_count == 1
 
     pos = exchange.get_position("BTC")
     assert pos.direction == PositionDirection.LONG
@@ -195,7 +160,7 @@ def test_dry_run_duplicate_signal_is_rejected() -> None:
         state_repository=repo, exchange_gateway=exchange
     )
     first_runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
-    first_result = first_runtime.process_closed_candle(_new_candle())
+    first_result = first_runtime.process_closed_candle(new_closed_candle())
 
     assert first_result.signal_action == "long_entry"
     first_intent_count = repo.order_intent_count
@@ -206,7 +171,7 @@ def test_dry_run_duplicate_signal_is_rejected() -> None:
         state_repository=repo, exchange_gateway=exchange
     )
     second_runtime._start_session("test-strategy-2", "test-hash", "BTC", "1h")
-    second_result = second_runtime.process_closed_candle(_new_candle())
+    second_runtime.process_closed_candle(new_closed_candle())
 
     # Duplicate signal should be rejected — no new intent
     assert repo.order_intent_count == first_intent_count
@@ -220,7 +185,7 @@ def test_max_position_exceeded_rejects_entry() -> None:
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle())
+    result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.signal_action == "long_entry"
     assert repo.order_intent_count == 0
@@ -243,7 +208,7 @@ def test_hold_signal_creates_no_order_intent() -> None:
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle())
+    result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.signal_action == "hold"
     assert repo.order_intent_count == 0
@@ -255,7 +220,7 @@ def test_processed_signal_key_is_persisted() -> None:
     runtime = _make_runtime(state_repository=repo)
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle())
+    result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.signal_action == "long_entry"
     assert repo.count_signals() == 1

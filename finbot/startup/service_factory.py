@@ -216,7 +216,10 @@ def create_live_trading_runtime_use_case(
     )
 
     trading_mode = TradingMode(mode)
-    repo = create_in_memory_repository()
+    if trading_mode in (TradingMode.TESTNET, TradingMode.LIVE):
+        repo = create_bot_state_repository()
+    else:
+        repo = create_in_memory_repository()
     if live_data:
         from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
             HyperliquidMarketDataStream,
@@ -271,5 +274,10 @@ def _hash_strategy_file(path: str) -> str:
     """Return a hex digest of the strategy file contents."""
     import hashlib
 
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()[:16]
+    from finbot.core.domain.entities.strategy_load_error import StrategyLoadError
+
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()[:16]
+    except OSError as e:
+        raise StrategyLoadError(f"Cannot read strategy file for hashing: {e}") from e

@@ -22,7 +22,7 @@ from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.enrichment_validation_result import (
     EnrichmentValidationResult,
 )
-from finbot.core.domain.entities.order_intent import OrderIntent
+from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
 from finbot.core.domain.entities.signal_action import SignalAction
@@ -44,7 +44,7 @@ from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
 )
-from finbot.core.domain.services.order_planner import OrderPlanner
+from finbot.core.domain.interfaces.order_planner import OrderPlanner
 from finbot.core.domain.services.warmup_window import WarmupWindow
 
 logger = logging.getLogger(__name__)
@@ -136,14 +136,14 @@ class LiveTradingRuntimeUseCase:
 
         # 2. Enrich
         enriched = self._enrich_bars()
-        if enriched.empty:
+        if self._bar_converter.is_empty(enriched):
             return CandleProcessingResult(
                 candle_timestamp=ts,
                 enrichment_valid=False,
                 enrichment_errors=["indicator engine returned empty result"],
                 message="enrichment failed — empty result",
             )
-        latest = enriched.iloc[-1].to_dict()
+        latest = self._bar_converter.latest_bar(enriched)
 
         # 3. Validate enrichment
         validation = self._enrichment_validator.validate(
@@ -254,7 +254,7 @@ class LiveTradingRuntimeUseCase:
         self,
         signal: SignalDecision,
         bar: dict[str, Any],
-        position: Any,
+        position: PositionSnapshot,
         candle_ts: int,
     ) -> CandleProcessingResult:
         """Run risk gates, persist signal/intent, submit if mode allows."""

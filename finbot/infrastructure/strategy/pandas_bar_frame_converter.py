@@ -26,3 +26,11 @@ class PandasBarFrameConverter(BarFrameConverter):
             df[col] = df[col].dt.strftime("%Y-%m-%dT%H:%M:%S")
         df = df.where(pd.notna(df), None)
         return df.to_dict(orient="records")
+
+    def latest_bar(self, frame: pd.DataFrame) -> dict:
+        """Return the last row as a dict."""
+        return frame.iloc[-1].to_dict()
+
+    def is_empty(self, frame: pd.DataFrame) -> bool:
+        """True when the DataFrame has no rows or columns."""
+        return frame.empty

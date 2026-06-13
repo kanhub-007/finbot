@@ -15,10 +15,13 @@ from finbot.core.domain.entities.order_side import OrderSide
 from finbot.core.domain.entities.order_type import OrderType
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
+from finbot.core.domain.interfaces.order_planner import (
+    OrderPlanner as OrderPlannerInterface,
+)
 from finbot.core.domain.interfaces.risk_gate import RiskGate
 
 
-class OrderPlanner:
+class OrderPlanner(OrderPlannerInterface):
     """Plan an order from a strategy signal.
 
     Parameters

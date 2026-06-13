@@ -6,48 +6,21 @@ from finbot.core.domain.entities.trading_mode import TradingMode
 from finbot.core.domain.services.enrichment_validator import (
     EnrichmentValidator,
 )
-from finbot.core.domain.services.warmup_window import WarmupWindow
 from tests.fakes import (
-    FakeMarketDataStream,
     FakeStrategyEvaluator,
     InMemoryBarFrameConverter,
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
     StubBotStateRepository,
+    closed_warmup_bars,
+    indicator_bar,
+    new_closed_candle,
 )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _closed_warmup_bars(count: int = 100) -> list[dict]:
-    """Generate synthetic closed warmup bars at 1h intervals."""
-    base_ts = 1735689600
-    return [
-        {
-            "timestamp": base_ts + i * 3600,
-            "open": 50000.0 + i * 10,
-            "high": 50200.0 + i * 10,
-            "low": 49800.0 + i * 10,
-            "close": 50100.0 + i * 10,
-            "volume": 100.0,
-        }
-        for i in range(count)
-    ]
-
-
-def _new_candle(offset: int = 100) -> dict:
-    """Build a closed candle at the given hourly offset from base."""
-    return {
-        "timestamp": 1735689600 + offset * 3600,
-        "open": 51000.0,
-        "high": 51100.0,
-        "low": 50900.0,
-        "close": 51050.0,
-        "volume": 50.0,
-    }
 
 
 def _create_runtime(
@@ -59,37 +32,23 @@ def _create_runtime(
     mode=TradingMode.DRY_RUN,
     warmup_bars=None,
     required_columns=None,
-) -> "LiveTradingRuntimeUseCase":
+):
     from finbot.core.application.use_cases.live_trading_runtime import (
         LiveTradingRuntimeUseCase,
     )
 
     return LiveTradingRuntimeUseCase(
         exchange_gateway=exchange or InMemoryExchangeGateway(),
-        market_data_stream=FakeMarketDataStream(),
+        market_data_stream=None,  # type: ignore[arg-type]
         strategy_evaluator=evaluator or FakeStrategyEvaluator(),
         state_repository=repo or StubBotStateRepository(),
         indicator_calculator=indicator_engine or InMemoryIndicatorEngine(),
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=mode,
-        warmup_bars=warmup_bars or _closed_warmup_bars(100),
+        warmup_bars=warmup_bars or closed_warmup_bars(100),
         required_columns=required_columns or set(),
     )
-
-
-def _indicator_bar(**extra) -> dict:
-    """Build a minimal enriched bar with defaults."""
-    base = {
-        "timestamp": 1735689600,
-        "open": 50000.0,
-        "high": 51000.0,
-        "low": 49000.0,
-        "close": 50500.0,
-        "volume": 100.0,
-    }
-    base.update(extra)
-    return base
 
 
 # ---------------------------------------------------------------------------
@@ -100,32 +59,34 @@ def _indicator_bar(**extra) -> dict:
 def test_invalid_enriched_candle_blocked_before_evaluation() -> None:
     """Missing/non-finite enriched columns block strategy evaluation."""
     repo = StubBotStateRepository()
+    evaluator = FakeStrategyEvaluator(
+        signal=SignalDecision(
+            action=SignalAction.LONG_ENTRY,
+            symbol="BTC",
+            interval="1h",
+            candle_timestamp=0,
+            strategy_hash="test-hash",
+        )
+    )
     runtime = _create_runtime(
         repo=repo,
-        evaluator=FakeStrategyEvaluator(
-            signal=SignalDecision(
-                action=SignalAction.LONG_ENTRY,
-                symbol="BTC",
-                interval="1h",
-                candle_timestamp=0,
-                strategy_hash="test-hash",
-            )
-        ),
+        evaluator=evaluator,
         indicator_engine=InMemoryIndicatorEngine(
-            latest_bar=_indicator_bar(atr=float("nan"))
+            latest_bar=indicator_bar(atr=float("nan"))
         ),
         required_columns={"atr", "vp_vah"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle())
+    result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.enrichment_valid is False
     assert "atr" in result.enrichment_errors
     assert "vp_vah" in result.enrichment_errors
     assert repo.signal_count == 0
     assert repo.order_intent_count == 0
-    assert len(runtime._evaluator.evaluate_calls) == 0  # type: ignore[union-attr]
+    # Evaluator was never called
+    assert len(evaluator.evaluate_calls) == 0
 
 
 def test_optional_nan_does_not_block_evaluation() -> None:
@@ -143,15 +104,13 @@ def test_optional_nan_does_not_block_evaluation() -> None:
             )
         ),
         indicator_engine=InMemoryIndicatorEngine(
-            latest_bar=_indicator_bar(
-                atr=1200.0, vp_vah=52000.0, rsi_14=float("nan")
-            )
+            latest_bar=indicator_bar(atr=1200.0, vp_vah=52000.0, rsi_14=float("nan"))
         ),
         required_columns={"atr", "vp_vah"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle())
+    result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.enrichment_valid is True
     assert result.enrichment_errors == []
@@ -163,13 +122,13 @@ def test_validation_rejection_persisted_as_risk_event() -> None:
     runtime = _create_runtime(
         repo=repo,
         indicator_engine=InMemoryIndicatorEngine(
-            latest_bar=_indicator_bar(atr=None, vp_vah=float("inf"))
+            latest_bar=indicator_bar(atr=None, vp_vah=float("inf"))
         ),
         required_columns={"atr", "vp_vah"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle())
+    result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.enrichment_valid is False
     risk_event = repo.last_risk_event
@@ -186,32 +145,30 @@ def test_validation_rejection_persisted_as_risk_event() -> None:
 def test_latest_bar_includes_required_columns_after_enrichment() -> None:
     """Enriched latest bar contains all required indicator columns."""
     repo = StubBotStateRepository()
+    evaluator = FakeStrategyEvaluator(
+        signal=SignalDecision(
+            action=SignalAction.LONG_ENTRY,
+            symbol="BTC",
+            interval="1h",
+            candle_timestamp=0,
+            strategy_hash="test-hash",
+        )
+    )
     runtime = _create_runtime(
         repo=repo,
-        evaluator=FakeStrategyEvaluator(
-            signal=SignalDecision(
-                action=SignalAction.LONG_ENTRY,
-                symbol="BTC",
-                interval="1h",
-                candle_timestamp=0,
-                strategy_hash="test-hash",
-            )
-        ),
+        evaluator=evaluator,
         indicator_engine=InMemoryIndicatorEngine(
-            latest_bar=_indicator_bar(atr=1200.0, vp_vah=52000.0, vp_val=50000.0)
+            latest_bar=indicator_bar(atr=1200.0, vp_vah=52000.0, vp_val=50000.0)
         ),
         required_columns={"atr", "vp_vah", "vp_val"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle())
+    result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.enrichment_valid is True
     assert result.enrichment_errors == []
     assert result.signal_action == "long_entry"
-
-    evaluator = runtime._evaluator  # type: ignore[union-attr]
-    assert isinstance(evaluator, FakeStrategyEvaluator)
     assert len(evaluator.evaluate_calls) == 1
     assert evaluator.evaluate_calls[0]["bar"].get("atr") == 1200.0
 
@@ -221,12 +178,12 @@ def test_evaluator_skipped_until_warmup_ready() -> None:
     evaluator = FakeStrategyEvaluator()
     runtime = _create_runtime(
         evaluator=evaluator,
-        warmup_bars=_closed_warmup_bars(5),
+        warmup_bars=closed_warmup_bars(5),
         required_columns={"atr"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle(offset=5))
+    result = runtime.process_closed_candle(new_closed_candle(offset=5))
 
     assert result.enrichment_valid is False
     assert "warmup" in result.message.lower()
@@ -239,13 +196,13 @@ def test_out_of_order_candle_ignored_on_gap_detection() -> None:
     runtime = _create_runtime(
         evaluator=evaluator,
         indicator_engine=InMemoryIndicatorEngine(
-            latest_bar=_indicator_bar(atr=1200.0)
+            latest_bar=indicator_bar(atr=1200.0)
         ),
         required_columns={"atr"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle(offset=200))
+    result = runtime.process_closed_candle(new_closed_candle(offset=200))
 
     assert result.enrichment_valid is False
     assert len(evaluator.evaluate_calls) == 0
@@ -280,7 +237,7 @@ def test_yaml_strategy_loaded_into_real_evaluator() -> None:
         repo=repo,
         evaluator=real_evaluator,
         indicator_engine=InMemoryIndicatorEngine(
-            latest_bar=_indicator_bar(
+            latest_bar=indicator_bar(
                 atr=1200.0,
                 vp_vah=52000.0,
                 vp_val=50000.0,
@@ -295,7 +252,7 @@ def test_yaml_strategy_loaded_into_real_evaluator() -> None:
     )
     runtime._start_session(strategy_path, strategy_hash, "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle())
+    result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.enrichment_valid is True
     assert result.signal_action in {"long_entry", "short_entry", "hold"}
@@ -322,7 +279,7 @@ def test_yaml_strategy_returns_hold_for_non_matching_bar() -> None:
     runtime = _create_runtime(
         evaluator=real_evaluator,
         indicator_engine=InMemoryIndicatorEngine(
-            latest_bar=_indicator_bar(
+            latest_bar=indicator_bar(
                 atr=1200.0,
                 vp_vah=52000.0,
                 vp_val=50000.0,
@@ -337,7 +294,7 @@ def test_yaml_strategy_returns_hold_for_non_matching_bar() -> None:
     )
     runtime._start_session(strategy_path, "test-hash", "BTC", "1h")
 
-    result = runtime.process_closed_candle(_new_candle())
+    result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.enrichment_valid is True
     assert result.signal_action == "hold"
@@ -365,7 +322,7 @@ def test_dry_run_processes_candle_without_submitting() -> None:
             )
         ),
         indicator_engine=InMemoryIndicatorEngine(
-            latest_bar=_indicator_bar(atr=1200.0)
+            latest_bar=indicator_bar(atr=1200.0)
         ),
         required_columns={"atr"},
     )
@@ -378,7 +335,7 @@ def test_dry_run_processes_candle_without_submitting() -> None:
     )
     assert run_id
 
-    result = runtime.process_closed_candle(_new_candle())
+    result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.enrichment_valid is True
     assert result.signal_action in {"hold", "long_entry", "short_entry"}
