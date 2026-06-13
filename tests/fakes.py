@@ -234,6 +234,9 @@ class StubBotStateRepository(BotStateRepository):
         self._risk_events: list = []
         self._audit_entries: list = []
         self._intents: list = []
+        self._intent_map: dict[str, object] = {}
+        self._order_responses: list = []
+        self._reconciliations: list = []
 
     def create_bot_run(self, bot_run) -> None:
         self._bot_runs.append(bot_run)
@@ -253,16 +256,18 @@ class StubBotStateRepository(BotStateRepository):
 
     def record_order_intent(self, intent) -> str:
         self._intents.append(intent)
-        return "test-intent-1"
+        intent_id = f"intent-{len(self._intents)}"
+        self._intent_map[intent_id] = intent
+        return intent_id
 
     def record_order_response(self, response) -> None:
-        pass
+        self._order_responses.append(response)
 
     def record_fill(self, fill) -> None:
         pass
 
     def record_reconciliation(self, rec) -> None:
-        pass
+        self._reconciliations.append(rec)
 
     def record_risk_event(self, event) -> None:
         self._risk_events.append(event)
@@ -277,7 +282,13 @@ class StubBotStateRepository(BotStateRepository):
         return self._processed_signals[-1] if self._processed_signals else None
 
     def get_last_order_response(self):
-        return None
+        return self._order_responses[-1] if self._order_responses else None
+
+    def last_order_intent(self):
+        return self._intents[-1] if self._intents else None
+
+    def last_reconciliation(self):
+        return self._reconciliations[-1] if self._reconciliations else None
 
     def count_signals(self) -> int:
         return len(self._processed)

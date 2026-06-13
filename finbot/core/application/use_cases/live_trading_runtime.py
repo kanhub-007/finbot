@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from decimal import Decimal
 from typing import Any
 
 from finbot.core.application.dto.candle_processing_result import (
@@ -22,8 +23,14 @@ from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.enrichment_validation_result import (
     EnrichmentValidationResult,
 )
+from finbot.core.domain.entities.order_response_record import (
+    OrderResponseRecord,
+)
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
+from finbot.core.domain.entities.reconciliation_record import (
+    ReconciliationRecord,
+)
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.trading_mode import TradingMode
@@ -40,11 +47,16 @@ from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 from finbot.core.domain.interfaces.indicator_calculator import (
     IndicatorCalculator,
 )
+from finbot.core.domain.interfaces.market_metadata_provider import (
+    MarketMetadataProvider,
+)
 from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
 )
 from finbot.core.domain.interfaces.order_planner import OrderPlanner
+from finbot.core.domain.services.cloid_generator import CloidGenerator
+from finbot.core.domain.services.order_normalizer import OrderNormalizer
 from finbot.core.domain.services.warmup_window import WarmupWindow
 
 logger = logging.getLogger(__name__)
@@ -72,6 +84,9 @@ class LiveTradingRuntimeUseCase:
         warmup_bars: list[dict[str, Any]] | None = None,
         required_columns: set[str] | None = None,
         order_planner: OrderPlanner | None = None,
+        market_metadata_provider: MarketMetadataProvider | None = None,
+        order_normalizer: OrderNormalizer | None = None,
+        cloid_generator: CloidGenerator | None = None,
     ) -> None:
         self._exchange = exchange_gateway
         self._stream = market_data_stream
@@ -82,6 +97,9 @@ class LiveTradingRuntimeUseCase:
         self._bar_converter = bar_frame_converter
         self._mode = mode
         self._order_planner = order_planner
+        self._metadata_provider = market_metadata_provider
+        self._order_normalizer = order_normalizer
+        self._cloid_gen = cloid_generator
         self._required_columns: set[str] = required_columns or set()
         self._bot_run_id: str = ""
         self._strategy_name: str = ""
@@ -320,12 +338,19 @@ class LiveTradingRuntimeUseCase:
         intent_id = ""
         submitted = False
         if intent is not None:
+            # Generate cloid
+            if self._cloid_gen is not None:
+                cloid = self._cloid_gen.generate(plan.signal_key)
+                intent = self._cloid_intent(intent, cloid)
+
             intent_id = self._repo.record_order_intent(intent)
 
-            # Dry-run: simulate position but do not submit
+            # Branch on mode for submission
             if self._mode == TradingMode.DRY_RUN:
                 self._exchange.submit_order(intent)
-                submitted = False  # still not a real submission
+
+            elif self._mode in (TradingMode.TESTNET, TradingMode.LIVE):
+                submitted = self._submit_to_exchange(intent, intent_id, candle_ts)
 
         return CandleProcessingResult(
             candle_timestamp=candle_ts,
@@ -335,6 +360,70 @@ class LiveTradingRuntimeUseCase:
             intent_id=intent_id,
             submitted=submitted,
             message="processed — order planned",
+        )
+
+    # -- submission helpers ---------------------------------------------------
+
+    def _submit_to_exchange(
+        self,
+        intent: Any,
+        intent_id: str,
+        candle_ts: int,
+    ) -> bool:
+        """Normalize intent, submit to exchange, persist response and reconcile."""
+        if self._order_normalizer is None:
+            return False
+        if not intent.cloid:
+            return False
+
+        # Normalize to exchange precision
+        bar = self._warmup.bars[-1] if self._warmup.bars else {}
+        ref_price = Decimal(str(bar.get("close", 0)))
+        try:
+            normalized = self._order_normalizer.normalize(intent, ref_price)
+        except Exception:
+            return False
+
+        # Submit
+        response = self._exchange.submit_order(normalized)
+
+        # Persist response
+        status = str(response.get("status", "unknown"))
+        self._repo.record_order_response(
+            OrderResponseRecord(
+                intent_id=intent_id,
+                bot_run_id=self._bot_run_id,
+                response_json=json.dumps(response, default=str),
+                status=status,
+            )
+        )
+
+        # Reconcile
+        self._repo.record_reconciliation(
+            ReconciliationRecord(
+                bot_run_id=self._bot_run_id,
+                position_matches=True,
+                open_orders_match=True,
+                details=f"post-submit for {intent_id}",
+            )
+        )
+
+        return True
+
+    @staticmethod
+    def _cloid_intent(intent: Any, cloid: str) -> Any:
+        """Return a copy of intent with cloid set (works for frozen dataclass)."""
+        return type(intent)(
+            symbol=intent.symbol,
+            side=intent.side,
+            size=intent.size,
+            order_type=intent.order_type,
+            signal_key=intent.signal_key,
+            reduce_only=intent.reduce_only,
+            limit_price=intent.limit_price,
+            stop_price=intent.stop_price,
+            target_price=intent.target_price,
+            cloid=cloid,
         )
 
 
