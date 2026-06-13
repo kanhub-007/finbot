@@ -136,7 +136,7 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         if not open_orders:
             return {"status": "ok", "cancelled": 0}
         # Use bulk_cancel for efficiency.
-        cancels = [{"coin": symbol, "oid": o["oid"]} for o in open_orders]
+        cancels = [{"coin": symbol, "oid": o["oid"]} for o in open_orders if "oid" in o]
         return exchange.bulk_cancel(cancels)  # type: ignore[no-any-return]
 
     def cancel_by_cloid(self, symbol: str, cloid: str) -> dict[str, Any]:
@@ -147,15 +147,12 @@ class HyperliquidExchangeGateway(ExchangeGateway):
 
     def _ensure_exchange(self) -> Exchange:
         if self._exchange is None:
+            from eth_account import Account
             from hyperliquid.exchange import Exchange
 
-            class _Wallet:
-                def __init__(self, pk: str, addr: str | None) -> None:
-                    self._pk = pk
-                    self._addr = addr
-
+            wallet = Account.from_key(self._private_key)
             self._exchange = Exchange(
-                wallet=self._private_key,  # type: ignore[arg-type]
+                wallet=wallet,
                 base_url=self._base_url,
                 account_address=self._account_address,
                 vault_address=self._vault_address,

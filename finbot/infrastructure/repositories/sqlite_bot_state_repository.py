@@ -39,6 +39,7 @@ class SqliteBotStateRepository(BotStateRepository):
     def __init__(self, db_path: str = "data/finbot.db") -> None:
         self._db_path = db_path
         self._conn: sqlite3.Connection | None = None
+        self._in_transaction = False
 
     def close(self) -> None:
         """Close the underlying database connection."""
@@ -60,6 +61,11 @@ class SqliteBotStateRepository(BotStateRepository):
         block exits without exception.
         """
         try:
+            # IMPORTANT: _execute() commits automatically, so the
+            # methods called inside this block (record_order_intent,
+            # mark_signal_processed, etc.) use _execute_raw() instead
+            # of _execute() to avoid premature commits.
+            self._in_transaction = True
             self._connection.isolation_level = None  # manual txn
             self._connection.execute("BEGIN")
             yield
@@ -68,6 +74,7 @@ class SqliteBotStateRepository(BotStateRepository):
             self._connection.rollback()
             raise
         finally:
+            self._in_transaction = False
             self._connection.execute("PRAGMA journal_mode=WAL")
             self._connection.execute("PRAGMA foreign_keys=ON")
             self._connection.isolation_level = ""  # back to autocommit
@@ -329,7 +336,8 @@ class SqliteBotStateRepository(BotStateRepository):
 
     def _execute(self, sql: str, params: tuple = ()) -> None:
         self._connection.execute(sql, params)
-        self._connection.commit()
+        if not self._in_transaction:
+            self._connection.commit()
 
     def _query_one(self, sql: str, params: tuple = ()) -> tuple | None:
         return self._connection.execute(sql, params).fetchone()
