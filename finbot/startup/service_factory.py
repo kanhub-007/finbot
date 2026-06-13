@@ -173,3 +173,103 @@ def create_status_use_case():
     from finbot.core.application.use_cases.status import StatusUseCase
 
     return StatusUseCase(repo=create_bot_state_repository(migrate=False))
+
+
+def create_live_trading_runtime_use_case(
+    strategy_path: str,
+    symbol: str,
+    interval: str,
+    *,
+    mode: str = "dry_run",
+    live_data: bool = False,
+    warmup_bars: list | None = None,
+):
+    """Create a fully wired LiveTradingRuntimeUseCase.
+
+    Loads the YAML strategy, creates a real ``RuleBasedStrategyEvaluator``
+    via the factory, and wires all adapters.  Never uses the placeholder
+    ``FinbarStrategyEvaluator`` in the live path.
+    """
+    from finbot.core.application.use_cases.live_trading_runtime import (
+        LiveTradingRuntimeUseCase,
+    )
+    from finbot.core.domain.entities.trading_mode import TradingMode
+    from finbot.core.domain.services.enrichment_validator import (
+        EnrichmentValidator,
+    )
+    from finbot.core.domain.services.order_planner import OrderPlanner
+    from finbot.core.domain.services.risk_gates.duplicate_signal_gate import (
+        DuplicateSignalGate,
+    )
+    from finbot.core.domain.services.risk_gates.mode_gate import ModeGate
+    from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
+        RuleBasedStrategyEvaluatorFactory,
+    )
+    from finbot.infrastructure.strategy.pandas_bar_frame_converter import (
+        PandasBarFrameConverter,
+    )
+    from finbot.infrastructure.strategy.pandas_ta_indicator_calculator import (
+        PandasTaIndicatorCalculator,
+    )
+    from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
+        YamlStrategyDefinitionLoader,
+    )
+
+    trading_mode = TradingMode(mode)
+    repo = create_in_memory_repository()
+    if live_data:
+        from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
+            HyperliquidMarketDataStream,
+        )
+
+        settings = Settings()
+        stream = HyperliquidMarketDataStream(
+            stale_data_seconds=settings.stale_data_seconds,
+        )
+    else:
+        from finbot.infrastructure.adapters.in_memory_market_data_stream import (
+            InMemoryMarketDataStream,
+        )
+
+        stream = InMemoryMarketDataStream()
+
+    # Load YAML strategy and create real evaluator
+    loader = YamlStrategyDefinitionLoader()
+    definition = loader.load_from_file(strategy_path)
+    strategy_hash = _hash_strategy_file(strategy_path)
+    evaluator = RuleBasedStrategyEvaluatorFactory().create(
+        definition=definition,
+        symbol=symbol,
+        interval=interval,
+        strategy_hash=strategy_hash,
+    )
+
+    # Collect required indicator columns from strategy definition
+    required_columns = {ind.name for ind in definition.indicators}
+
+    return LiveTradingRuntimeUseCase(
+        exchange_gateway=_build_exchange_gateway(Settings(), trading_mode),
+        market_data_stream=stream,
+        strategy_evaluator=evaluator,
+        state_repository=repo,
+        indicator_calculator=PandasTaIndicatorCalculator(),
+        enrichment_validator=EnrichmentValidator(),
+        bar_frame_converter=PandasBarFrameConverter(),
+        mode=trading_mode,
+        warmup_bars=warmup_bars,
+        required_columns=required_columns,
+        order_planner=OrderPlanner(
+            gates=[
+                ModeGate(),
+                DuplicateSignalGate(repo),
+            ]
+        ),
+    )
+
+
+def _hash_strategy_file(path: str) -> str:
+    """Return a hex digest of the strategy file contents."""
+    import hashlib
+
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:16]
