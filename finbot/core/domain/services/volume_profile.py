@@ -88,6 +88,65 @@ def _distribute_bar_volume(
     return (pdf / total_pdf) * bar_volume
 
 
+def _distribute_bars_volume_vectorised(
+    highs: np.ndarray,
+    lows: np.ndarray,
+    closes: np.ndarray,
+    volumes: np.ndarray,
+    price_buckets: np.ndarray,
+    bucket_size: float,
+) -> np.ndarray:
+    """Distribute volume across price buckets for ALL bars at once.
+
+    Vectorised equivalent of calling :func:`_distribute_bar_volume` per bar.
+    Returns an ``(n_bars, n_buckets)`` array of volume-per-bucket-per-bar.
+    Bars with non-positive volume or degenerate range return all-zeros rows.
+    """
+    n_bars = len(volumes)
+    n_buckets = len(price_buckets)
+    if n_bars == 0 or n_buckets == 0:
+        return np.zeros((n_bars, n_buckets))
+
+    # Typical price and Parkinson sigma per bar (vectorised).
+    highs_f = highs.astype(float)
+    lows_f = lows.astype(float)
+    closes_f = closes.astype(float)
+    tp = (highs_f + lows_f + closes_f) / 3.0
+    # Parkinson sigma = ln(H/L) / (2·√ln2); 0 for degenerate bars.
+    safe_ratio = np.where((lows_f > 0) & (highs_f > lows_f), highs_f / lows_f, 1.0)
+    sigma = np.log(safe_ratio) / (2.0 * math.sqrt(math.log(2)))
+    sigma = np.where(sigma > 0, sigma, 0.0)
+
+    # Broadcast to (n_bars, n_buckets): z = (bucket - tp) / sigma
+    tp_col = tp.reshape(-1, 1)  # (n_bars, 1)
+    sigma_col = sigma.reshape(-1, 1)  # (n_bars, 1)
+    buckets_row = price_buckets.reshape(1, -1)  # (1, n_buckets)
+
+    valid_sigma = sigma_col > 0
+    safe_sigma = np.where(valid_sigma, sigma_col, 1.0)
+    z = (buckets_row - tp_col) / safe_sigma
+    pdf = np.where(
+        valid_sigma,
+        np.exp(-0.5 * z**2) / (safe_sigma * math.sqrt(2 * math.pi)),
+        0.0,
+    )
+
+    # Soft-truncate buckets outside each bar's high-low range (×0.1).
+    half_bucket = bucket_size / 2.0
+    below_low = (buckets_row + half_bucket) < lows_f.reshape(-1, 1)
+    above_high = (buckets_row - half_bucket) > highs_f.reshape(-1, 1)
+    pdf = np.where(below_low | above_high, pdf * 0.1, pdf)
+
+    # Normalise each bar's distribution to sum to 1, then scale by volume.
+    totals = pdf.sum(axis=1, keepdims=True)
+    totals_safe = np.where(totals > 0, totals, 1.0)
+    fractions = np.where(totals > 0, pdf / totals_safe, 0.0)
+
+    vol_col = volumes.astype(float).reshape(-1, 1)
+    vol_col = np.where(vol_col > 0, vol_col, 0.0)
+    return fractions * vol_col
+
+
 # ---------------------------------------------------------------------------
 # Session Volume Profile
 # ---------------------------------------------------------------------------
@@ -147,24 +206,9 @@ def compute_session_volume_profile(
         num_buckets,
     )
 
-    # Aggregate volume across all bars
-    volume_profile = np.zeros(num_buckets)
-    total_volume = 0.0
-
-    for _, bar in session_bars.iterrows():
-        bar_high = float(bar["high"])
-        bar_low = float(bar["low"])
-        bar_close = float(bar["close"])
-        bar_volume = float(bar["volume"]) if bar["volume"] > 0 else 0.0
-
-        if bar_volume <= 0:
-            continue
-
-        total_volume += bar_volume
-        volume_profile += _distribute_bar_volume(
-            bar_high, bar_low, bar_close, bar_volume, price_buckets, bucket_size
-        )
-
+    # Aggregate volume across all bars (vectorised — replaces iterrows loop).
+    volumes = session_bars["volume"].to_numpy(dtype=float)
+    total_volume = float(volumes[volumes > 0].sum())
     if total_volume <= 0:
         return VolumeProfileResult(
             poc=float(session_bars["close"].iloc[-1]),
@@ -175,6 +219,16 @@ def compute_session_volume_profile(
             bucket_size=bucket_size,
             num_buckets=num_buckets,
         )
+
+    per_bar = _distribute_bars_volume_vectorised(
+        session_bars["high"].to_numpy(),
+        session_bars["low"].to_numpy(),
+        session_bars["close"].to_numpy(),
+        volumes,
+        price_buckets,
+        bucket_size,
+    )
+    volume_profile = per_bar.sum(axis=0)
 
     # POC: price bucket with maximum volume
     poc_idx = int(np.argmax(volume_profile))
@@ -189,13 +243,6 @@ def compute_session_volume_profile(
     val = float(price_buckets[lower_idx]) - bucket_size / 2
     value_area_volume = float(accumulated)
 
-    # Build profile dict for optional use
-    profile_dict = {
-        float(price_buckets[i]): float(volume_profile[i])
-        for i in range(num_buckets)
-        if volume_profile[i] > 0
-    }
-
     return VolumeProfileResult(
         poc=poc,
         vah=vah,
@@ -204,7 +251,7 @@ def compute_session_volume_profile(
         value_area_volume=value_area_volume,
         bucket_size=bucket_size,
         num_buckets=num_buckets,
-        profile=profile_dict,
+        profile=None,
     )
 
 
@@ -308,18 +355,21 @@ def compute_rolling_vp(
     if len(ordered_dates) < window:
         return result
 
-    # Rolling median over sessions
-    for i in range(window - 1, len(ordered_dates)):
-        w_dates = ordered_dates[i - window + 1 : i + 1]
-        rolling_poc = float(np.median([session_poc[d] for d in w_dates]))
-        rolling_vah = float(np.median([session_vah[d] for d in w_dates]))
-        rolling_val = float(np.median([session_val[d] for d in w_dates]))
+    # Rolling median over sessions — one vectorised pandas call instead of
+    # a Python loop calling np.median per session.
+    poc_series = pd.Series([session_poc[d] for d in ordered_dates], index=ordered_dates)
+    vah_series = pd.Series([session_vah[d] for d in ordered_dates], index=ordered_dates)
+    val_series = pd.Series([session_val[d] for d in ordered_dates], index=ordered_dates)
+    rolling_poc = poc_series.rolling(window=window).median()
+    rolling_vah = vah_series.rolling(window=window).median()
+    rolling_val = val_series.rolling(window=window).median()
 
+    for i in range(window - 1, len(ordered_dates)):
         current_date = ordered_dates[i]
         idx = date_series[date_series == current_date].index
-        result.loc[idx, poc_col] = rolling_poc
-        result.loc[idx, vah_col] = rolling_vah
-        result.loc[idx, val_col] = rolling_val
+        result.loc[idx, poc_col] = rolling_poc.iloc[i]
+        result.loc[idx, vah_col] = rolling_vah.iloc[i]
+        result.loc[idx, val_col] = rolling_val.iloc[i]
 
     return result
 
@@ -365,11 +415,29 @@ def compute_rolling_window_vp(
     if len(result) < window_bars:
         return result
 
-    for i in range(window_bars - 1, len(result)):
-        window = df.iloc[i - window_bars + 1 : i + 1]
+    # Compute each window's profile (already vectorised internally) and
+    # collect into arrays, then bulk-assign once — avoids slow per-row
+    # result.iloc[i, ...] = scalar writes.
+    n = len(result)
+    poc_arr = np.full(n, np.nan)
+    vah_arr = np.full(n, np.nan)
+    val_arr = np.full(n, np.nan)
+    high = df["high"].to_numpy()
+    low = df["low"].to_numpy()
+    close = df["close"].to_numpy()
+    volume = df["volume"].to_numpy(dtype=float)
+    for i in range(window_bars - 1, n):
+        s = slice(i - window_bars + 1, i + 1)
+        window = pd.DataFrame(
+            {"high": high[s], "low": low[s], "close": close[s], "volume": volume[s]},
+            index=df.index[s],
+        )
         profile = compute_session_volume_profile(window, num_buckets=num_buckets)
-        result.iloc[i, result.columns.get_loc(poc_col)] = profile.poc
-        result.iloc[i, result.columns.get_loc(vah_col)] = profile.vah
-        result.iloc[i, result.columns.get_loc(val_col)] = profile.val
+        poc_arr[i] = profile.poc
+        vah_arr[i] = profile.vah
+        val_arr[i] = profile.val
 
+    result[poc_col] = poc_arr
+    result[vah_col] = vah_arr
+    result[val_col] = val_arr
     return result
