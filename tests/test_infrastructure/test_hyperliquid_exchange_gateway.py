@@ -168,6 +168,84 @@ class TestHyperliquidExchangeGateway:
             assert pos.direction.value == "flat"
             assert pos.size == Decimal("0")
 
+    def test_hip3_symbol_passed_through_to_sdk(self) -> None:
+        """HIP-3 dex:COIN symbols are passed directly to the SDK."""
+        mock_exchange = MagicMock()
+        mock_exchange.market_open.return_value = {
+            "status": "ok",
+            "response": {"type": "order", "data": {}},
+        }
+
+        with patch.object(
+            HyperliquidExchangeGateway,
+            "_ensure_exchange",
+            return_value=mock_exchange,
+        ):
+            gateway = HyperliquidExchangeGateway(
+                private_key="0x" + "a" * 64,
+            )
+            intent = OrderIntent(
+                symbol="xyz:AAPL",
+                side=OrderSide.BUY,
+                size=Decimal("0.01"),
+                order_type=OrderType.MARKET,
+                cloid="cloid-hip3",
+            )
+            result = gateway.submit_order(intent)
+            mock_exchange.market_open.assert_called_once_with(
+                coin="xyz:AAPL",
+                is_buy=True,
+                sz=0.01,
+                limit_px=None,
+                cloid="cloid-hip3",
+            )
+            assert result["status"] == "ok"
+
+    def test_hip3_position_query_uses_raw_symbol(self) -> None:
+        """Position query for HIP-3 tokens uses dex:COIN format."""
+        mock_info = MagicMock()
+        mock_info.user_state.return_value = {
+            "assetPositions": [
+                {
+                    "position": {
+                        "coin": "flx:TSLA",
+                        "szi": "0.5",
+                        "entryPx": "410.00",
+                    }
+                }
+            ]
+        }
+
+        with patch.object(
+            HyperliquidExchangeGateway,
+            "_ensure_info",
+            return_value=mock_info,
+        ):
+            gateway = HyperliquidExchangeGateway(
+                private_key="0x" + "a" * 64,
+            )
+            pos = gateway.get_position("flx:TSLA")
+            assert pos.direction.value == "long"
+            assert pos.size == Decimal("0.5")
+            assert pos.entry_price == Decimal("410.00")
+
+    def test_hip3_cancel_by_cloid(self) -> None:
+        """Cancel by cloid passes HIP-3 symbol through."""
+        mock_exchange = MagicMock()
+        mock_exchange.cancel_by_cloid.return_value = {"status": "ok"}
+
+        with patch.object(
+            HyperliquidExchangeGateway,
+            "_ensure_exchange",
+            return_value=mock_exchange,
+        ):
+            gateway = HyperliquidExchangeGateway(
+                private_key="0x" + "a" * 64,
+            )
+            result = gateway.cancel_by_cloid("xyz:AAPL", "cloid-1")
+            mock_exchange.cancel_by_cloid.assert_called_once_with("xyz:AAPL", "cloid-1")
+            assert result["status"] == "ok"
+
     def test_cancel_all_calls_bulk_cancel(self) -> None:
         mock_exchange = MagicMock()
         mock_exchange.bulk_cancel.return_value = {"status": "ok"}
