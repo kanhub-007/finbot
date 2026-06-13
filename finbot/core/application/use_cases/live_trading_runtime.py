@@ -473,8 +473,11 @@ class LiveTradingRuntimeUseCase:
                 message=plan.reason,
             )
 
-        self._mark_signal_processed(plan, signal.action.value, candle_ts)
-        intent_id, submitted = self._dispatch_submission(plan)
+        # Batch all per-candle writes into one transaction so SQLite commits
+        # (fsync) once per candle instead of once per write (P7).
+        intent_id, submitted = self._with_persistence_transaction(
+            lambda: self._commit_accepted_plan(plan, signal.action.value, candle_ts)
+        )
 
         return CandleProcessingResult(
             candle_timestamp=candle_ts,
@@ -485,6 +488,25 @@ class LiveTradingRuntimeUseCase:
             submitted=submitted,
             message="processed — order planned",
         )
+
+    def _commit_accepted_plan(
+        self, plan, action: str, candle_ts: int
+    ) -> tuple[str, bool]:
+        """Persist signal + intent and submit, assuming an accepted plan."""
+        self._mark_signal_processed(plan, action, candle_ts)
+        return self._dispatch_submission(plan)
+
+    def _with_persistence_transaction(self, fn):
+        """Run *fn* inside a repo transaction if the repo supports one.
+
+        Falls back to direct execution for in-memory repos that don't expose
+        ``transaction`` (they have no fsync cost to avoid).
+        """
+        tx = getattr(self._repo, "transaction", None)
+        if tx is None:
+            return fn()
+        with tx():
+            return fn()
 
     def _build_risk_context(
         self, bar: dict[str, Any], position: PositionSnapshot
