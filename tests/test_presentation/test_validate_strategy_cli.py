@@ -1,12 +1,14 @@
 """Tests for validate-strategy and strategy-compat CLI commands."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "strategies"
 CLI_ENTRY = (
-    Path(__file__).resolve().parent.parent.parent
+    PROJECT_ROOT
     / "finbot"
     / "presentation"
     / "cli"
@@ -15,10 +17,17 @@ CLI_ENTRY = (
 
 
 def _run(*args: str) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    # Ensure finbot is importable from the subprocess
+    pythonpath = str(PROJECT_ROOT)
+    if "PYTHONPATH" in env:
+        pythonpath = f"{pythonpath}{os.pathsep}{env['PYTHONPATH']}"
+    env["PYTHONPATH"] = pythonpath
     return subprocess.run(
         [sys.executable, str(CLI_ENTRY), *args],
         capture_output=True,
         text=True,
+        env=env,
     )
 
 
