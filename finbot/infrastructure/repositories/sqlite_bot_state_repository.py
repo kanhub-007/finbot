@@ -368,7 +368,7 @@ class SqliteBotStateRepository(BotStateRepository):
                 now_text,
             ),
         )
-        for from_state, to_state, reason in lifecycle.transition_history:
+        for from_state, to_state, reason in lifecycle.unpersisted_transitions:
             self._execute(
                 "INSERT INTO order_lifecycle_transitions "
                 "(order_id, from_state, to_state, reason, occurred_at) "
@@ -381,6 +381,9 @@ class SqliteBotStateRepository(BotStateRepository):
                     now_text,
                 ),
             )
+        # Mark the inserted transitions as persisted so the next save only
+        # appends new ones — avoids O(k²) re-insertion over an order's life.
+        lifecycle.persisted_transition_count = len(lifecycle.transition_history)
 
     @property
     def _connection(self) -> sqlite3.Connection:

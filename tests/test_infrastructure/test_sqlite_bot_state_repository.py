@@ -214,6 +214,39 @@ class TestSqliteBotStateRepository:
         assert loaded is not None
         assert loaded.state == OrderState.OPEN
 
+    def test_repeated_saves_do_not_duplicate_transitions(self, repo) -> None:
+        """Saving an order with N transitions many times yields exactly N rows.
+
+        Regression guard for the O(k²) re-insertion bug: every save must only
+        append *new* transitions, never re-dump the whole history.
+        """
+        from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
+        from finbot.core.domain.entities.order_state import OrderState
+
+        lifecycle = OrderLifecycle(
+            order_id="oid-dup",
+            symbol="BTC",
+            side="buy",
+            original_size=Decimal("0.001"),
+            state=OrderState.SUBMITTED,
+        )
+        # Record 3 distinct transitions.
+        lifecycle.record_transition(OrderState.PLANNED, OrderState.INTENT_PERSISTED)
+        lifecycle.record_transition(OrderState.INTENT_PERSISTED, OrderState.SUBMITTED)
+        lifecycle.record_transition(OrderState.SUBMITTED, OrderState.OPEN)
+
+        # Save the same entity many times (simulates per-event saves).
+        for _ in range(5):
+            repo.save_order_lifecycle(lifecycle)
+
+        row = repo._query_one(
+            "SELECT COUNT(*) FROM order_lifecycle_transitions WHERE order_id = ?",
+            ("oid-dup",),
+        )
+        assert row is not None
+        assert row[0] == 3, f"expected 3 transitions, got {row[0]} (duplicated)"
+        assert lifecycle.persisted_transition_count == 3
+
     def test_transaction_rolls_back_on_exception(self) -> None:
         """Writes inside a failed transaction() must not persist."""
         db_path = _db_path()

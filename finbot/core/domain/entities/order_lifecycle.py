@@ -25,6 +25,10 @@ class OrderLifecycle:
     transition_history: list[tuple[OrderState, OrderState, str]] = field(
         default_factory=list
     )
+    # Number of transitions already persisted by the repository.  Tracked on
+    # the entity so a repository can save only the *new* transitions on each
+    # save rather than re-inserting the whole history (O(k) instead of O(k²)).
+    persisted_transition_count: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def __post_init__(self) -> None:
@@ -39,3 +43,10 @@ class OrderLifecycle:
         self, from_state: OrderState, to_state: OrderState, reason: str = ""
     ) -> None:
         self.transition_history.append((from_state, to_state, reason))
+
+    @property
+    def unpersisted_transitions(
+        self,
+    ) -> list[tuple[OrderState, OrderState, str]]:
+        """Transitions added since the last successful repository save."""
+        return self.transition_history[self.persisted_transition_count :]
