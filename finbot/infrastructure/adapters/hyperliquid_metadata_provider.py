@@ -159,9 +159,7 @@ class HyperliquidMetadataProvider(MarketMetadataProvider):
 
         temp_info = Info(self._base_url, skip_ws=True)
         perps = temp_info.perp_dexs()
-        self._perp_dexs_cache = [
-            d["name"] for d in perps if d and d.get("name")
-        ]
+        self._perp_dexs_cache = [d["name"] for d in perps if d and d.get("name")]
         self._perp_dexs_cache_time = now
         return self._perp_dexs_cache
 

@@ -57,9 +57,7 @@ class HyperliquidBarSource(BarSource):
         end_ms = now_ms
 
         if ":" in symbol:
-            raw_candles = self._fetch_hip3_candles(
-                symbol, interval, start_ms, end_ms
-            )
+            raw_candles = self._fetch_hip3_candles(symbol, interval, start_ms, end_ms)
         else:
             raw_candles = self._fetch_standard_candles(
                 symbol, interval, start_ms, end_ms

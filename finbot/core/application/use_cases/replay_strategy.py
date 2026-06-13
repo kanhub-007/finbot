@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from decimal import Decimal
 
 from finbot.core.application.dto.replay_strategy_result import ReplayStrategyResult
@@ -165,6 +166,4 @@ def _float_bar(bar: dict, key: str) -> float:
 
 
 def _hash_content(content: str) -> str:
-    import hashlib
-
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]

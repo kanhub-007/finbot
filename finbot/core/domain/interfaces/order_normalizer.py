@@ -10,9 +10,7 @@ class OrderNormalizer(ABC):
     """Adjust order sizes and prices to meet exchange precision rules."""
 
     @abstractmethod
-    def normalize(
-        self, intent: OrderIntent, reference_price: Decimal
-    ) -> OrderIntent:
+    def normalize(self, intent: OrderIntent, reference_price: Decimal) -> OrderIntent:
         """Return a new ``OrderIntent`` with exchange-safe precision.
 
         Args:

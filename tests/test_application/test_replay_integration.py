@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from finbot.core.application.use_cases.replay_strategy import (
     ReplayStrategyUseCase,
 )

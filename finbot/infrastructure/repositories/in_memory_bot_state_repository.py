@@ -7,6 +7,7 @@ from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
 from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.fill_record import FillRecord
 from finbot.core.domain.entities.order_intent import OrderIntent
+from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
 from finbot.core.domain.entities.order_response_record import (
     OrderResponseRecord,
 )
@@ -42,9 +43,11 @@ class InMemoryBotStateRepository(BotStateRepository):
         self._bot_runs.append(bot_run)
 
     def end_bot_run(self, run_id: str) -> None:
+        from datetime import UTC, datetime
+
         for run in self._bot_runs:
             if run.run_id == run_id:
-                object.__setattr__(run, "ended_at", run.started_at)
+                object.__setattr__(run, "ended_at", datetime.now(UTC))
                 return
 
     # -- strategy snapshot --------------------------------------------------
@@ -129,8 +132,8 @@ class InMemoryBotStateRepository(BotStateRepository):
 
     # -- order lifecycle -----------------------------------------------------
 
-    def get_order_lifecycle(self, order_id: str):
+    def get_order_lifecycle(self, order_id: str) -> OrderLifecycle | None:
         return self._lifecycles.get(order_id)
 
-    def save_order_lifecycle(self, lifecycle) -> None:
+    def save_order_lifecycle(self, lifecycle: OrderLifecycle) -> None:
         self._lifecycles[lifecycle.order_id] = lifecycle

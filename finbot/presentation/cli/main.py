@@ -13,10 +13,8 @@ from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_side import OrderSide
 from finbot.core.domain.entities.order_type import OrderType
 from finbot.core.domain.entities.position_direction import PositionDirection
-from finbot.infrastructure.adapters.hyperliquid_exchange_gateway import (
-    HyperliquidExchangeGateway,
-)
 from finbot.startup.service_factory import (
+    create_exchange_gateway,
     create_live_trading_runtime_use_case,
     create_replay_strategy_use_case,
     create_run_bot_request,
@@ -133,30 +131,35 @@ def _cmd_run(args) -> None:
         print("DRY-RUN on mainnet — websocket only, no orders placed.")
 
     if args.live_data:
-        # New runtime: blocking event loop with real pipeline
-        from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
-        from finbot.infrastructure.adapters.thread_safe_event_queue import (
-            ThreadSafeEventQueue,
-        )
-        from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
-            HyperliquidMarketDataStream,
-        )
-
-        stream = HyperliquidMarketDataStream(
-            stale_data_seconds=settings.stale_data_seconds,
-        )
-        bot_loop = BotEventLoop(ThreadSafeEventQueue(), stream)
-
+        # New runtime: blocking event loop with real pipeline.
+        # The bot loop (and account stream for testnet/live) are built in
+        # the composition root, not here, so wiring stays single-sourced.
         runtime = create_live_trading_runtime_use_case(
             args.strategy,
             args.symbol,
             args.interval,
             mode=settings.mode,
             live_data=True,
-            bot_loop=bot_loop,
         )
-        runtime.start(args.strategy, args.symbol, args.interval)
-        print(f"running: {args.strategy} on {args.symbol}/{args.interval} [{settings.mode}]")
+        if settings.mode in ("testnet", "live"):
+            # Live/testnet go through the full safety + compatibility gates.
+            from finbot.startup.service_factory import create_bot_config
+
+            result = runtime.start_live(
+                strategy_path=args.strategy,
+                symbol=args.symbol,
+                interval=args.interval,
+                config=create_bot_config(settings),
+            )
+            if result.status != "running":
+                print(f"{result.status}: {result.message}")
+                sys.exit(1)
+        else:
+            runtime.start(args.strategy, args.symbol, args.interval)
+        print(
+            f"running: {args.strategy} on {args.symbol}/{args.interval}"
+            f" [{settings.mode}]"
+        )
         try:
             runtime.run_forever()
         except KeyboardInterrupt:
@@ -328,16 +331,7 @@ def _cmd_panic(args) -> None:
         print("ERROR: FINBOT_HYPERLIQUID_PRIVATE_KEY not set")
         sys.exit(1)
 
-    gateway = HyperliquidExchangeGateway(
-        private_key=settings.hyperliquid_private_key.get_secret_value(),
-        base_url=(
-            "https://api.hyperliquid-testnet.xyz"
-            if settings.hyperliquid_testnet
-            else "https://api.hyperliquid.xyz"
-        ),
-        account_address=settings.hyperliquid_account_address,
-        vault_address=settings.hyperliquid_vault_address,
-    )
+    gateway = create_exchange_gateway(settings)
 
     if args.cancel_orders:
         result = gateway.cancel_all(args.symbol)

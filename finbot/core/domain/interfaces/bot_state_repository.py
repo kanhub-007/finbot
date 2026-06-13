@@ -6,6 +6,7 @@ from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
 from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.fill_record import FillRecord
 from finbot.core.domain.entities.order_intent import OrderIntent
+from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
 from finbot.core.domain.entities.order_response_record import (
     OrderResponseRecord,
 )
@@ -117,9 +118,9 @@ class BotStateRepository(ABC):
     # -- order lifecycle -----------------------------------------------------
 
     @abstractmethod
-    def get_order_lifecycle(self, order_id: str):
+    def get_order_lifecycle(self, order_id: str) -> OrderLifecycle | None:
         """Return the lifecycle for *order_id*, or None."""
 
     @abstractmethod
-    def save_order_lifecycle(self, lifecycle) -> None:
+    def save_order_lifecycle(self, lifecycle: OrderLifecycle) -> None:
         """Persist an order lifecycle state update."""

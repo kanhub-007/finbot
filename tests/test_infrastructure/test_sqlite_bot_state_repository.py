@@ -171,3 +171,104 @@ class TestSqliteBotStateRepository:
         repo2 = SqliteBotStateRepository(db_path)
         assert repo2.has_processed_signal("persistent")
         repo2.close()
+
+    def test_order_lifecycle_round_trips(self, repo: SqliteBotStateRepository) -> None:
+        """Saving then loading an order lifecycle preserves state and sizes."""
+        from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
+        from finbot.core.domain.entities.order_state import OrderState
+
+        lifecycle = OrderLifecycle(
+            order_id="oid-1",
+            symbol="BTC",
+            side="buy",
+            original_size=Decimal("0.002"),
+            state=OrderState.SUBMITTED,
+        )
+        repo.save_order_lifecycle(lifecycle)
+
+        loaded = repo.get_order_lifecycle("oid-1")
+        assert loaded is not None
+        assert loaded.symbol == "BTC"
+        assert loaded.side == "buy"
+        assert loaded.original_size == Decimal("0.002")
+        assert loaded.remaining_size == Decimal("0.002")
+        assert loaded.state == OrderState.SUBMITTED
+
+    def test_order_lifecycle_update_persists_new_state(self, repo) -> None:
+        """A second save upserts the row rather than duplicating it."""
+        from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
+        from finbot.core.domain.entities.order_state import OrderState
+
+        lifecycle = OrderLifecycle(
+            order_id="oid-2",
+            symbol="BTC",
+            side="buy",
+            original_size=Decimal("0.001"),
+            state=OrderState.SUBMITTED,
+        )
+        repo.save_order_lifecycle(lifecycle)
+        lifecycle.state = OrderState.OPEN
+        repo.save_order_lifecycle(lifecycle)
+
+        loaded = repo.get_order_lifecycle("oid-2")
+        assert loaded is not None
+        assert loaded.state == OrderState.OPEN
+
+    def test_transaction_rolls_back_on_exception(self) -> None:
+        """Writes inside a failed transaction() must not persist."""
+        db_path = _db_path()
+        SqliteMigrator(db_path).migrate()
+        repo = SqliteBotStateRepository(db_path)
+        repo.create_bot_run(
+            BotRun(
+                strategy_name="t",
+                strategy_hash="h",
+                symbol="BTC",
+                interval="1h",
+                mode="dry_run",
+                run_id="r1",
+            )
+        )
+        try:
+            with repo.transaction():
+                repo.mark_signal_processed(
+                    ProcessedSignal(
+                        signal_key="tx-signal",
+                        bot_run_id="r1",
+                        signal_action="long_entry",
+                        bar_timestamp="2025-01-01T09:00",
+                    )
+                )
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+
+        assert not repo.has_processed_signal("tx-signal")
+        repo.close()
+
+    def test_transaction_commits_on_success(self) -> None:
+        """Writes inside a successful transaction() persist atomically."""
+        db_path = _db_path()
+        SqliteMigrator(db_path).migrate()
+        repo = SqliteBotStateRepository(db_path)
+        repo.create_bot_run(
+            BotRun(
+                strategy_name="t",
+                strategy_hash="h",
+                symbol="BTC",
+                interval="1h",
+                mode="dry_run",
+                run_id="r1",
+            )
+        )
+        with repo.transaction():
+            repo.mark_signal_processed(
+                ProcessedSignal(
+                    signal_key="tx-ok",
+                    bot_run_id="r1",
+                    signal_action="long_entry",
+                    bar_timestamp="2025-01-01T09:00",
+                )
+            )
+        assert repo.has_processed_signal("tx-ok")
+        repo.close()

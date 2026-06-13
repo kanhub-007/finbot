@@ -4,6 +4,30 @@ Classical-school fakes: in-memory implementations with no mocks,
 suitable for outcome-based assertions.
 """
 
+from decimal import Decimal
+from typing import Any
+
+from finbot.core.domain.entities.position_direction import PositionDirection
+from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+from finbot.core.domain.entities.signal_action import SignalAction
+from finbot.core.domain.entities.signal_decision import SignalDecision
+from finbot.core.domain.interfaces.bar_frame_converter import (
+    BarFrameConverter,
+)
+from finbot.core.domain.interfaces.bot_state_repository import (
+    BotStateRepository,
+)
+from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
+from finbot.core.domain.interfaces.indicator_calculator import (
+    IndicatorCalculator,
+)
+from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
+from finbot.core.domain.interfaces.market_metadata_provider import (
+    MarketMetadataProvider,
+)
+from finbot.core.domain.interfaces.strategy_evaluator import (
+    StrategyEvaluator,
+)
 
 # ---------------------------------------------------------------------------
 # Shared bar helpers
@@ -50,36 +74,6 @@ def indicator_bar(**extra) -> dict:
     }
     base.update(extra)
     return base
-
-from decimal import Decimal
-from typing import Any
-
-from finbot.core.domain.entities.position_direction import PositionDirection
-from finbot.core.domain.entities.position_snapshot import PositionSnapshot
-from finbot.core.domain.entities.signal_action import SignalAction
-from finbot.core.domain.entities.signal_decision import SignalDecision
-from finbot.core.domain.entities.order_intent import OrderIntent
-from finbot.core.domain.entities.position_direction import PositionDirection
-from finbot.core.domain.entities.position_snapshot import PositionSnapshot
-from finbot.core.domain.entities.signal_action import SignalAction
-from finbot.core.domain.entities.signal_decision import SignalDecision
-from finbot.core.domain.interfaces.bar_frame_converter import (
-    BarFrameConverter,
-)
-from finbot.core.domain.interfaces.bot_state_repository import (
-    BotStateRepository,
-)
-from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
-from finbot.core.domain.interfaces.indicator_calculator import (
-    IndicatorCalculator,
-)
-from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
-from finbot.core.domain.interfaces.market_metadata_provider import (
-    MarketMetadataProvider,
-)
-from finbot.core.domain.interfaces.strategy_evaluator import (
-    StrategyEvaluator,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +166,7 @@ class InMemoryBarFrameConverter(BarFrameConverter):
 
     def bars_to_frame(self, bars: list[dict]) -> Any:
         import pandas as pd
+
         return pd.DataFrame(bars)
 
     def frame_to_bars(self, frame) -> list[dict]:
@@ -179,15 +174,17 @@ class InMemoryBarFrameConverter(BarFrameConverter):
 
     def latest_bar(self, frame) -> dict:
         import pandas as pd
+
         if isinstance(frame, pd.DataFrame):
             return frame.iloc[-1].to_dict()
         return frame[-1] if isinstance(frame, list) and frame else {}
 
     def is_empty(self, frame) -> bool:
         import pandas as pd
+
         if isinstance(frame, pd.DataFrame):
             return frame.empty
-        return len(frame) == 0 if hasattr(frame, '__len__') else False
+        return len(frame) == 0 if hasattr(frame, "__len__") else False
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +346,7 @@ class InMemoryMarketMetadataProvider(MarketMetadataProvider):
 
     def __init__(self, metadata: dict | None = None) -> None:
         from finbot.core.domain.entities.market_metadata import MarketMetadata
+
         self._data: dict[str, MarketMetadata] = metadata or {}
 
     def get_metadata(self, symbol: str):
@@ -357,6 +355,7 @@ class InMemoryMarketMetadataProvider(MarketMetadataProvider):
     @classmethod
     def for_btc(cls) -> "InMemoryMarketMetadataProvider":
         from decimal import Decimal
+
         from finbot.core.domain.entities.market_metadata import MarketMetadata
 
         return cls(

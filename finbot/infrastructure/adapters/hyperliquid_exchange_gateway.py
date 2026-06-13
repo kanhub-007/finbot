@@ -143,6 +143,15 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         exchange = self._ensure_exchange()
         return exchange.cancel_by_cloid(symbol, cloid)  # type: ignore[no-any-return]
 
+    def get_exchange(self) -> Exchange:
+        """Return the underlying SDK ``Exchange`` (lazy-initialised).
+
+        Used to share the authenticated websocket manager with the
+        :class:`HyperliquidAccountDataStream` so account subscriptions and
+        order submission use one signing context.
+        """
+        return self._ensure_exchange()
+
     # -- internal -----------------------------------------------------------
 
     def _ensure_exchange(self) -> Exchange:

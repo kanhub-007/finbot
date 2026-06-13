@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 from finbot.core.domain.entities.bot_event import BotEvent
 from finbot.core.domain.entities.bot_event_type import BotEventType
@@ -19,6 +19,14 @@ from finbot.core.domain.interfaces.event_queue import EventQueue
 from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 
 logger = logging.getLogger(__name__)
+
+
+class AccountStream(Protocol):
+    """Minimal protocol for an account websocket stream."""
+
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
 
 
 class BotEventLoop(BotLoop):
@@ -40,10 +48,12 @@ class BotEventLoop(BotLoop):
         self,
         queue: EventQueue,
         stream: MarketDataStream,
+        account_stream: AccountStream | None = None,
         reconnect_backoff: float = 2.0,
     ) -> None:
         self._queue = queue
         self._stream = stream
+        self._account_stream = account_stream
         self._reconnect_backoff = reconnect_backoff
         self._running = False
         self._symbol: str = ""
@@ -75,6 +85,12 @@ class BotEventLoop(BotLoop):
         except Exception as exc:
             logger.warning("Initial subscribe failed: %s", exc)
             self._reconnect()
+
+        if self._account_stream is not None:
+            try:
+                self._account_stream.start()
+            except Exception as exc:  # noqa: BLE001 - keep market data flowing
+                logger.warning("Account stream start failed: %s", exc)
 
         while self._running:
             event = self._queue.dequeue(timeout=1.0)
@@ -139,6 +155,11 @@ class BotEventLoop(BotLoop):
             if event is not None:
                 self._dispatch(event)
         self._queue.clear()
+        if self._account_stream is not None:
+            try:
+                self._account_stream.stop()
+            except Exception:  # noqa: BLE001
+                pass
         try:
             self._stream.stop()
         except Exception:

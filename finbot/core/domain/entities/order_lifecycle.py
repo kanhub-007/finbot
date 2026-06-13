@@ -28,8 +28,12 @@ class OrderLifecycle:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def __post_init__(self) -> None:
+        # This dataclass is intentionally mutable (the state machine updates
+        # ``state``/``filled_size``/``remaining_size`` in place), so plain
+        # assignment is correct here — no need for the frozen-dataclass
+        # ``object.__setattr__`` escape hatch.
         if self.remaining_size == Decimal("0"):
-            object.__setattr__(self, "remaining_size", self.original_size)
+            self.remaining_size = self.original_size
 
     def record_transition(
         self, from_state: OrderState, to_state: OrderState, reason: str = ""

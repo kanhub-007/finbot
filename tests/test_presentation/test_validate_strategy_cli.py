@@ -7,13 +7,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "strategies"
-CLI_ENTRY = (
-    PROJECT_ROOT
-    / "finbot"
-    / "presentation"
-    / "cli"
-    / "main.py"
-)
+CLI_ENTRY = PROJECT_ROOT / "finbot" / "presentation" / "cli" / "main.py"
 
 
 def _run(*args: str) -> subprocess.CompletedProcess:

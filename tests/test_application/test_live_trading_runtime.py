@@ -17,7 +17,6 @@ from tests.fakes import (
     new_closed_candle,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -39,7 +38,6 @@ def _create_runtime(
 
     return LiveTradingRuntimeUseCase(
         exchange_gateway=exchange or InMemoryExchangeGateway(),
-        market_data_stream=None,  # type: ignore[arg-type]
         strategy_evaluator=evaluator or FakeStrategyEvaluator(),
         state_repository=repo or StubBotStateRepository(),
         indicator_calculator=indicator_engine or InMemoryIndicatorEngine(),
@@ -195,9 +193,7 @@ def test_out_of_order_candle_ignored_on_gap_detection() -> None:
     evaluator = FakeStrategyEvaluator()
     runtime = _create_runtime(
         evaluator=evaluator,
-        indicator_engine=InMemoryIndicatorEngine(
-            latest_bar=indicator_bar(atr=1200.0)
-        ),
+        indicator_engine=InMemoryIndicatorEngine(latest_bar=indicator_bar(atr=1200.0)),
         required_columns={"atr"},
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
@@ -246,8 +242,11 @@ def test_yaml_strategy_loaded_into_real_evaluator() -> None:
             )
         ),
         required_columns={
-            "atr", "vp_vah", "vp_val",
-            "acceptance_into_value", "above_value",
+            "atr",
+            "vp_vah",
+            "vp_val",
+            "acceptance_into_value",
+            "above_value",
         },
     )
     runtime._start_session(strategy_path, strategy_hash, "BTC", "1h")
@@ -288,8 +287,11 @@ def test_yaml_strategy_returns_hold_for_non_matching_bar() -> None:
             )
         ),
         required_columns={
-            "atr", "vp_vah", "vp_val",
-            "acceptance_into_value", "above_value",
+            "atr",
+            "vp_vah",
+            "vp_val",
+            "acceptance_into_value",
+            "above_value",
         },
     )
     runtime._start_session(strategy_path, "test-hash", "BTC", "1h")
@@ -321,9 +323,7 @@ def test_dry_run_processes_candle_without_submitting() -> None:
                 strategy_hash="test-hash",
             )
         ),
-        indicator_engine=InMemoryIndicatorEngine(
-            latest_bar=indicator_bar(atr=1200.0)
-        ),
+        indicator_engine=InMemoryIndicatorEngine(latest_bar=indicator_bar(atr=1200.0)),
         required_columns={"atr"},
     )
 

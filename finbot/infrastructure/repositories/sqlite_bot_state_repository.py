@@ -5,14 +5,17 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
 from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.fill_record import FillRecord
 from finbot.core.domain.entities.order_intent import OrderIntent
+from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
 from finbot.core.domain.entities.order_response_record import (
     OrderResponseRecord,
 )
+from finbot.core.domain.entities.order_state import OrderState
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
 from finbot.core.domain.entities.reconciliation_record import (
     ReconciliationRecord,
@@ -58,26 +61,27 @@ class SqliteBotStateRepository(BotStateRepository):
                 repo.mark_signal_processed(signal)
 
         All writes inside the block are committed atomically when the
-        block exits without exception.
+        block exits without exception.  Inner write methods call
+        :meth:`_execute`, which honours ``self._in_transaction`` and skips
+        the per-call commit so nothing is persisted prematurely.
         """
-        try:
-            # IMPORTANT: _execute() commits automatically, so the
-            # methods called inside this block (record_order_intent,
-            # mark_signal_processed, etc.) use _execute_raw() instead
-            # of _execute() to avoid premature commits.
-            self._in_transaction = True
-            self._connection.isolation_level = None  # manual txn
-            self._connection.execute("BEGIN")
+        if self._in_transaction:
+            # Nested re-entry: behave as a no-op passthrough so callers can
+            # wrap a transaction around code that already opened one.
             yield
-            self._connection.commit()
+            return
+        conn = self._connection
+        try:
+            self._in_transaction = True
+            conn.commit()  # flush any pending autocommit writes first
+            conn.execute("BEGIN")
+            yield
+            conn.commit()
         except Exception:
-            self._connection.rollback()
+            conn.rollback()
             raise
         finally:
             self._in_transaction = False
-            self._connection.execute("PRAGMA journal_mode=WAL")
-            self._connection.execute("PRAGMA foreign_keys=ON")
-            self._connection.isolation_level = ""  # back to autocommit
 
     # -- bot run lifecycle --------------------------------------------------
 
@@ -326,20 +330,57 @@ class SqliteBotStateRepository(BotStateRepository):
         return row[0] if row else 0
 
     def has_fill(self, fill_id: str) -> bool:
-        row = self._query_one(
-            "SELECT 1 FROM fills WHERE fill_id = ?", (fill_id,)
-        )
+        row = self._query_one("SELECT 1 FROM fills WHERE fill_id = ?", (fill_id,))
         return row is not None
 
-    def get_order_lifecycle(self, order_id: str):
-        raise NotImplementedError(
-            "Order lifecycle queries not yet supported in SQLite repository"
+    def get_order_lifecycle(self, order_id: str) -> OrderLifecycle | None:
+        row = self._query_one(
+            "SELECT order_id, symbol, side, original_size, remaining_size, "
+            "filled_size, state FROM order_lifecycles WHERE order_id = ?",
+            (order_id,),
         )
+        if row is None:
+            return None
+        return _lifecycle_from_row(row)
 
-    def save_order_lifecycle(self, lifecycle) -> None:
-        raise NotImplementedError(
-            "Order lifecycle persistence not yet supported in SQLite repository"
+    def save_order_lifecycle(self, lifecycle: OrderLifecycle) -> None:
+        now_text = _to_utc_text(datetime.now(UTC))
+        self._execute(
+            "INSERT INTO order_lifecycles "
+            "(order_id, symbol, side, original_size, remaining_size, "
+            "filled_size, state, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(order_id) DO UPDATE SET "
+            "symbol=excluded.symbol, side=excluded.side, "
+            "original_size=excluded.original_size, "
+            "remaining_size=excluded.remaining_size, "
+            "filled_size=excluded.filled_size, state=excluded.state, "
+            "updated_at=excluded.updated_at",
+            (
+                lifecycle.order_id,
+                lifecycle.symbol,
+                lifecycle.side,
+                str(lifecycle.original_size),
+                str(lifecycle.remaining_size),
+                str(lifecycle.filled_size),
+                lifecycle.state.value,
+                now_text,
+                now_text,
+            ),
         )
+        for from_state, to_state, reason in lifecycle.transition_history:
+            self._execute(
+                "INSERT INTO order_lifecycle_transitions "
+                "(order_id, from_state, to_state, reason, occurred_at) "
+                "VALUES (?,?,?,?,?)",
+                (
+                    lifecycle.order_id,
+                    from_state.value,
+                    to_state.value,
+                    reason,
+                    now_text,
+                ),
+            )
 
     @property
     def _connection(self) -> sqlite3.Connection:
@@ -361,3 +402,16 @@ class SqliteBotStateRepository(BotStateRepository):
 
 def _to_utc_text(dt: datetime) -> str:
     return dt.isoformat()
+
+
+def _lifecycle_from_row(row: tuple) -> OrderLifecycle:
+    """Map an ``order_lifecycles`` row to a domain :class:`OrderLifecycle`."""
+    return OrderLifecycle(
+        order_id=row[0],
+        symbol=row[1],
+        side=row[2],
+        original_size=Decimal(row[3]),
+        remaining_size=Decimal(row[4]),
+        filled_size=Decimal(row[5]),
+        state=OrderState(row[6]),
+    )

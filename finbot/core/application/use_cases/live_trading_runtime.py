@@ -5,7 +5,9 @@ enriched bar quality, evaluates YAML-defined strategies, plans orders,
 runs risk gates, and persists decisions.
 
 Constructor-inject every dependency. The use case owns orchestration
-but delegates to domain services and infrastructure adapters.
+but delegates to domain services and infrastructure adapters.  Account
+websocket events (fills / order updates) are delegated to a dedicated
+:class:`AccountEventHandler`.
 """
 
 from __future__ import annotations
@@ -13,32 +15,31 @@ from __future__ import annotations
 import json
 import logging
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 from finbot.core.application.dto.candle_processing_result import (
     CandleProcessingResult,
 )
+from finbot.core.application.dto.run_bot_result import RunBotResult
+from finbot.core.application.use_cases.account_event_handler import (
+    AccountEventHandler,
+)
+from finbot.core.application.use_cases.order_submitter import OrderSubmitter
+from finbot.core.domain.dto.validate_strategy_request import (
+    ValidateStrategyRequest,
+)
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
+from finbot.core.domain.entities.bot_config import BotConfig
 from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.enrichment_validation_result import (
     EnrichmentValidationResult,
 )
-from finbot.core.domain.entities.order_intent import OrderIntent
-from finbot.core.domain.entities.order_response_record import (
-    OrderResponseRecord,
-)
-from finbot.core.domain.entities.fill_record import FillRecord
-from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
-from finbot.core.domain.entities.order_state import OrderState
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
-from finbot.core.domain.entities.reconciliation_record import (
-    ReconciliationRecord,
-)
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
-from finbot.core.application.dto.run_bot_result import RunBotResult
-from finbot.core.domain.entities.bot_config import BotConfig
 from finbot.core.domain.entities.signal_action import SignalAction
+from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.entities.trading_mode import TradingMode
 from finbot.core.domain.interfaces.bar_frame_converter import (
     BarFrameConverter,
@@ -47,6 +48,7 @@ from finbot.core.domain.interfaces.bot_loop import BotLoop
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
+from finbot.core.domain.interfaces.cloid_generator import CloidGenerator
 from finbot.core.domain.interfaces.enrichment_validator import (
     EnrichmentValidator,
 )
@@ -57,22 +59,15 @@ from finbot.core.domain.interfaces.indicator_calculator import (
 from finbot.core.domain.interfaces.market_metadata_provider import (
     MarketMetadataProvider,
 )
-from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
+from finbot.core.domain.interfaces.order_normalizer import OrderNormalizer
+from finbot.core.domain.interfaces.order_planner import OrderPlanner
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
 )
 from finbot.core.domain.interfaces.strategy_validator import (
     StrategyValidator,
 )
-from finbot.core.domain.interfaces.cloid_generator import CloidGenerator
-from finbot.core.domain.interfaces.order_normalizer import OrderNormalizer
-from finbot.core.domain.interfaces.order_planner import OrderPlanner
-from finbot.core.domain.services.order_normalizer import (
-    OrderNormalizationError,
-)
-from finbot.core.domain.services.order_state_machine import (
-    OrderStateMachine,
-)
+from finbot.core.domain.services.live_mode_guard import check_live_mode
 from finbot.core.domain.services.warmup_window import WarmupWindow
 
 logger = logging.getLogger(__name__)
@@ -85,12 +80,15 @@ class LiveTradingRuntimeUseCase:
     handles the full pipeline: warmup → enrichment → validation →
     evaluation → risk → planning → persistence.  Branching between
     dry-run, testnet, and live happens at the submission boundary.
+
+    The market data stream is intentionally NOT a dependency of this use
+    case: it is owned by the injected :class:`BotLoop`, which feeds
+    closed candles via ``process_closed_candle``.
     """
 
     def __init__(
         self,
         exchange_gateway: ExchangeGateway,
-        market_data_stream: MarketDataStream,
         strategy_evaluator: StrategyEvaluator,
         state_repository: BotStateRepository,
         indicator_calculator: IndicatorCalculator,
@@ -105,9 +103,9 @@ class LiveTradingRuntimeUseCase:
         cloid_generator: CloidGenerator | None = None,
         bot_loop: BotLoop | None = None,
         strategy_validator: StrategyValidator | None = None,
+        account_event_handler: AccountEventHandler | None = None,
     ) -> None:
         self._exchange = exchange_gateway
-        self._stream = market_data_stream
         self._evaluator = strategy_evaluator
         self._repo = state_repository
         self._indicator_calc = indicator_calculator
@@ -120,6 +118,10 @@ class LiveTradingRuntimeUseCase:
         self._cloid_gen = cloid_generator
         self._bot_loop = bot_loop
         self._strategy_validator = strategy_validator
+        self._account_handler = account_event_handler
+        self._submitter = OrderSubmitter(
+            exchange_gateway, order_normalizer, state_repository
+        )
         self._required_columns: set[str] = required_columns or set()
         self._bot_run_id: str = ""
         self._strategy_name: str = ""
@@ -161,8 +163,6 @@ class LiveTradingRuntimeUseCase:
         config: BotConfig,
     ) -> RunBotResult:
         """Start with live-mode safety gates plus strategy compatibility."""
-        from finbot.core.domain.services.live_mode_guard import check_live_mode
-
         check = check_live_mode(
             mode=config.mode.value,
             live_trading_ack=config.live_trading_ack,
@@ -177,7 +177,9 @@ class LiveTradingRuntimeUseCase:
                 message="; ".join(check.reasons),
             )
 
-        # Strategy compatibility gate — reject unsupported features
+        # Strategy compatibility gate — reject unsupported features.
+        # Fail closed: any error while checking rejects the run rather than
+        # silently allowing an unverified strategy into live/testnet mode.
         compat = self._check_strategy_compat(strategy_path, config.mode.value)
         if compat is not None:
             return compat
@@ -193,35 +195,47 @@ class LiveTradingRuntimeUseCase:
     def _check_strategy_compat(
         self, strategy_path: str, mode: str
     ) -> RunBotResult | None:
-        """Return a rejection result if strategy has unsupported features."""
+        """Return a rejection result if the strategy has unsupported features.
+
+        Returns ``None`` when the strategy is acceptable.  In live/testnet
+        mode a check failure (parse error, missing file, etc.) is treated
+        as a rejection rather than silently permitted.
+        """
         if self._strategy_validator is None:
             return None
         try:
-            from finbot.core.application.dto.validate_strategy_request import (
-                ValidateStrategyRequest,
-            )
-            from pathlib import Path
-
             content = Path(strategy_path).read_text(encoding="utf-8")
             result = self._strategy_validator.compatibility(
                 ValidateStrategyRequest(
                     strategy_path=strategy_path, strategy_content=content
                 )
             )
-            mode_info = result.modes.get(mode, {})
-            blockers: list[str] = []
-            for feature, status in mode_info.items():
-                if status not in ("supported", "parse"):
-                    blockers.append(f"{feature}: {status}")
-            if "parse" in mode_info and mode_info["parse"] == "error":
-                blockers.insert(0, "strategy parsing failed")
-            if blockers:
+        except OSError as e:
+            return RunBotResult(
+                status="rejected",
+                message=f"strategy compatibility: cannot read strategy file ({e})",
+            )
+        except Exception as e:  # noqa: BLE001 - fail closed on any check error
+            logger.warning("Strategy compatibility check failed: %s", e)
+            if mode in ("testnet", "live"):
                 return RunBotResult(
                     status="rejected",
-                    message="strategy compatibility: " + "; ".join(blockers),
+                    message=f"strategy compatibility: check failed ({e})",
                 )
-        except Exception as e:
-            logger.warning("Strategy compatibility check failed: %s", e)
+            return None
+
+        mode_info = result.modes.get(mode, {})
+        blockers: list[str] = []
+        for feature, status in mode_info.items():
+            if status not in ("supported", "parse"):
+                blockers.append(f"{feature}: {status}")
+        if "parse" in mode_info and mode_info["parse"] == "error":
+            blockers.insert(0, "strategy parsing failed")
+        if blockers:
+            return RunBotResult(
+                status="rejected",
+                message="strategy compatibility: " + "; ".join(blockers),
+            )
         return None
 
     def stop(self) -> None:
@@ -241,7 +255,9 @@ class LiveTradingRuntimeUseCase:
         if self._bot_loop is None:
             raise RuntimeError("No BotLoop injected — cannot run forever")
         if not self._started:
-            raise RuntimeError("Session not started — call start() or start_live() first")
+            raise RuntimeError(
+                "Session not started — call start() or start_live() first"
+            )
         self._bot_loop.start(
             symbol=self._symbol,
             interval=self._interval,
@@ -259,7 +275,8 @@ class LiveTradingRuntimeUseCase:
             if self._warmup_needed:
                 logger.info(
                     "Warmup %d/%d — waiting for more candles",
-                    self._warmup.count, self._warmup.min_bars,
+                    self._warmup.count,
+                    self._warmup.min_bars,
                 )
             return CandleProcessingResult(
                 candle_timestamp=ts,
@@ -294,7 +311,9 @@ class LiveTradingRuntimeUseCase:
         signal = self._evaluator.evaluate(latest, position)
         logger.info(
             "Candle %s: action=%s symbol=%s",
-            ts, signal.action.value, signal.symbol,
+            ts,
+            signal.action.value,
+            signal.symbol,
         )
 
         # 5. If HOLD, no further processing
@@ -312,127 +331,17 @@ class LiveTradingRuntimeUseCase:
     def process_account_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """Process an account websocket event (order update, fill, etc.).
 
-        Dispatches by event type and updates order lifecycle state.
+        Delegates to :class:`AccountEventHandler`, lazily constructed from
+        the state repository so callers that never receive account events
+        pay no setup cost.
         """
-        event_type = event.get("type", "")
-        order_id = str(event.get("order_id", event.get("cloid", "")))
-
-        if not order_id:
-            return {"status": "skipped", "reason": "no order_id or cloid"}
-
-        if event_type == "order_update":
-            return self._handle_order_update(order_id, event)
-        elif event_type == "fill":
-            return self._handle_fill(order_id, event)
-        else:
-            return {"status": "skipped", "reason": f"unknown event type: {event_type}"}
-
-    # -- account event handlers -----------------------------------------------
-
-    def _handle_order_update(
-        self, order_id: str, event: dict[str, Any]
-    ) -> dict[str, Any]:
-        status = str(event.get("status", "")).lower()
-        lifecycle = self._get_or_create_lifecycle(order_id)
-
-        status_map = {
-            "accepted": OrderState.ACCEPTED,
-            "open": OrderState.OPEN,
-            "cancelled": OrderState.CANCEL_REQUESTED,
-            "rejected": OrderState.REJECTED,
-            "expired": OrderState.EXPIRED,
-        }
-
-        target = status_map.get(status)
-        if target is None:
-            # Unknown status — transition to reconciliation required
-            try:
-                OrderStateMachine.transition(
-                    lifecycle,
-                    OrderState.UNKNOWN_RECONCILE_REQUIRED,
-                    f"unknown order status: {status}",
-                )
-            except Exception as e:
-                logger.warning(
-                    "Unknown status transition failed for %s: %s", order_id, e
-                )
-            return {"status": "unknown_status", "reason": str(status)}
-
-        try:
-            OrderStateMachine.transition(lifecycle, target, f"order_update: {status}")
-        except Exception as e:
-            return {"status": "transition_rejected", "reason": str(e)}
-
-        return {"status": "processed"}
-
-    def _handle_fill(
-        self, order_id: str, event: dict[str, Any]
-    ) -> dict[str, Any]:
-        fill_id = str(event.get("fill_id", ""))
-        if not fill_id:
-            return {"status": "skipped", "reason": "no fill_id"}
-
-        # Idempotency: check if fill already recorded
-        if self._repo.has_fill(fill_id):
-            return {"status": "duplicate", "reason": f"fill {fill_id} already recorded"}
-
-        size = Decimal(str(event.get("size", "0")))
-        price = Decimal(str(event.get("price", "0")))
-        fee = Decimal(str(event.get("fee", "0")))
-
-        lifecycle = self._get_or_create_lifecycle(order_id)
-        original = lifecycle.original_size
-
-        # Transition to PARTIALLY_FILLED or FILLED
-        new_filled = lifecycle.filled_size + size
-        if new_filled >= original:
-            target = OrderState.FILLED
-        else:
-            target = OrderState.PARTIALLY_FILLED
-
-        try:
-            OrderStateMachine.transition(
-                lifecycle, target, str(size)
-            )
-        except Exception as e:
-            logger.warning("Fill transition failed for %s: %s", order_id, e)
-            return {"status": "transition_rejected"}
-
-        # Derive side from lifecycle; fall back to event field
-        side = event.get("side", lifecycle.side if lifecycle.side != "unknown" else "")
-        if not side:
-            side = ""
-
-        # Persist fill record
-        fill = FillRecord(
+        if self._account_handler is None:
+            self._account_handler = AccountEventHandler(self._repo)
+        return self._account_handler.handle(
+            event,
             bot_run_id=self._bot_run_id,
-            order_id=order_id,
-            symbol=self._symbol or "DEFAULT",
-            side=side,
-            size=size,
-            price=price,
-            fee=fee,
-            fill_id=fill_id,
+            symbol=self._symbol,
         )
-        self._repo.record_fill(fill)
-
-        return {"status": "processed"}
-
-    def _get_or_create_lifecycle(self, order_id: str) -> OrderLifecycle:
-        """Return existing lifecycle or create a stub for reconciliation."""
-        lifecycle = self._repo.get_order_lifecycle(order_id)
-        if lifecycle is not None:
-            return lifecycle
-        # Create a minimal lifecycle stub
-        lifecycle = OrderLifecycle(
-            order_id=order_id,
-            symbol=self._symbol or "DEFAULT",
-            side="unknown",
-            original_size=Decimal("0"),
-            state=OrderState.SUBMITTED,
-        )
-        self._repo.save_order_lifecycle(lifecycle)
-        return lifecycle
 
     # -- internal pipeline steps ---------------------------------------------
 
@@ -514,7 +423,6 @@ class LiveTradingRuntimeUseCase:
         candle_ts: int,
     ) -> CandleProcessingResult:
         """Run risk gates, persist signal/intent, submit if mode allows."""
-        # If no order planner is wired, skip ordering (backward compat).
         if self._order_planner is None:
             return CandleProcessingResult(
                 candle_timestamp=candle_ts,
@@ -523,36 +431,11 @@ class LiveTradingRuntimeUseCase:
                 message="processed — no order planner wired",
             )
 
-        ctx = {
-            "bar": bar,
-            "symbol": self._symbol,
-            "bot_run_id": self._bot_run_id,
-            "mode": self._mode.value,
-            "position_size": position.size,
-        }
-
+        ctx = self._build_risk_context(bar, position)
         plan = self._order_planner.plan(signal, ctx)
 
-        # Persist risk decision
-        if plan.accepted:
-            self._repo.record_risk_event(
-                RiskEventRecord(
-                    bot_run_id=self._bot_run_id,
-                    event_type=plan.gate_name or "risk",
-                    signal_key=plan.signal_key,
-                    decision="accepted",
-                )
-            )
-        else:
-            self._repo.record_risk_event(
-                RiskEventRecord(
-                    bot_run_id=self._bot_run_id,
-                    event_type=plan.gate_name or "risk",
-                    signal_key=plan.signal_key,
-                    decision="rejected",
-                    reason=plan.reason,
-                )
-            )
+        self._persist_risk_decision(plan)
+        if not plan.accepted:
             return CandleProcessingResult(
                 candle_timestamp=candle_ts,
                 enrichment_valid=True,
@@ -561,34 +444,8 @@ class LiveTradingRuntimeUseCase:
                 message=plan.reason,
             )
 
-        # Mark signal processed
-        self._repo.mark_signal_processed(
-            ProcessedSignal(
-                signal_key=plan.signal_key,
-                bot_run_id=self._bot_run_id,
-                signal_action=signal.action.value,
-                bar_timestamp=str(candle_ts),
-            )
-        )
-
-        # Persist order intent
-        intent = plan.intent
-        intent_id = ""
-        submitted = False
-        if intent is not None:
-            # Generate cloid and stamp onto intent
-            if self._cloid_gen is not None:
-                cloid = self._cloid_gen.generate(plan.signal_key)
-                intent = intent.with_cloid(cloid)
-
-            intent_id = self._repo.record_order_intent(intent)
-
-            # Branch on mode for submission
-            if self._mode == TradingMode.DRY_RUN:
-                self._exchange.submit_order(intent)
-
-            elif self._mode in (TradingMode.TESTNET, TradingMode.LIVE):
-                submitted = self._submit_to_exchange(intent, intent_id, candle_ts)
+        self._mark_signal_processed(plan, signal.action.value, candle_ts)
+        intent_id, submitted = self._dispatch_submission(plan)
 
         return CandleProcessingResult(
             candle_timestamp=candle_ts,
@@ -600,56 +457,82 @@ class LiveTradingRuntimeUseCase:
             message="processed — order planned",
         )
 
-    # -- submission helpers ---------------------------------------------------
+    def _build_risk_context(
+        self, bar: dict[str, Any], position: PositionSnapshot
+    ) -> dict[str, Any]:
+        """Assemble the context dict consumed by the risk gates."""
+        # open_order_count comes from the exchange so MaxOpenOrdersGate can
+        # enforce.  daily_loss_usd is 0 until realized-PnL tracking lands;
+        # DailyLossGate still enforces the cap once a real value is supplied.
+        return {
+            "bar": bar,
+            "symbol": self._symbol,
+            "bot_run_id": self._bot_run_id,
+            "mode": self._mode.value,
+            "position_size": position.size,
+            "open_order_count": len(
+                self._exchange.list_open_orders(self._symbol or "")
+            ),
+            "daily_loss_usd": Decimal("0"),
+        }
 
-    def _submit_to_exchange(
-        self,
-        intent: OrderIntent,
-        intent_id: str,
-        candle_ts: int,
-    ) -> bool:
-        """Normalize intent, submit to exchange, persist response and reconcile."""
-        if self._order_normalizer is None:
-            return False
-        if not intent.cloid:
-            return False
-
-        # Normalize to exchange precision
-        bar = self._warmup.bars[-1] if self._warmup.bars else {}
-        ref_price = Decimal(str(bar.get("close", 0)))
-        try:
-            normalized = self._order_normalizer.normalize(intent, ref_price)
-        except OrderNormalizationError as e:
-            logger.warning(
-                "Order normalization failed for intent %s: %s", intent_id, e
-            )
-            return False
-
-        # Submit
-        response = self._exchange.submit_order(normalized)
-
-        # Persist response
-        status = str(response.get("status", "unknown"))
-        self._repo.record_order_response(
-            OrderResponseRecord(
-                intent_id=intent_id,
+    def _mark_signal_processed(self, plan, action: str, candle_ts: int) -> None:
+        """Record the signal key so replays are treated as duplicates."""
+        self._repo.mark_signal_processed(
+            ProcessedSignal(
+                signal_key=plan.signal_key,
                 bot_run_id=self._bot_run_id,
-                response_json=json.dumps(response, default=str),
-                status=status,
+                signal_action=action,
+                bar_timestamp=str(candle_ts),
             )
         )
 
-        # Reconcile — placeholder until actual exchange state comparison
-        self._repo.record_reconciliation(
-            ReconciliationRecord(
+    def _persist_risk_decision(self, plan) -> None:
+        """Record the planner's accept/reject decision as a risk event."""
+        gate_name = plan.gate_name or "risk"
+        if plan.accepted:
+            self._repo.record_risk_event(
+                RiskEventRecord(
+                    bot_run_id=self._bot_run_id,
+                    event_type=gate_name,
+                    signal_key=plan.signal_key,
+                    decision="accepted",
+                )
+            )
+            return
+        self._repo.record_risk_event(
+            RiskEventRecord(
                 bot_run_id=self._bot_run_id,
-                position_matches=False,
-                open_orders_match=False,
-                details=f"post-submit for {intent_id} (not yet reconciled)",
+                event_type=gate_name,
+                signal_key=plan.signal_key,
+                decision="rejected",
+                reason=plan.reason,
             )
         )
 
-        return True
+    def _dispatch_submission(self, plan) -> tuple[str, bool]:
+        """Persist the order intent and submit it according to the run mode."""
+        intent = plan.intent
+        if intent is None:
+            return "", False
+
+        if self._cloid_gen is not None:
+            intent = intent.with_cloid(self._cloid_gen.generate(plan.signal_key))
+        intent_id = self._repo.record_order_intent(intent)
+
+        if self._mode == TradingMode.DRY_RUN:
+            self._exchange.submit_order(intent)
+            return intent_id, False
+
+        if self._mode in (TradingMode.TESTNET, TradingMode.LIVE):
+            bar = self._warmup.bars[-1] if self._warmup.bars else {}
+            ref_price = Decimal(str(bar.get("close", 0)))
+            submitted = self._submitter.submit(
+                intent, intent_id, self._bot_run_id, ref_price
+            )
+            return intent_id, submitted
+
+        return intent_id, False
 
 
 # -- module-level helpers -----------------------------------------------------

@@ -1,5 +1,7 @@
 """Composition root for Finbot services."""
 
+import hashlib
+
 from finbot.config.settings import Settings
 from finbot.core.application.dto.run_bot_request import RunBotRequest
 from finbot.core.application.use_cases.replay_strategy import (
@@ -35,6 +37,15 @@ from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
     YamlStrategyDefinitionLoader,
 )
 
+# Hyperliquid REST endpoints — single source of truth for URL selection.
+_MAINNET_URL = "https://api.hyperliquid.xyz"
+_TESTNET_URL = "https://api.hyperliquid-testnet.xyz"
+
+
+def hyperliquid_base_url(settings: Settings) -> str:
+    """Return the Hyperliquid REST URL for the configured environment."""
+    return _TESTNET_URL if settings.hyperliquid_testnet else _MAINNET_URL
+
 
 def create_bot_config(settings: Settings) -> BotConfig:
     """Create a domain bot configuration from environment settings."""
@@ -45,18 +56,33 @@ def create_bot_config(settings: Settings) -> BotConfig:
         max_daily_loss_usd=settings.max_daily_loss_usd,
         max_open_orders=settings.max_open_orders,
         stale_data_seconds=settings.stale_data_seconds,
+        private_key=settings.hyperliquid_private_key.get_secret_value(),
+        db_path=settings.database_path,
     )
 
 
 def _build_exchange_gateway(settings: Settings, mode: TradingMode) -> ExchangeGateway:
     """Create the correct exchange gateway for the given mode.
 
-    Uses a registry-like dispatch so adding testnet/live sub-modes does not
-    require nested ternaries.
+    Dry-run uses a no-op gateway; testnet/live use the real Hyperliquid
+    gateway wired with credentials and the environment-appropriate URL.
     """
     if mode == TradingMode.DRY_RUN:
         return DryRunExchangeGateway()
-    return HyperliquidExchangeGateway()
+    return HyperliquidExchangeGateway(
+        private_key=settings.hyperliquid_private_key.get_secret_value(),
+        base_url=hyperliquid_base_url(settings),
+        account_address=settings.hyperliquid_account_address,
+        vault_address=settings.hyperliquid_vault_address,
+    )
+
+
+def create_exchange_gateway(settings: Settings) -> ExchangeGateway:
+    """Create a Hyperliquid exchange gateway from settings.
+
+    Used by kill-switch / panic commands that need the gateway directly.
+    """
+    return _build_exchange_gateway(settings, TradingMode(settings.mode))
 
 
 def create_run_bot_use_case(
@@ -76,6 +102,7 @@ def create_run_bot_use_case(
         )
 
         stream = HyperliquidMarketDataStream(
+            base_url=hyperliquid_base_url(settings),
             stale_data_seconds=settings.stale_data_seconds,
         )
     else:
@@ -175,6 +202,59 @@ def create_status_use_case():
     return StatusUseCase(repo=create_bot_state_repository(migrate=False))
 
 
+def create_bot_loop(
+    settings: Settings,
+    gateway: ExchangeGateway | None = None,
+    *,
+    account: bool = False,
+):
+    """Create the market-data (and optional account) event loop.
+
+    Parameters
+    ----------
+    settings:
+        Runtime settings (stale-data threshold, testnet flag, credentials).
+    gateway:
+        Exchange gateway whose SDK ``Exchange`` backs the account stream.
+        Required when ``account=True``.
+    account:
+        When ``True`` (testnet/live), subscribe to user fills and order
+        updates so lifecycle/fill handling is fed by real exchange events.
+    """
+    from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
+    from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
+        HyperliquidMarketDataStream,
+    )
+    from finbot.infrastructure.adapters.thread_safe_event_queue import (
+        ThreadSafeEventQueue,
+    )
+
+    queue = ThreadSafeEventQueue()
+    stream = HyperliquidMarketDataStream(
+        base_url=hyperliquid_base_url(settings),
+        stale_data_seconds=settings.stale_data_seconds,
+    )
+    account_stream = None
+    if account:
+        if gateway is None:
+            raise ValueError("account=True requires an exchange gateway")
+        from finbot.infrastructure.adapters.hyperliquid_account_data_stream import (
+            HyperliquidAccountDataStream,
+        )
+        from finbot.infrastructure.adapters.hyperliquid_exchange_gateway import (
+            HyperliquidExchangeGateway,
+        )
+
+        if not isinstance(gateway, HyperliquidExchangeGateway):
+            raise ValueError("account stream requires a HyperliquidExchangeGateway")
+        account_stream = HyperliquidAccountDataStream(
+            exchange=gateway.get_exchange(),
+            queue=queue,
+            user_address=settings.hyperliquid_account_address,
+        )
+    return BotEventLoop(queue, stream, account_stream=account_stream)
+
+
 def create_live_trading_runtime_use_case(
     strategy_path: str,
     symbol: str,
@@ -191,8 +271,10 @@ def create_live_trading_runtime_use_case(
     via the factory, and wires all adapters.  Never uses the placeholder
     ``FinbarStrategyEvaluator`` in the live path.
 
-    When *bot_loop* is provided, the stream is owned by the bot loop
-    and ``market_data_stream`` is set to ``None`` on the use case.
+    When ``live_data`` is True (or *bot_loop* is omitted on the
+    testnet/live path) a :class:`BotEventLoop` owning the market data
+    stream — plus an account stream for testnet/live — is built here so
+    all wiring lives in the composition root.
     """
     from finbot.core.application.use_cases.live_trading_runtime import (
         LiveTradingRuntimeUseCase,
@@ -205,12 +287,27 @@ def create_live_trading_runtime_use_case(
         EnrichmentValidator,
     )
     from finbot.core.domain.services.order_planner import OrderPlanner
+    from finbot.core.domain.services.risk_gates.daily_loss_gate import (
+        DailyLossGate,
+    )
     from finbot.core.domain.services.risk_gates.duplicate_signal_gate import (
         DuplicateSignalGate,
     )
+    from finbot.core.domain.services.risk_gates.max_leverage_gate import (
+        MaxLeverageGate,
+    )
+    from finbot.core.domain.services.risk_gates.max_open_orders_gate import (
+        MaxOpenOrdersGate,
+    )
+    from finbot.core.domain.services.risk_gates.max_position_gate import (
+        MaxPositionGate,
+    )
     from finbot.core.domain.services.risk_gates.mode_gate import ModeGate
-    from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
-        RuleBasedStrategyEvaluatorFactory,
+    from finbot.core.domain.services.risk_gates.reduce_only_gate import (
+        ReduceOnlyGate,
+    )
+    from finbot.core.domain.services.risk_gates.stale_data_gate import (
+        StaleDataGate,
     )
     from finbot.infrastructure.strategy.pandas_bar_frame_converter import (
         PandasBarFrameConverter,
@@ -218,37 +315,30 @@ def create_live_trading_runtime_use_case(
     from finbot.infrastructure.strategy.pandas_ta_indicator_calculator import (
         PandasTaIndicatorCalculator,
     )
-    from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
-        YamlStrategyDefinitionLoader,
-    )
 
     trading_mode = TradingMode(mode)
     settings = Settings()
     if trading_mode in (TradingMode.TESTNET, TradingMode.LIVE):
         repo = create_bot_state_repository()
-    elif settings.database_path and settings.database_path not in ("data/finbot.db", ""):
+    elif settings.database_path and settings.database_path not in (
+        "data/finbot.db",
+        "",
+    ):
         # Dry-run with explicit database path — use SQLite for persistent audit
         repo = create_bot_state_repository()
     else:
         repo = create_in_memory_repository()
 
-    # When a bot_loop is provided, it owns the stream — don't create a second one.
-    if bot_loop is not None:
-        stream = None  # type: ignore[assignment]
-    elif live_data:
-        from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
-            HyperliquidMarketDataStream,
-        )
+    gateway = _build_exchange_gateway(settings, trading_mode)
 
-        stream = HyperliquidMarketDataStream(
-            stale_data_seconds=settings.stale_data_seconds,
+    # Build the bot loop + account stream in the composition root unless the
+    # caller supplied one (tests inject fakes).
+    if bot_loop is None and live_data:
+        bot_loop = create_bot_loop(
+            settings,
+            gateway,
+            account=trading_mode in (TradingMode.TESTNET, TradingMode.LIVE),
         )
-    else:
-        from finbot.infrastructure.adapters.in_memory_market_data_stream import (
-            InMemoryMarketDataStream,
-        )
-
-        stream = InMemoryMarketDataStream()
 
     # Load YAML strategy and create real evaluator
     loader = YamlStrategyDefinitionLoader()
@@ -269,8 +359,7 @@ def create_live_trading_runtime_use_case(
         warmup_bars = _load_warmup_bars(symbol, interval, min_bars=100)
 
     return LiveTradingRuntimeUseCase(
-        exchange_gateway=_build_exchange_gateway(settings, trading_mode),
-        market_data_stream=stream,
+        exchange_gateway=gateway,
         strategy_evaluator=evaluator,
         state_repository=repo,
         indicator_calculator=PandasTaIndicatorCalculator(),
@@ -281,21 +370,26 @@ def create_live_trading_runtime_use_case(
         required_columns=required_columns,
         order_planner=OrderPlanner(
             gates=[
-                ModeGate(),
+                ModeGate(
+                    mode=trading_mode.value,
+                    live_trading_ack=settings.live_trading_ack,
+                ),
+                StaleDataGate(max_age_seconds=settings.stale_data_seconds),
+                MaxPositionGate(max_notional_usd=settings.max_position_usd),
+                MaxLeverageGate(),
+                MaxOpenOrdersGate(max_orders=settings.max_open_orders),
+                DailyLossGate(max_loss_usd=settings.max_daily_loss_usd),
+                ReduceOnlyGate(),
                 DuplicateSignalGate(repo),
             ]
         ),
         bot_loop=bot_loop,
-        strategy_validator=ValidateStrategyUseCase(
-            YamlStrategyDefinitionLoader()
-        ),
+        strategy_validator=ValidateStrategyUseCase(YamlStrategyDefinitionLoader()),
     )
 
 
 def _hash_strategy_file(path: str) -> str:
     """Return a hex digest of the strategy file contents."""
-    import hashlib
-
     from finbot.core.domain.entities.strategy_load_error import StrategyLoadError
 
     try:
@@ -328,6 +422,6 @@ def _load_warmup_bars(
         bars = source.load_bars(symbol, interval, min_bars)
         logger.info("Loaded %d warmup bars for %s/%s", len(bars), symbol, interval)
         return bars
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - degrade gracefully to live warmup
         logger.warning("Warmup bar load failed for %s: %s", symbol, e)
         return []

@@ -13,6 +13,9 @@ from finbot.core.domain.services.risk_gates.daily_loss_gate import (
 from finbot.core.domain.services.risk_gates.duplicate_signal_gate import (
     DuplicateSignalGate,
 )
+from finbot.core.domain.services.risk_gates.max_leverage_gate import (
+    MaxLeverageGate,
+)
 from finbot.core.domain.services.risk_gates.max_open_orders_gate import (
     MaxOpenOrdersGate,
 )
@@ -183,4 +186,51 @@ class TestReduceOnlyGate:
     def test_exit_with_reduce_only_passes(self) -> None:
         gate = ReduceOnlyGate()
         result = gate.check(_signal(SignalAction.LONG_EXIT), {"reduce_only": True})
+        assert result.accepted
+
+
+class TestModeGate:
+    def test_dry_run_default_allows_signals(self) -> None:
+        gate = ModeGate()
+        result = gate.check(_signal(SignalAction.LONG_ENTRY), {})
+        assert result.accepted
+
+    def test_live_without_ack_is_rejected(self) -> None:
+        gate = ModeGate(mode="live", live_trading_ack=False)
+        result = gate.check(_signal(SignalAction.LONG_ENTRY), {})
+        assert not result.accepted
+        assert result.gate_name == "mode"
+        assert "ack" in result.reason.lower()
+
+    def test_live_with_ack_allows_signals(self) -> None:
+        gate = ModeGate(mode="live", live_trading_ack=True)
+        result = gate.check(_signal(SignalAction.LONG_ENTRY), {})
+        assert result.accepted
+
+    def test_testnet_allows_signals(self) -> None:
+        gate = ModeGate(mode="testnet", live_trading_ack=False)
+        result = gate.check(_signal(SignalAction.LONG_ENTRY), {})
+        assert result.accepted
+
+
+class TestMaxLeverageGate:
+    def test_disabled_when_max_is_zero(self) -> None:
+        gate = MaxLeverageGate(max_leverage=0)
+        result = gate.check(_signal(SignalAction.LONG_ENTRY), {"leverage": 100})
+        assert result.accepted
+
+    def test_over_leverage_is_rejected(self) -> None:
+        gate = MaxLeverageGate(max_leverage=5)
+        result = gate.check(_signal(SignalAction.LONG_ENTRY), {"leverage": 10})
+        assert not result.accepted
+        assert result.gate_name == "max_leverage"
+
+    def test_unleveraged_order_passes(self) -> None:
+        gate = MaxLeverageGate(max_leverage=5)
+        result = gate.check(_signal(SignalAction.LONG_ENTRY), {})
+        assert result.accepted
+
+    def test_exactly_at_limit_passes(self) -> None:
+        gate = MaxLeverageGate(max_leverage=5)
+        result = gate.check(_signal(SignalAction.LONG_ENTRY), {"leverage": 5})
         assert result.accepted

@@ -1,8 +1,5 @@
 """Integration tests for BotLoop wiring into LiveTradingRuntimeUseCase."""
 
-import threading
-import time
-
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.entities.trading_mode import TradingMode
@@ -35,6 +32,7 @@ class FakeBotLoop(BotLoop):
         interval: str,
         on_candle,
         on_stale=None,
+        on_account_event=None,
     ) -> None:
         self.started_symbol = symbol
         self.started_interval = interval
@@ -52,7 +50,7 @@ class FakeBotLoop(BotLoop):
 class CapturingBotLoop(FakeBotLoop):
     """BotLoop fake that captures the callback and can fire events."""
 
-    def start(self, symbol, interval, on_candle, on_stale=None):
+    def start(self, symbol, interval, on_candle, on_stale=None, on_account_event=None):
         super().start(symbol, interval, on_candle, on_stale)
         self._on_candle = on_candle
 
@@ -71,7 +69,6 @@ def test_bot_loop_run_forever_processes_candles() -> None:
 
     runtime = LiveTradingRuntimeUseCase(
         exchange_gateway=InMemoryExchangeGateway(),
-        market_data_stream=None,  # type: ignore[arg-type]
         strategy_evaluator=FakeStrategyEvaluator(
             signal=SignalDecision(
                 action=SignalAction.LONG_ENTRY,
@@ -99,8 +96,11 @@ def test_bot_loop_run_forever_processes_candles() -> None:
     # Simulate what run_forever does: the loop calls process_closed_candle
     candle = {
         "timestamp": 1735689600 + 100 * 3600,
-        "open": 51000.0, "high": 51100.0, "low": 50900.0,
-        "close": 51050.0, "volume": 50.0,
+        "open": 51000.0,
+        "high": 51100.0,
+        "low": 50900.0,
+        "close": 51050.0,
+        "volume": 50.0,
     }
 
     # Direct call simulates bot loop dispatch
@@ -114,14 +114,14 @@ def test_bot_loop_run_forever_processes_candles() -> None:
 
 def test_run_forever_raises_without_bot_loop() -> None:
     """run_forever raises RuntimeError when no BotLoop is injected."""
+    import pytest
+
     from finbot.core.application.use_cases.live_trading_runtime import (
         LiveTradingRuntimeUseCase,
     )
-    import pytest
 
     runtime = LiveTradingRuntimeUseCase(
         exchange_gateway=InMemoryExchangeGateway(),
-        market_data_stream=None,  # type: ignore[arg-type]
         strategy_evaluator=FakeStrategyEvaluator(),
         state_repository=StubBotStateRepository(),
         indicator_calculator=InMemoryIndicatorEngine(),

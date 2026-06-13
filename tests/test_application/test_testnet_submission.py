@@ -2,10 +2,10 @@
 
 from decimal import Decimal
 
-from finbot.core.domain.entities.market_metadata import MarketMetadata
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.entities.trading_mode import TradingMode
+from finbot.core.domain.services.cloid_generator import CloidGenerator
 from finbot.core.domain.services.enrichment_validator import (
     EnrichmentValidator,
 )
@@ -26,9 +26,6 @@ from tests.fakes import (
     indicator_bar,
     new_closed_candle,
 )
-
-from finbot.core.domain.services.cloid_generator import CloidGenerator
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,7 +57,6 @@ def _make_runtime(**overrides):
     }
     kwargs = dict(
         exchange_gateway=FakeExchangeGateway(),
-        market_data_stream=None,
         strategy_evaluator=FakeStrategyEvaluator(
             signal=SignalDecision(
                 action=SignalAction.LONG_ENTRY,
@@ -79,9 +75,7 @@ def _make_runtime(**overrides):
         mode=TradingMode.TESTNET,
         warmup_bars=closed_warmup_bars(100),
         required_columns={"atr"},
-        order_planner=OrderPlanner(
-            gates=[ModeGate(), DuplicateSignalGate(repo)]
-        ),
+        order_planner=OrderPlanner(gates=[ModeGate(), DuplicateSignalGate(repo)]),
         market_metadata_provider=metadata_provider,
         order_normalizer=normalizer,
         cloid_generator=CloidGenerator(),

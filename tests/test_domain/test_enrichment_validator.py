@@ -1,18 +1,11 @@
 """Tests for EnrichmentValidator — the enrichment quality gate."""
 
-import math
-
-import pytest
-
-from finbot.core.domain.entities.enrichment_validation_result import (
-    EnrichmentValidationResult,
-)
 from finbot.core.domain.services.enrichment_validator import EnrichmentValidator
-
 
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
 
 def _bar(**fields: object) -> dict:
     """Build a synthetic enriched bar dict for tests."""
@@ -22,6 +15,7 @@ def _bar(**fields: object) -> dict:
 # ---------------------------------------------------------------------------
 # Valid bars pass
 # ---------------------------------------------------------------------------
+
 
 def test_valid_bar_passes_all_checks() -> None:
     validator = EnrichmentValidator()
@@ -51,6 +45,7 @@ def test_valid_bar_passes_all_checks() -> None:
 # ---------------------------------------------------------------------------
 # Missing required columns
 # ---------------------------------------------------------------------------
+
 
 def test_missing_required_column_rejects() -> None:
     validator = EnrichmentValidator()
@@ -89,6 +84,7 @@ def test_all_required_columns_missing_rejects() -> None:
 # ---------------------------------------------------------------------------
 # Non-finite numeric values
 # ---------------------------------------------------------------------------
+
 
 def test_nan_in_required_numeric_column_rejects() -> None:
     validator = EnrichmentValidator()
@@ -161,6 +157,7 @@ def test_negative_inf_in_required_numeric_column_rejects() -> None:
 # None values
 # ---------------------------------------------------------------------------
 
+
 def test_none_in_required_column_rejects() -> None:
     validator = EnrichmentValidator()
     bar = _bar(
@@ -188,6 +185,7 @@ def test_none_in_required_column_rejects() -> None:
 # Invalid boolean type
 # ---------------------------------------------------------------------------
 
+
 def test_string_where_boolean_required_rejects() -> None:
     validator = EnrichmentValidator()
     bar = _bar(
@@ -213,6 +211,7 @@ def test_string_where_boolean_required_rejects() -> None:
 # ---------------------------------------------------------------------------
 # Warmup / gap gates
 # ---------------------------------------------------------------------------
+
 
 def test_warmup_not_ready_rejects() -> None:
     validator = EnrichmentValidator()
@@ -249,6 +248,7 @@ def test_gap_detected_rejects() -> None:
 # ---------------------------------------------------------------------------
 # Optional columns
 # ---------------------------------------------------------------------------
+
 
 def test_optional_non_required_nan_does_not_block() -> None:
     """Non-required columns with NaN/None do not block evaluation."""
@@ -292,6 +292,7 @@ def test_optional_non_required_missing_does_not_block() -> None:
 # ---------------------------------------------------------------------------
 # Multiple failures are all reported
 # ---------------------------------------------------------------------------
+
 
 def test_multiple_failures_all_reported() -> None:
     validator = EnrichmentValidator()

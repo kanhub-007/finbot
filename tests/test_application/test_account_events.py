@@ -2,7 +2,6 @@
 
 from decimal import Decimal
 
-from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
 from finbot.core.domain.entities.order_side import OrderSide
@@ -12,11 +11,11 @@ from finbot.core.domain.entities.trading_mode import TradingMode
 from finbot.core.domain.services.enrichment_validator import (
     EnrichmentValidator,
 )
+from finbot.core.domain.services.order_planner import OrderPlanner
 from finbot.core.domain.services.risk_gates.duplicate_signal_gate import (
     DuplicateSignalGate,
 )
 from finbot.core.domain.services.risk_gates.mode_gate import ModeGate
-from finbot.core.domain.services.order_planner import OrderPlanner
 from tests.fakes import (
     FakeStrategyEvaluator,
     InMemoryBarFrameConverter,
@@ -26,7 +25,6 @@ from tests.fakes import (
     closed_warmup_bars,
     indicator_bar,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -41,7 +39,6 @@ def _make_runtime(repo=None):
     repo = repo or StubBotStateRepository()
     return LiveTradingRuntimeUseCase(
         exchange_gateway=InMemoryExchangeGateway(),
-        market_data_stream=None,  # type: ignore[arg-type]
         strategy_evaluator=FakeStrategyEvaluator(),
         state_repository=repo,
         indicator_calculator=InMemoryIndicatorEngine(
@@ -52,9 +49,7 @@ def _make_runtime(repo=None):
         mode=TradingMode.DRY_RUN,
         warmup_bars=closed_warmup_bars(100),
         required_columns={"atr"},
-        order_planner=OrderPlanner(
-            gates=[ModeGate(), DuplicateSignalGate(repo)]
-        ),
+        order_planner=OrderPlanner(gates=[ModeGate(), DuplicateSignalGate(repo)]),
     )
 
 
@@ -97,11 +92,13 @@ def test_accepted_update_moves_lifecycle_to_accepted() -> None:
     runtime = _make_runtime(repo)
     _start_session_with_intent(runtime, repo, "intent-1")
 
-    result = runtime.process_account_event({
-        "type": "order_update",
-        "order_id": "intent-1",
-        "status": "accepted",
-    })
+    result = runtime.process_account_event(
+        {
+            "type": "order_update",
+            "order_id": "intent-1",
+            "status": "accepted",
+        }
+    )
 
     lifecycle = repo._lifecycles.get("intent-1")
     assert lifecycle is not None
@@ -113,14 +110,16 @@ def test_open_update_moves_lifecycle_to_open() -> None:
     """Open order update moves lifecycle from ACCEPTED to OPEN."""
     repo = StubBotStateRepository()
     runtime = _make_runtime(repo)
-    intent = _start_session_with_intent(runtime, repo, "intent-2")
+    _start_session_with_intent(runtime, repo, "intent-2")
     repo._lifecycles["intent-2"].state = OrderState.ACCEPTED
 
-    runtime.process_account_event({
-        "type": "order_update",
-        "order_id": "intent-2",
-        "status": "open",
-    })
+    runtime.process_account_event(
+        {
+            "type": "order_update",
+            "order_id": "intent-2",
+            "status": "open",
+        }
+    )
 
     assert repo._lifecycles["intent-2"].state == OrderState.OPEN
 
@@ -132,14 +131,16 @@ def test_partial_fill_persists_fill_and_updates_remaining_size() -> None:
     _start_session_with_intent(runtime, repo, "intent-3")
     repo._lifecycles["intent-3"].state = OrderState.OPEN
 
-    runtime.process_account_event({
-        "type": "fill",
-        "order_id": "intent-3",
-        "fill_id": "fill-1",
-        "size": str(Decimal("0.0005")),
-        "price": str(Decimal("50000")),
-        "fee": str(Decimal("1.25")),
-    })
+    runtime.process_account_event(
+        {
+            "type": "fill",
+            "order_id": "intent-3",
+            "fill_id": "fill-1",
+            "size": str(Decimal("0.0005")),
+            "price": str(Decimal("50000")),
+            "fee": str(Decimal("1.25")),
+        }
+    )
 
     lifecycle = repo._lifecycles["intent-3"]
     assert lifecycle.state == OrderState.PARTIALLY_FILLED
@@ -179,14 +180,16 @@ def test_full_fill_moves_lifecycle_to_filled() -> None:
     _start_session_with_intent(runtime, repo, "intent-5")
     repo._lifecycles["intent-5"].state = OrderState.OPEN
 
-    runtime.process_account_event({
-        "type": "fill",
-        "order_id": "intent-5",
-        "fill_id": "fill-3",
-        "size": str(Decimal("0.001")),  # Full size
-        "price": str(Decimal("50000")),
-        "fee": str(Decimal("2.50")),
-    })
+    runtime.process_account_event(
+        {
+            "type": "fill",
+            "order_id": "intent-5",
+            "fill_id": "fill-3",
+            "size": str(Decimal("0.001")),  # Full size
+            "price": str(Decimal("50000")),
+            "fee": str(Decimal("2.50")),
+        }
+    )
 
     assert repo._lifecycles["intent-5"].state == OrderState.FILLED
     assert repo._lifecycles["intent-5"].remaining_size == Decimal("0")
@@ -198,11 +201,13 @@ def test_rejected_update_marks_lifecycle_rejected() -> None:
     runtime = _make_runtime(repo)
     _start_session_with_intent(runtime, repo, "intent-6")
 
-    runtime.process_account_event({
-        "type": "order_update",
-        "order_id": "intent-6",
-        "status": "rejected",
-    })
+    runtime.process_account_event(
+        {
+            "type": "order_update",
+            "order_id": "intent-6",
+            "status": "rejected",
+        }
+    )
 
     assert repo._lifecycles["intent-6"].state == OrderState.REJECTED
 
@@ -214,11 +219,13 @@ def test_cancelled_update_marks_lifecycle_cancelled() -> None:
     _start_session_with_intent(runtime, repo, "intent-7")
     repo._lifecycles["intent-7"].state = OrderState.OPEN
 
-    runtime.process_account_event({
-        "type": "order_update",
-        "order_id": "intent-7",
-        "status": "cancelled",
-    })
+    runtime.process_account_event(
+        {
+            "type": "order_update",
+            "order_id": "intent-7",
+            "status": "cancelled",
+        }
+    )
 
     # CANCELLED requires CANCEL_REQUESTED transition first (state machine)
     assert repo._lifecycles["intent-7"].state == OrderState.CANCEL_REQUESTED
@@ -231,10 +238,12 @@ def test_unknown_order_update_blocks_new_orders() -> None:
     _start_session_with_intent(runtime, repo, "intent-8")
     repo._lifecycles["intent-8"].state = OrderState.SUBMITTED
 
-    runtime.process_account_event({
-        "type": "order_update",
-        "order_id": "intent-8",
-        "status": "unknown",
-    })
+    runtime.process_account_event(
+        {
+            "type": "order_update",
+            "order_id": "intent-8",
+            "status": "unknown",
+        }
+    )
 
     assert repo._lifecycles["intent-8"].state == OrderState.UNKNOWN_RECONCILE_REQUIRED

@@ -15,8 +15,18 @@ class TestHyperliquidMetadataProviderStandard:
         mock_info = MagicMock()
         mock_info.meta.return_value = {
             "universe": [
-                {"name": "BTC", "szDecimals": 5, "coinCdcDecimalPlaces": 0, "maxLeverage": 50},
-                {"name": "ETH", "szDecimals": 4, "coinCdcDecimalPlaces": 1, "maxLeverage": 25},
+                {
+                    "name": "BTC",
+                    "szDecimals": 5,
+                    "coinCdcDecimalPlaces": 0,
+                    "maxLeverage": 50,
+                },
+                {
+                    "name": "ETH",
+                    "szDecimals": 4,
+                    "coinCdcDecimalPlaces": 1,
+                    "maxLeverage": 25,
+                },
             ]
         }
         mock_info.perp_dexs.return_value = []
@@ -35,7 +45,12 @@ class TestHyperliquidMetadataProviderStandard:
         mock_info = MagicMock()
         mock_info.meta.return_value = {
             "universe": [
-                {"name": "BTC", "szDecimals": 5, "coinCdcDecimalPlaces": 0, "maxLeverage": 50},
+                {
+                    "name": "BTC",
+                    "szDecimals": 5,
+                    "coinCdcDecimalPlaces": 0,
+                    "maxLeverage": 50,
+                },
             ]
         }
         mock_info.perp_dexs.return_value = []
@@ -50,7 +65,12 @@ class TestHyperliquidMetadataProviderStandard:
         mock_info = MagicMock()
         mock_info.meta.return_value = {
             "universe": [
-                {"name": "BTC", "szDecimals": 5, "coinCdcDecimalPlaces": 0, "maxLeverage": 50},
+                {
+                    "name": "BTC",
+                    "szDecimals": 5,
+                    "coinCdcDecimalPlaces": 0,
+                    "maxLeverage": 50,
+                },
             ]
         }
         mock_info.perp_dexs.return_value = []
@@ -65,7 +85,12 @@ class TestHyperliquidMetadataProviderStandard:
         mock_info = MagicMock()
         mock_info.meta.return_value = {
             "universe": [
-                {"name": "ETH", "szDecimals": 4, "coinCdcDecimalPlaces": 2, "maxLeverage": 25},
+                {
+                    "name": "ETH",
+                    "szDecimals": 4,
+                    "coinCdcDecimalPlaces": 2,
+                    "maxLeverage": 25,
+                },
             ]
         }
         mock_info.perp_dexs.return_value = []
@@ -87,10 +112,22 @@ class TestHyperliquidMetadataProviderHip3:
         mock_info.perp_dexs.return_value = [{"name": "flx"}, {"name": "xyz"}]
         # HIP-3 endpoint returns metaAndAssetCtxs for a specific DEX
         mock_info.post.return_value = [
-            {"universe": [
-                {"name": "flx:TSLA", "szDecimals": 2, "coinCdcDecimalPlaces": 2, "maxLeverage": 3},
-                {"name": "flx:NVDA", "szDecimals": 2, "coinCdcDecimalPlaces": 2, "maxLeverage": 3},
-            ]},
+            {
+                "universe": [
+                    {
+                        "name": "flx:TSLA",
+                        "szDecimals": 2,
+                        "coinCdcDecimalPlaces": 2,
+                        "maxLeverage": 3,
+                    },
+                    {
+                        "name": "flx:NVDA",
+                        "szDecimals": 2,
+                        "coinCdcDecimalPlaces": 2,
+                        "maxLeverage": 3,
+                    },
+                ]
+            },
             [{"dayNtlVlm": "100000"}],
         ]
 
@@ -109,9 +146,16 @@ class TestHyperliquidMetadataProviderHip3:
         mock_info.meta.return_value = {"universe": []}
         mock_info.perp_dexs.return_value = [{"name": "flx"}]
         mock_info.post.return_value = [
-            {"universe": [
-                {"name": "flx:TSLA", "szDecimals": 2, "coinCdcDecimalPlaces": 2, "maxLeverage": 3},
-            ]},
+            {
+                "universe": [
+                    {
+                        "name": "flx:TSLA",
+                        "szDecimals": 2,
+                        "coinCdcDecimalPlaces": 2,
+                        "maxLeverage": 3,
+                    },
+                ]
+            },
             [],
         ]
 
@@ -128,9 +172,16 @@ class TestHyperliquidMetadataProviderHip3:
         mock_info.meta.return_value = {"universe": []}
         mock_info.perp_dexs.return_value = [{"name": "flx"}]
         mock_info.post.return_value = [
-            {"universe": [
-                {"name": "flx:TSLA", "szDecimals": 2, "coinCdcDecimalPlaces": 2, "maxLeverage": 3},
-            ]},
+            {
+                "universe": [
+                    {
+                        "name": "flx:TSLA",
+                        "szDecimals": 2,
+                        "coinCdcDecimalPlaces": 2,
+                        "maxLeverage": 3,
+                    },
+                ]
+            },
             [],
         ]
 
@@ -156,9 +207,16 @@ class TestHyperliquidMetadataProviderHip3:
         mock_info.meta.return_value = {"universe": []}
         mock_info.perp_dexs.return_value = [{"name": "flx"}]
         mock_info.post.return_value = [
-            {"universe": [
-                {"name": "flx:TSLA", "szDecimals": 2, "coinCdcDecimalPlaces": 2, "maxLeverage": 3},
-            ]},
+            {
+                "universe": [
+                    {
+                        "name": "flx:TSLA",
+                        "szDecimals": 2,
+                        "coinCdcDecimalPlaces": 2,
+                        "maxLeverage": 3,
+                    },
+                ]
+            },
             [],
         ]
 
@@ -172,14 +230,26 @@ class TestHyperliquidMetadataProviderHip3:
         mock_info = MagicMock()
         mock_info.meta.return_value = {
             "universe": [
-                {"name": "BTC", "szDecimals": 5, "coinCdcDecimalPlaces": 0, "maxLeverage": 50},
+                {
+                    "name": "BTC",
+                    "szDecimals": 5,
+                    "coinCdcDecimalPlaces": 0,
+                    "maxLeverage": 50,
+                },
             ]
         }
         mock_info.perp_dexs.return_value = [{"name": "flx"}]
         mock_info.post.return_value = [
-            {"universe": [
-                {"name": "flx:TSLA", "szDecimals": 2, "coinCdcDecimalPlaces": 2, "maxLeverage": 3},
-            ]},
+            {
+                "universe": [
+                    {
+                        "name": "flx:TSLA",
+                        "szDecimals": 2,
+                        "coinCdcDecimalPlaces": 2,
+                        "maxLeverage": 3,
+                    },
+                ]
+            },
             [],
         ]
 

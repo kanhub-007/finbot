@@ -18,7 +18,6 @@ from finbot.core.domain.entities.bot_event_type import BotEventType
 from finbot.core.domain.interfaces.event_queue import EventQueue
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
 
     from hyperliquid.exchange import Exchange
 
@@ -61,7 +60,9 @@ class HyperliquidAccountDataStream:
         """Subscribe to user fills and order updates."""
         ws = self._exchange.ws_manager
         if ws is None:
-            logger.warning("No websocket manager on Exchange — skipping account subscriptions")
+            logger.warning(
+                "No websocket manager on Exchange — skipping account subscriptions"
+            )
             return
 
         try:

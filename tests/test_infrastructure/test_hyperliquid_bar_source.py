@@ -13,10 +13,26 @@ class TestHyperliquidBarSourceStandard:
     def test_load_standard_perp_bars(self) -> None:
         mock_info = MagicMock()
         mock_info.candles_snapshot.return_value = [
-            {"t": 1749000000000, "o": "50000", "h": "51000", "l": "49000",
-             "c": "50500", "v": "100", "s": "BTC", "i": "1h"},
-            {"t": 1749003600000, "o": "50500", "h": "52000", "l": "50500",
-             "c": "51800", "v": "150", "s": "BTC", "i": "1h"},
+            {
+                "t": 1749000000000,
+                "o": "50000",
+                "h": "51000",
+                "l": "49000",
+                "c": "50500",
+                "v": "100",
+                "s": "BTC",
+                "i": "1h",
+            },
+            {
+                "t": 1749003600000,
+                "o": "50500",
+                "h": "52000",
+                "l": "50500",
+                "c": "51800",
+                "v": "150",
+                "s": "BTC",
+                "i": "1h",
+            },
         ]
 
         with (
@@ -64,10 +80,26 @@ class TestHyperliquidBarSourceHip3:
         mock_info = MagicMock()
         mock_info.candles_snapshot.return_value = []
         mock_info.post.return_value = [
-            {"t": 1749000000000, "o": "290.00", "h": "295.00", "l": "288.00",
-             "c": "292.00", "v": "5000", "s": "xyz:AAPL", "i": "1h"},
-            {"t": 1749003600000, "o": "292.00", "h": "298.00", "l": "291.00",
-             "c": "296.00", "v": "6000", "s": "xyz:AAPL", "i": "1h"},
+            {
+                "t": 1749000000000,
+                "o": "290.00",
+                "h": "295.00",
+                "l": "288.00",
+                "c": "292.00",
+                "v": "5000",
+                "s": "xyz:AAPL",
+                "i": "1h",
+            },
+            {
+                "t": 1749003600000,
+                "o": "292.00",
+                "h": "298.00",
+                "l": "291.00",
+                "c": "296.00",
+                "v": "6000",
+                "s": "xyz:AAPL",
+                "i": "1h",
+            },
         ]
 
         with (
@@ -94,8 +126,16 @@ class TestHyperliquidBarSourceHip3:
     def test_hip3_coin_field_is_dex_colon_coin(self) -> None:
         mock_info = MagicMock()
         mock_info.post.return_value = [
-            {"t": 1749000000000, "o": "400", "h": "410", "l": "400",
-             "c": "408", "v": "100", "s": "flx:TSLA", "i": "1h"},
+            {
+                "t": 1749000000000,
+                "o": "400",
+                "h": "410",
+                "l": "400",
+                "c": "408",
+                "v": "100",
+                "s": "flx:TSLA",
+                "i": "1h",
+            },
         ]
 
         with (

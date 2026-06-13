@@ -30,7 +30,6 @@ from tests.fakes import (
     new_closed_candle,
 )
 
-
 # ---------------------------------------------------------------------------
 # TrackingDryRunExchange — exchange fake that simulates position changes
 # ---------------------------------------------------------------------------
@@ -92,7 +91,6 @@ def _make_runtime(**overrides):
 
     kwargs = dict(
         exchange_gateway=TrackingDryRunExchange("BTC"),
-        market_data_stream=None,
         strategy_evaluator=FakeStrategyEvaluator(
             signal=SignalDecision(
                 action=SignalAction.LONG_ENTRY,
@@ -135,9 +133,7 @@ def test_dry_run_accepts_signal_and_increments_position() -> None:
     """Dry-run: accepted signal creates order intent and updates position."""
     exchange = TrackingDryRunExchange("BTC")
     repo = StubBotStateRepository()
-    runtime = _make_runtime(
-        exchange_gateway=exchange, state_repository=repo
-    )
+    runtime = _make_runtime(exchange_gateway=exchange, state_repository=repo)
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
     result = runtime.process_closed_candle(new_closed_candle())
@@ -156,9 +152,7 @@ def test_dry_run_duplicate_signal_is_rejected() -> None:
     repo = StubBotStateRepository()
     exchange = TrackingDryRunExchange("BTC")
 
-    first_runtime = _make_runtime(
-        state_repository=repo, exchange_gateway=exchange
-    )
+    first_runtime = _make_runtime(state_repository=repo, exchange_gateway=exchange)
     first_runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
     first_result = first_runtime.process_closed_candle(new_closed_candle())
 
@@ -167,9 +161,7 @@ def test_dry_run_duplicate_signal_is_rejected() -> None:
     assert first_intent_count == 1
 
     # Simulate restart: new runtime with same repository
-    second_runtime = _make_runtime(
-        state_repository=repo, exchange_gateway=exchange
-    )
+    second_runtime = _make_runtime(state_repository=repo, exchange_gateway=exchange)
     second_runtime._start_session("test-strategy-2", "test-hash", "BTC", "1h")
     second_runtime.process_closed_candle(new_closed_candle())
 
@@ -180,9 +172,7 @@ def test_dry_run_duplicate_signal_is_rejected() -> None:
 def test_max_position_exceeded_rejects_entry() -> None:
     """Max position exceeded -> risk rejected, no intent saved."""
     repo = StubBotStateRepository()
-    runtime = _make_runtime(
-        state_repository=repo, _max_position=Decimal("1")
-    )
+    runtime = _make_runtime(state_repository=repo, _max_position=Decimal("1"))
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
     result = runtime.process_closed_candle(new_closed_candle())

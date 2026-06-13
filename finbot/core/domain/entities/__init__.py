@@ -1,11 +1,11 @@
 """Domain entities."""
 
 from finbot.core.domain.entities.condition import Condition  # noqa: F401
+from finbot.core.domain.entities.condition_group import ConditionGroup  # noqa: F401
+from finbot.core.domain.entities.data_mode import DataMode  # noqa: F401
 from finbot.core.domain.entities.enrichment_validation_result import (  # noqa: F401
     EnrichmentValidationResult,
 )
-from finbot.core.domain.entities.condition_group import ConditionGroup  # noqa: F401
-from finbot.core.domain.entities.data_mode import DataMode  # noqa: F401
 from finbot.core.domain.entities.feature_spec import FeatureSpec  # noqa: F401
 from finbot.core.domain.entities.formula_node import FormulaNode  # noqa: F401
 from finbot.core.domain.entities.indicator_spec import IndicatorSpec  # noqa: F401

@@ -99,6 +99,31 @@ class StrategyDefinitionParser(ParserInterface):
         if data is None:
             return StrategyValidationResult(valid=False, errors=errors)
 
+        definition = self._resolve_components(data, param_overrides, errors)
+        if errors:
+            return StrategyValidationResult(valid=False, errors=errors)
+
+        warnings = _collect_warnings(definition, self._warning_rules)
+        limit_errors = _collect_limit_errors(
+            definition,
+            definition.parameters,
+            definition.indicators,
+            definition.features,
+            self._limit_rules,
+        )
+        errors.extend(limit_errors)
+        if errors:
+            return StrategyValidationResult(valid=False, errors=errors)
+
+        return self._build_success_result(definition, warnings)
+
+    def _resolve_components(
+        self,
+        data: dict,
+        param_overrides: dict | None,
+        errors: list[StrategyValidationError],
+    ) -> StrategyDefinition:
+        """Parse and resolve all strategy components from a raw dict."""
         name = self._validate_header(data, errors)
         params = self._parameter_resolver.parse(data.get("parameters", {}), errors)
         resolved_params = self._parameter_resolver.apply_overrides(
@@ -129,10 +154,7 @@ class StrategyDefinitionParser(ParserInterface):
             resolved_params,
             errors,
         )
-        if errors:
-            return StrategyValidationResult(valid=False, errors=errors)
-
-        definition = StrategyDefinition(
+        return StrategyDefinition(
             name=name,
             description=str(data.get("description", "")),
             parameters=params,
@@ -145,14 +167,13 @@ class StrategyDefinitionParser(ParserInterface):
             metadata=_metadata(data),
         )
 
-        warnings = _collect_warnings(definition, self._warning_rules)
-        limit_errors = _collect_limit_errors(
-            definition, params, indicators, features, self._limit_rules
-        )
-        errors.extend(limit_errors)
-        if errors:
-            return StrategyValidationResult(valid=False, errors=errors)
-
+    def _build_success_result(
+        self,
+        definition: StrategyDefinition,
+        warnings: list,
+    ) -> StrategyValidationResult:
+        """Assemble the final successful validation result."""
+        indicators = definition.indicators
         return StrategyValidationResult(
             valid=True,
             definition=definition,

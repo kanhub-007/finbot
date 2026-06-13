@@ -15,9 +15,7 @@ from tests.fakes import (
     StubBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
-    new_closed_candle,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,7 +29,6 @@ def _make_runtime(**overrides):
 
     kwargs = dict(
         exchange_gateway=InMemoryExchangeGateway(),
-        market_data_stream=None,  # type: ignore[arg-type]
         strategy_evaluator=FakeStrategyEvaluator(),
         state_repository=StubBotStateRepository(),
         indicator_calculator=InMemoryIndicatorEngine(
@@ -45,6 +42,18 @@ def _make_runtime(**overrides):
     )
     kwargs.update(overrides)
     return LiveTradingRuntimeUseCase(**kwargs)
+
+
+def _make_validator():
+    """Return a real ValidateStrategyUseCase for compatibility checks."""
+    from finbot.core.application.use_cases.validate_strategy_definition import (
+        ValidateStrategyUseCase,
+    )
+    from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
+        YamlStrategyDefinitionLoader,
+    )
+
+    return ValidateStrategyUseCase(YamlStrategyDefinitionLoader())
 
 
 def _live_config(**overrides) -> BotConfig:
@@ -107,7 +116,9 @@ def test_live_mode_rejected_without_durable_storage() -> None:
     )
 
     assert result.status == "rejected"
-    assert "persistence" in result.message.lower() or "database" in result.message.lower()
+    assert (
+        "persistence" in result.message.lower() or "database" in result.message.lower()
+    )
 
 
 def test_live_mode_rejected_with_zero_max_position() -> None:
@@ -174,3 +185,21 @@ def test_live_mode_accepts_with_all_gates_met() -> None:
     )
 
     assert result.status == "running"
+
+
+def test_live_mode_rejects_when_strategy_file_missing() -> None:
+    """A missing strategy file fails closed in live mode (not silently allowed)."""
+    runtime = _make_runtime(
+        mode=TradingMode.LIVE,
+        strategy_validator=_make_validator(),
+    )
+
+    result = runtime.start_live(
+        strategy_path="tests/fixtures/strategies/does_not_exist.yaml",
+        symbol="BTC",
+        interval="1h",
+        config=_live_config(),
+    )
+
+    assert result.status == "rejected"
+    assert "compatibility" in result.message.lower() or "read" in result.message.lower()

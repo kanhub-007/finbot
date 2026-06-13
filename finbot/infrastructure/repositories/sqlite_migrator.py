@@ -104,6 +104,31 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         """,
     ),
+    (
+        2,
+        """
+        CREATE TABLE IF NOT EXISTS order_lifecycles (
+            order_id      TEXT PRIMARY KEY,
+            symbol        TEXT NOT NULL,
+            side          TEXT NOT NULL,
+            original_size TEXT NOT NULL,
+            remaining_size TEXT NOT NULL,
+            filled_size   TEXT NOT NULL,
+            state         TEXT NOT NULL,
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS order_lifecycle_transitions (
+            transition_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id      TEXT NOT NULL REFERENCES order_lifecycles(order_id),
+            from_state    TEXT NOT NULL,
+            to_state      TEXT NOT NULL,
+            reason        TEXT NOT NULL DEFAULT '',
+            occurred_at   TEXT NOT NULL
+        );
+        """,
+    ),
 ]
 
 LATEST_VERSION = max(v for v, _ in MIGRATIONS) if MIGRATIONS else 0

@@ -98,6 +98,8 @@ class TestSymbolParser:
             parse_symbol("a:b:c")
 
     def test_parsed_symbol_dataclass(self) -> None:
-        p = ParsedSymbol(raw="xyz:AAPL", is_hip3=True, dex="xyz", coin="AAPL", api_symbol="xyz:AAPL")
+        p = ParsedSymbol(
+            raw="xyz:AAPL", is_hip3=True, dex="xyz", coin="AAPL", api_symbol="xyz:AAPL"
+        )
         assert p.raw == "xyz:AAPL"
         assert p.is_hip3 is True
