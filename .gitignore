@@ -12,3 +12,4 @@ data/*.db-shm
 data/*.db-wal
 logs/
 *.egg-info/
+.venv313
