@@ -43,6 +43,9 @@ class BotEventLoop(BotLoop):
     """
 
     MAX_BACKOFF = 60.0
+    #: Seconds a candle may take before its processing is logged as a stall
+    #: (P12 — tail-latency observability for account events queued behind it).
+    CANDLE_STALL_WARN_SECONDS = 1.0
 
     def __init__(
         self,
@@ -96,9 +99,42 @@ class BotEventLoop(BotLoop):
             event = self._queue.dequeue(timeout=1.0)
             if event is None:
                 continue
-            self._dispatch(event)
+            # Before any (potentially slow) candle work, drain account events
+            # that have arrived so fills / order updates are not starved by a
+            # long candle enrichment (P12 — tail-latency amplification).
+            self._drain_account_events()
+            self._dispatch_with_deadline(event)
 
         self._flush()
+
+    def _drain_account_events(self) -> None:
+        """Process any already-queued account events without blocking."""
+        for _ in range(self._queue.size()):
+            event = self._queue.dequeue(timeout=0)
+            if event is None:
+                break
+            if event.type in (BotEventType.FILL, BotEventType.ORDER_UPDATE):
+                self._dispatch(event)
+            else:
+                # Put non-account events back at the tail by re-enqueueing.
+                self._queue.enqueue(event)
+
+    def _dispatch_with_deadline(self, event: BotEvent) -> None:
+        """Dispatch an event, logging a warning if candle work stalls the loop."""
+        import time
+
+        started = time.monotonic()
+        self._dispatch(event)
+        elapsed = time.monotonic() - started
+        if (
+            event.type == BotEventType.CANDLE
+            and elapsed > self.CANDLE_STALL_WARN_SECONDS
+        ):
+            logger.warning(
+                "Candle processing took %.1fs (>%.1fs) — account events may lag",
+                elapsed,
+                self.CANDLE_STALL_WARN_SECONDS,
+            )
 
     def stop(self) -> None:
         """Signal the event loop to shut down gracefully.

@@ -13,6 +13,7 @@ from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
 from finbot.infrastructure.adapters.thread_safe_event_queue import (
     ThreadSafeEventQueue,
 )
+from tests.fakes import FakeMarketDataStream
 
 
 class TestThreadSafeEventQueue:
@@ -217,3 +218,52 @@ class _CountingQueue:
 
     def clear(self) -> None:
         pass
+
+
+def test_account_events_drained_before_candle_work() -> None:
+    """P12: a queued account event is processed before a slow candle."""
+    from finbot.core.domain.entities.bot_event import BotEvent
+    from finbot.core.domain.entities.bot_event_type import BotEventType
+    from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
+
+    queue = _ScriptedQueue(
+        [
+            BotEvent(type=BotEventType.CANDLE, data={"ts": 1}),
+            BotEvent(type=BotEventType.FILL, data={"fill_id": "f1"}),
+        ]
+    )
+    order: list = []
+    loop = BotEventLoop(queue, FakeMarketDataStream())
+    loop._on_candle = lambda d: order.append(("candle", d))
+    loop._on_account = lambda d: order.append(("account", d))
+    loop._running = True
+    # Run one iteration of the loop body manually.
+    event = queue.dequeue(timeout=0)
+    loop._drain_account_events()
+    loop._dispatch(event)
+
+    # The FILL that was queued behind the CANDLE is processed first.
+    assert order[0] == ("account", {"fill_id": "f1"})
+    assert order[1] == ("candle", {"ts": 1})
+
+
+class _ScriptedQueue:
+    """Returns pre-loaded events in order; enqueue appends to the tail."""
+
+    def __init__(self, events):
+        self._events = list(events)
+
+    def enqueue(self, event) -> bool:
+        self._events.append(event)
+        return True
+
+    def dequeue(self, timeout=None):
+        if self._events:
+            return self._events.pop(0)
+        return None
+
+    def size(self) -> int:
+        return len(self._events)
+
+    def clear(self) -> None:
+        self._events.clear()
