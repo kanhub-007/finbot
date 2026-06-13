@@ -245,6 +245,10 @@ class StubBotStateRepository(BotStateRepository):
         self._intent_map: dict[str, object] = {}
         self._order_responses: list = []
         self._reconciliations: list = []
+        self._fills: list = []
+        self._fill_ids: set[str] = set()
+        self._lifecycles: dict[str, object] = {}
+        self._cloid_map: dict[str, str] = {}
 
     def create_bot_run(self, bot_run) -> None:
         self._bot_runs.append(bot_run)
@@ -272,7 +276,12 @@ class StubBotStateRepository(BotStateRepository):
         self._order_responses.append(response)
 
     def record_fill(self, fill) -> None:
-        pass
+        from finbot.core.domain.entities.fill_record import FillRecord
+        if isinstance(fill, FillRecord) and fill.fill_id in self._fill_ids:
+            return  # idempotent
+        self._fills.append(fill)
+        if hasattr(fill, 'fill_id'):
+            self._fill_ids.add(fill.fill_id)
 
     def record_reconciliation(self, rec) -> None:
         self._reconciliations.append(rec)
@@ -298,6 +307,15 @@ class StubBotStateRepository(BotStateRepository):
     def last_reconciliation(self):
         return self._reconciliations[-1] if self._reconciliations else None
 
+    def has_fill(self, fill_id: str) -> bool:
+        return fill_id in self._fill_ids
+
+    def get_order_lifecycle(self, order_id: str):
+        return self._lifecycles.get(order_id)
+
+    def save_order_lifecycle(self, lifecycle) -> None:
+        self._lifecycles[lifecycle.order_id] = lifecycle
+
     def count_signals(self) -> int:
         return len(self._processed)
 
@@ -305,7 +323,7 @@ class StubBotStateRepository(BotStateRepository):
         return len(self._intents)
 
     def count_fills(self) -> int:
-        return 0
+        return len(self._fills)
 
     @property
     def signal_count(self) -> int:

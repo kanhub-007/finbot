@@ -27,6 +27,9 @@ from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_response_record import (
     OrderResponseRecord,
 )
+from finbot.core.domain.entities.fill_record import FillRecord
+from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
+from finbot.core.domain.entities.order_state import OrderState
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
 from finbot.core.domain.entities.reconciliation_record import (
@@ -60,6 +63,9 @@ from finbot.core.domain.interfaces.order_normalizer import OrderNormalizer
 from finbot.core.domain.interfaces.order_planner import OrderPlanner
 from finbot.core.domain.services.order_normalizer import (
     OrderNormalizationError,
+)
+from finbot.core.domain.services.order_state_machine import (
+    OrderStateMachine,
 )
 from finbot.core.domain.services.warmup_window import WarmupWindow
 
@@ -196,9 +202,119 @@ class LiveTradingRuntimeUseCase:
     def process_account_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """Process an account websocket event (order update, fill, etc.).
 
-        Placeholder — full account event processing in later slices.
+        Dispatches by event type and updates order lifecycle state.
         """
-        return {"status": "acknowledged", "event": str(event)[:80]}
+        event_type = event.get("type", "")
+        order_id = str(event.get("order_id", event.get("cloid", "")))
+
+        if not order_id:
+            return {"status": "skipped", "reason": "no order_id or cloid"}
+
+        if event_type == "order_update":
+            return self._handle_order_update(order_id, event)
+        elif event_type == "fill":
+            return self._handle_fill(order_id, event)
+        else:
+            return {"status": "skipped", "reason": f"unknown event type: {event_type}"}
+
+    # -- account event handlers -----------------------------------------------
+
+    def _handle_order_update(
+        self, order_id: str, event: dict[str, Any]
+    ) -> dict[str, Any]:
+        status = str(event.get("status", "")).lower()
+        lifecycle = self._get_or_create_lifecycle(order_id)
+
+        status_map = {
+            "accepted": OrderState.ACCEPTED,
+            "open": OrderState.OPEN,
+            "cancelled": OrderState.CANCEL_REQUESTED,
+            "rejected": OrderState.REJECTED,
+            "expired": OrderState.EXPIRED,
+        }
+
+        target = status_map.get(status)
+        if target is None:
+            # Unknown status — transition to reconciliation required
+            try:
+                OrderStateMachine.transition(
+                    lifecycle,
+                    OrderState.UNKNOWN_RECONCILE_REQUIRED,
+                    f"unknown order status: {status}",
+                )
+            except Exception:
+                pass
+            return {"status": "unknown_status", "reason": str(status)}
+
+        try:
+            OrderStateMachine.transition(lifecycle, target, f"order_update: {status}")
+        except Exception as e:
+            return {"status": "transition_rejected", "reason": str(e)}
+
+        return {"status": "processed"}
+
+    def _handle_fill(
+        self, order_id: str, event: dict[str, Any]
+    ) -> dict[str, Any]:
+        fill_id = str(event.get("fill_id", ""))
+        if not fill_id:
+            return {"status": "skipped", "reason": "no fill_id"}
+
+        # Idempotency: check if fill already recorded
+        if self._repo.has_fill(fill_id):
+            return {"status": "duplicate", "reason": f"fill {fill_id} already recorded"}
+
+        size = Decimal(str(event.get("size", "0")))
+        price = Decimal(str(event.get("price", "0")))
+        fee = Decimal(str(event.get("fee", "0")))
+
+        lifecycle = self._get_or_create_lifecycle(order_id)
+        original = lifecycle.original_size
+
+        # Transition to PARTIALLY_FILLED or FILLED
+        new_filled = lifecycle.filled_size + size
+        if new_filled >= original:
+            target = OrderState.FILLED
+        else:
+            target = OrderState.PARTIALLY_FILLED
+
+        try:
+            OrderStateMachine.transition(
+                lifecycle, target, str(size)
+            )
+        except Exception:
+            return {"status": "transition_rejected"}
+
+        # Persist fill record
+        fill = FillRecord(
+            bot_run_id=self._bot_run_id,
+            order_id=order_id,
+            symbol=self._symbol or "DEFAULT",
+            side="buy",
+            size=size,
+            price=price,
+            fee=fee,
+            fill_id=fill_id,
+        )
+        self._repo.record_fill(fill)
+
+        return {"status": "processed"}
+
+    def _get_or_create_lifecycle(self, order_id: str) -> Any:
+        """Return existing lifecycle or create a stub for reconciliation."""
+        lifecycle = self._repo.get_order_lifecycle(order_id)
+        if lifecycle is not None:
+            return lifecycle
+        # Create a minimal lifecycle stub
+        lifecycle = OrderLifecycle(
+            order_id=order_id,
+            symbol=self._symbol or "DEFAULT",
+            side="unknown",
+            original_size=Decimal("0"),
+            state=OrderState.SUBMITTED,
+        )
+        self._repo.save_order_lifecycle(lifecycle)
+        return lifecycle
 
     # -- internal pipeline steps ---------------------------------------------
 
