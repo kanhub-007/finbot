@@ -32,6 +32,9 @@ from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 from finbot.core.domain.interfaces.indicator_calculator import (
     IndicatorCalculator,
 )
+from finbot.core.domain.interfaces.bar_frame_converter import (
+    BarFrameConverter,
+)
 from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
@@ -62,6 +65,7 @@ class LiveTradingRuntimeUseCase:
         indicator_calculator: IndicatorCalculator,
         enrichment_validator: EnrichmentValidator,
         mode: TradingMode,
+        bar_frame_converter: BarFrameConverter | None = None,
         warmup_bars: list[dict[str, Any]] | None = None,
         required_columns: set[str] | None = None,
     ) -> None:
@@ -71,6 +75,7 @@ class LiveTradingRuntimeUseCase:
         self._repo = state_repository
         self._indicator_calc = indicator_calculator
         self._enrichment_validator = enrichment_validator
+        self._bar_converter = bar_frame_converter
         self._mode = mode
         self._required_columns: set[str] = required_columns or set()
         self._bot_run_id: str = ""
@@ -139,10 +144,13 @@ class LiveTradingRuntimeUseCase:
             )
 
         # 2. Enrich
-        import pandas as pd
-
         bars = self._warmup.bars
-        df = pd.DataFrame(bars)
+        if self._bar_converter is not None:
+            df = self._bar_converter.bars_to_frame(bars)
+        else:
+            import pandas as pd
+
+            df = pd.DataFrame(bars)
         enriched = self._indicator_calc.calculate(
             df, list(self._required_columns)
         )

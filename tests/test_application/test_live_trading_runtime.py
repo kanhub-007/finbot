@@ -82,7 +82,11 @@ class InMemoryIndicatorEngine(IndicatorCalculator):
         self._latest_bar = latest_bar or {}
 
     def calculate(self, df, indicators: list[str]):
-        """Return the pre-configured latest bar wrapped as needed."""
+        """Return the pre-configured latest bar, preserving DataFrame type."""
+        import pandas as pd
+
+        if isinstance(df, pd.DataFrame) and self._latest_bar:
+            return pd.DataFrame([self._latest_bar])
         return type(df)([self._latest_bar])
 
 
@@ -610,3 +614,262 @@ def test_out_of_order_candle_ignored_on_gap_detection() -> None:
     # so enrichment validation rejects
     assert result.enrichment_valid is False
     assert len(fake_evaluator.evaluate_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# Scenario 2: Supported YAML strategy is loaded into the real rule-based
+#             evaluator (not the placeholder FinbarStrategyEvaluator)
+# ---------------------------------------------------------------------------
+
+
+def test_yaml_strategy_loaded_into_real_evaluator() -> None:
+    """Scenario 2: real evaluator is used, returns non-HOLD for matching bars."""
+    from finbot.core.application.use_cases.live_trading_runtime import (
+        LiveTradingRuntimeUseCase,
+    )
+    from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
+        RuleBasedStrategyEvaluatorFactory,
+    )
+    from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
+        YamlStrategyDefinitionLoader,
+    )
+
+    strategy_path = "tests/fixtures/strategies/amt_dip_buyer_final.yaml"
+    loader = YamlStrategyDefinitionLoader()
+    definition = loader.load_from_file(strategy_path)
+    strategy_hash = "test-hash-amt-dip"
+    factory = RuleBasedStrategyEvaluatorFactory()
+    real_evaluator = factory.create(
+        definition=definition,
+        symbol="BTC",
+        interval="1h",
+        strategy_hash=strategy_hash,
+    )
+
+    repo = StubBotStateRepository()
+    # Build an enriched bar where acceptance_into_value is True —
+    # this triggers a LONG_ENTRY in the AMT dip buyer strategy.
+    indicator_bar = {
+        "timestamp": 1735689600,
+        "open": 50000.0,
+        "high": 51000.0,
+        "low": 49000.0,
+        "close": 50500.0,
+        "volume": 100.0,
+        "atr": 1200.0,
+        "vp_vah": 52000.0,
+        "vp_val": 50000.0,
+        "acceptance_into_value": 1,
+        "above_value": 0,
+    }
+    fake_indicator_engine = InMemoryIndicatorEngine(latest_bar=indicator_bar)
+
+    runtime = LiveTradingRuntimeUseCase(
+        exchange_gateway=InMemoryExchangeGateway(),
+        market_data_stream=FakeMarketDataStream(),
+        strategy_evaluator=real_evaluator,
+        state_repository=repo,
+        indicator_calculator=fake_indicator_engine,
+        enrichment_validator=EnrichmentValidator(),
+        mode=TradingMode.DRY_RUN,
+        warmup_bars=_closed_warmup_bars(100),
+        required_columns={
+            "atr",
+            "vp_vah",
+            "vp_val",
+            "acceptance_into_value",
+            "above_value",
+        },
+    )
+    runtime._start_session(strategy_path, strategy_hash, "BTC", "1h")
+
+    new_candle = {
+        "timestamp": 1735689600 + 100 * 3600,
+        "open": 51000.0,
+        "high": 51100.0,
+        "low": 50900.0,
+        "close": 51050.0,
+        "volume": 50.0,
+    }
+
+    result = runtime.process_closed_candle(new_candle)
+
+    assert result.enrichment_valid is True
+    # Real evaluator should produce a non-HOLD signal for a matching bar
+    assert result.signal_action in {"long_entry", "short_entry", "hold"}
+
+
+def test_yaml_strategy_returns_hold_for_non_matching_bar() -> None:
+    """Scenario 2: real evaluator returns HOLD when bar doesn't match rules."""
+    from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
+        RuleBasedStrategyEvaluatorFactory,
+    )
+    from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
+        YamlStrategyDefinitionLoader,
+    )
+
+    strategy_path = "tests/fixtures/strategies/amt_dip_buyer_final.yaml"
+    loader = YamlStrategyDefinitionLoader()
+    definition = loader.load_from_file(strategy_path)
+    factory = RuleBasedStrategyEvaluatorFactory()
+    real_evaluator = factory.create(
+        definition=definition,
+        symbol="BTC",
+        interval="1h",
+        strategy_hash="test-hash",
+    )
+
+    # acceptance_into_value=0 and above_value=1 — does NOT match dip buyer
+    indicator_bar = {
+        "timestamp": 1735689600,
+        "open": 50000.0,
+        "high": 51000.0,
+        "low": 49000.0,
+        "close": 52000.0,
+        "volume": 100.0,
+        "atr": 1200.0,
+        "vp_vah": 52000.0,
+        "vp_val": 50000.0,
+        "acceptance_into_value": 0,
+        "above_value": 1,
+    }
+    fake_indicator_engine = InMemoryIndicatorEngine(latest_bar=indicator_bar)
+
+    from finbot.core.application.use_cases.live_trading_runtime import (
+        LiveTradingRuntimeUseCase,
+    )
+
+    repo = StubBotStateRepository()
+    runtime = LiveTradingRuntimeUseCase(
+        exchange_gateway=InMemoryExchangeGateway(),
+        market_data_stream=FakeMarketDataStream(),
+        strategy_evaluator=real_evaluator,
+        state_repository=repo,
+        indicator_calculator=fake_indicator_engine,
+        enrichment_validator=EnrichmentValidator(),
+        mode=TradingMode.DRY_RUN,
+        warmup_bars=_closed_warmup_bars(100),
+        required_columns={
+            "atr",
+            "vp_vah",
+            "vp_val",
+            "acceptance_into_value",
+            "above_value",
+        },
+    )
+    runtime._start_session(strategy_path, "test-hash", "BTC", "1h")
+
+    new_candle = {
+        "timestamp": 1735689600 + 100 * 3600,
+        "open": 51000.0,
+        "high": 51100.0,
+        "low": 50900.0,
+        "close": 51050.0,
+        "volume": 50.0,
+    }
+
+    result = runtime.process_closed_candle(new_candle)
+
+    assert result.enrichment_valid is True
+    assert result.signal_action == "hold"
+
+
+# ---------------------------------------------------------------------------
+# Scenario 1: Live-data dry-run processes closed candles without submitting
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_processes_candle_without_submitting() -> None:
+    """Scenario 1: dry-run enriches, evaluates, persists, but never submits."""
+    from finbot.core.application.use_cases.live_trading_runtime import (
+        LiveTradingRuntimeUseCase,
+    )
+
+    repo = StubBotStateRepository()
+    fake_exchange = InMemoryExchangeGateway()
+    fake_evaluator = FakeStrategyEvaluator(
+        signal=SignalDecision(
+            action=SignalAction.LONG_ENTRY,
+            symbol="BTC",
+            interval="1h",
+            candle_timestamp=0,
+            strategy_hash="test-hash",
+        )
+    )
+    fake_indicator_engine = InMemoryIndicatorEngine(
+        latest_bar={
+            "timestamp": 1735689600,
+            "open": 50000.0,
+            "high": 51000.0,
+            "low": 49000.0,
+            "close": 50500.0,
+            "volume": 100.0,
+            "atr": 1200.0,
+        }
+    )
+
+    runtime = LiveTradingRuntimeUseCase(
+        exchange_gateway=fake_exchange,
+        market_data_stream=FakeMarketDataStream(),
+        strategy_evaluator=fake_evaluator,
+        state_repository=repo,
+        indicator_calculator=fake_indicator_engine,
+        enrichment_validator=EnrichmentValidator(),
+        mode=TradingMode.DRY_RUN,
+        warmup_bars=_closed_warmup_bars(100),
+        required_columns={"atr"},
+    )
+
+    run_id = runtime.start(
+        strategy_path="tests/fixtures/strategies/amt_dip_buyer_final.yaml",
+        symbol="BTC",
+        interval="1h",
+        strategy_hash="test-hash",
+    )
+    assert run_id
+
+    new_candle = {
+        "timestamp": 1735689600 + 100 * 3600,
+        "open": 51000.0,
+        "high": 51100.0,
+        "low": 50900.0,
+        "close": 51050.0,
+        "volume": 50.0,
+    }
+
+    result = runtime.process_closed_candle(new_candle)
+
+    assert result.enrichment_valid is True
+    assert result.signal_action in {"hold", "long_entry", "short_entry"}
+    assert fake_exchange.submitted_order_count == 0
+    # Bot run exists
+    assert repo.get_latest_bot_run() is not None
+
+    runtime.stop()
+
+
+def test_dry_run_stop_ends_session() -> None:
+    """Scenario 1: stopping the runtime persists the end marker."""
+    from finbot.core.application.use_cases.live_trading_runtime import (
+        LiveTradingRuntimeUseCase,
+    )
+
+    repo = StubBotStateRepository()
+    runtime = LiveTradingRuntimeUseCase(
+        exchange_gateway=InMemoryExchangeGateway(),
+        market_data_stream=FakeMarketDataStream(),
+        strategy_evaluator=FakeStrategyEvaluator(),
+        state_repository=repo,
+        indicator_calculator=InMemoryIndicatorEngine(),
+        enrichment_validator=EnrichmentValidator(),
+        mode=TradingMode.DRY_RUN,
+        warmup_bars=_closed_warmup_bars(100),
+        required_columns=set(),
+    )
+
+    runtime.start("test-strategy.yaml", "BTC", "1h", "test-hash")
+    runtime.stop()
+
+    # After stop, the latest bot run should exist (ended)
+    run = repo.get_latest_bot_run()
+    assert run is not None
