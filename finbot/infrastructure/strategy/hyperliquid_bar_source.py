@@ -124,7 +124,7 @@ def _normalize_candles(
             continue
         bars.append(
             {
-                "timestamp": int(ts),  # kept in ms for consistency with SDK
+                "timestamp": int(ts) // 1000,  # ms → s (matches websocket)
                 "open": float(c.get("o", 0)),
                 "high": float(c.get("h", 0)),
                 "low": float(c.get("l", 0)),

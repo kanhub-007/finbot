@@ -130,6 +130,7 @@ class LiveTradingRuntimeUseCase:
 
         # Warmup
         self._warmup = WarmupWindow()
+        self._warmup_needed = True
         if warmup_bars:
             for bar in warmup_bars:
                 self._warmup.append(bar)
@@ -255,6 +256,11 @@ class LiveTradingRuntimeUseCase:
         # 1. Warmup
         self._warmup.append(candle)
         if not self._warmup.is_ready():
+            if self._warmup_needed:
+                logger.info(
+                    "Warmup %d/%d — waiting for more candles",
+                    self._warmup.count, self._warmup.min_bars,
+                )
             return CandleProcessingResult(
                 candle_timestamp=ts,
                 enrichment_valid=False,
@@ -286,6 +292,10 @@ class LiveTradingRuntimeUseCase:
         # 4. Evaluate strategy
         position = self._exchange.get_position(self._symbol or "DEFAULT")
         signal = self._evaluator.evaluate(latest, position)
+        logger.info(
+            "Candle %s: action=%s symbol=%s",
+            ts, signal.action.value, signal.symbol,
+        )
 
         # 5. If HOLD, no further processing
         if signal.action == SignalAction.HOLD:

@@ -264,6 +264,10 @@ def create_live_trading_runtime_use_case(
     # Collect required indicator columns from strategy definition
     required_columns = {ind.name for ind in definition.indicators}
 
+    # Pre-load warmup bars from Hyperliquid when using live data
+    if warmup_bars is None and live_data:
+        warmup_bars = _load_warmup_bars(symbol, interval, min_bars=100)
+
     return LiveTradingRuntimeUseCase(
         exchange_gateway=_build_exchange_gateway(settings, trading_mode),
         market_data_stream=stream,
@@ -299,3 +303,31 @@ def _hash_strategy_file(path: str) -> str:
             return hashlib.sha256(f.read()).hexdigest()[:16]
     except OSError as e:
         raise StrategyLoadError(f"Cannot read strategy file for hashing: {e}") from e
+
+
+def _load_warmup_bars(
+    symbol: str,
+    interval: str,
+    min_bars: int = 100,
+) -> list[dict]:
+    """Load historical bars from Hyperliquid for warmup.
+
+    Handles both standard perps and HIP-3 ``dex:COIN`` symbols.
+    Returns an empty list if the API call fails (runtime will warm
+    up from live candles instead).
+    """
+    import logging
+
+    from finbot.infrastructure.strategy.hyperliquid_bar_source import (
+        HyperliquidBarSource,
+    )
+
+    logger = logging.getLogger(__name__)
+    try:
+        source = HyperliquidBarSource()
+        bars = source.load_bars(symbol, interval, min_bars)
+        logger.info("Loaded %d warmup bars for %s/%s", len(bars), symbol, interval)
+        return bars
+    except Exception as e:
+        logger.warning("Warmup bar load failed for %s: %s", symbol, e)
+        return []
