@@ -320,6 +320,41 @@ class StubBotStateRepository(BotStateRepository):
     def count_fills(self) -> int:
         return len(self._fills)
 
+    # -- run history queries -------------------------------------------------
+
+    def get_bot_run(self, run_id: str) -> object | None:
+        return next((r for r in self._bot_runs if r.run_id == run_id), None)
+
+    def list_bot_runs(
+        self, limit: int = 20, mode_filter: str | None = None
+    ) -> list:
+        runs = list(self._bot_runs)
+        if mode_filter:
+            runs = [r for r in runs if r.mode == mode_filter]
+        runs.sort(key=lambda r: r.started_at, reverse=True)
+        return runs[:limit]
+
+    def get_signals_for_run(self, run_id: str) -> list:
+        return [s for s in self._processed_signals if s.bot_run_id == run_id]
+
+    def get_orders_for_run(self, run_id: str) -> list:
+        return [r for r in self._order_responses if r.bot_run_id == run_id]
+
+    def get_fills_for_run(self, run_id: str) -> list:
+        return [f for f in self._fills if f.bot_run_id == run_id]
+
+    def get_risk_events_for_run(self, run_id: str) -> list:
+        return [e for e in self._risk_events if e.bot_run_id == run_id]
+
+    def get_audit_log(
+        self, limit: int = 50, event_type: str | None = None
+    ) -> list:
+        entries = list(self._audit_entries)
+        if event_type:
+            entries = [e for e in entries if e.event_type == event_type]
+        entries.sort(key=lambda e: e.created_at, reverse=True)
+        return entries[:limit]
+
     @property
     def signal_count(self) -> int:
         return len(self._processed)
@@ -397,3 +432,87 @@ class FakeExchangeGateway(InMemoryExchangeGateway):
         }
         self.submitted_responses.append(resp)
         return resp
+
+
+# ---------------------------------------------------------------------------
+# Fake runtime — shared across BotManager and MCP tool tests
+# ---------------------------------------------------------------------------
+
+
+class FakeRuntime:
+    """A fake LiveTradingRuntimeUseCase that records lifecycle calls.
+
+    Used by both ``test_bot_manager.py`` and ``test_mcp_tools.py``.
+    Accepts an optional repository to persist BotRun records so
+    ``get_status()`` / ``list_bot_runs`` work after stop.
+    """
+
+    def __init__(self, repo=None) -> None:
+        self.started = False
+        self.stopped = False
+        self.start_count = 0
+        self.run_forever_called = False
+        self._run_id = "fake-run-id"
+        self._repo = repo
+        # Simulate LiveTradingRuntimeUseCase's live_state support
+        self._live_state: object | None = None
+
+    def set_live_state(self, state: object) -> None:
+        self._live_state = state
+
+    def start(
+        self,
+        strategy_path: str,
+        symbol: str,
+        interval: str,
+        strategy_hash: str = "",
+    ) -> str:
+
+        self.started = True
+        self.start_count += 1
+        if self._repo is not None:
+            from finbot.core.domain.entities.bot_run import BotRun
+
+            self._repo.create_bot_run(
+                BotRun(
+                    strategy_name=strategy_path,
+                    strategy_hash=strategy_hash,
+                    symbol=symbol,
+                    interval=interval,
+                    mode="dry_run",
+                )
+            )
+        return self._run_id
+
+    def start_live(
+        self, strategy_path: str, symbol: str, interval: str, config: object
+    ):
+        from finbot.core.application.dto.run_bot_result import RunBotResult
+
+        self.started = True
+        self.start_count += 1
+        if self._repo is not None:
+            from finbot.core.domain.entities.bot_run import BotRun
+
+            self._repo.create_bot_run(
+                BotRun(
+                    strategy_name=strategy_path,
+                    strategy_hash="",
+                    symbol=symbol,
+                    interval=interval,
+                    mode=config.mode.value,
+                )
+            )
+        return RunBotResult(status="running", message=self._run_id)
+
+    def stop(self) -> None:
+        self.stopped = True
+        if self._repo is not None:
+            self._repo.end_bot_run(self._run_id)
+
+    def run_forever(self) -> None:
+        import time as _time
+
+        self.run_forever_called = True
+        while self.started and not self.stopped:
+            _time.sleep(0.01)

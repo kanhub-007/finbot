@@ -139,3 +139,43 @@ class InMemoryBotStateRepository(BotStateRepository):
 
     def save_order_lifecycle(self, lifecycle: OrderLifecycle) -> None:
         self._lifecycles[lifecycle.order_id] = lifecycle
+
+    # -- run history queries -------------------------------------------------
+
+    def get_bot_run(self, run_id: str) -> BotRun | None:
+        return next((r for r in self._bot_runs if r.run_id == run_id), None)
+
+    def list_bot_runs(
+        self, limit: int = 20, mode_filter: str | None = None
+    ) -> list[BotRun]:
+        runs = list(self._bot_runs)
+        if mode_filter:
+            runs = [r for r in runs if r.mode == mode_filter]
+        runs.sort(key=lambda r: r.started_at, reverse=True)
+        return runs[:limit]
+
+    def get_signals_for_run(self, run_id: str) -> list[ProcessedSignal]:
+        return [s for s in self._processed_signals if s.bot_run_id == run_id]
+
+    def get_orders_for_run(self, run_id: str) -> list[OrderResponseRecord]:
+        return [
+            self._responses[rid]["response"]
+            for rid in self._responses
+            if self._responses[rid].get("response") is not None
+            and self._responses[rid]["response"].bot_run_id == run_id
+        ]
+
+    def get_fills_for_run(self, run_id: str) -> list[FillRecord]:
+        return [f for f in self._fills if f.bot_run_id == run_id]
+
+    def get_risk_events_for_run(self, run_id: str) -> list[RiskEventRecord]:
+        return [e for e in self._risk_events if e.bot_run_id == run_id]
+
+    def get_audit_log(
+        self, limit: int = 50, event_type: str | None = None
+    ) -> list[AuditLogEntry]:
+        entries = list(self._audit_log)
+        if event_type:
+            entries = [e for e in entries if e.event_type == event_type]
+        entries.sort(key=lambda e: e.created_at, reverse=True)
+        return entries[:limit]

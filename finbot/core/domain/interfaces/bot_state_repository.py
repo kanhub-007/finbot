@@ -115,6 +115,40 @@ class BotStateRepository(ABC):
     def has_fill(self, fill_id: str) -> bool:
         """Return True if *fill_id* has already been recorded."""
 
+    # -- run history queries -------------------------------------------------
+
+    @abstractmethod
+    def get_bot_run(self, run_id: str) -> BotRun | None:
+        """Return a single bot run by its run_id, or None."""
+
+    @abstractmethod
+    def list_bot_runs(
+        self, limit: int = 20, mode_filter: str | None = None
+    ) -> list[BotRun]:
+        """Return recent bot runs ordered by started_at DESC."""
+
+    @abstractmethod
+    def get_signals_for_run(self, run_id: str) -> list[ProcessedSignal]:
+        """Return all signals for a specific bot run."""
+
+    @abstractmethod
+    def get_orders_for_run(self, run_id: str) -> list[OrderResponseRecord]:
+        """Return all order responses for a specific bot run."""
+
+    @abstractmethod
+    def get_fills_for_run(self, run_id: str) -> list[FillRecord]:
+        """Return all fills for a specific bot run."""
+
+    @abstractmethod
+    def get_risk_events_for_run(self, run_id: str) -> list[RiskEventRecord]:
+        """Return all risk events for a specific bot run."""
+
+    @abstractmethod
+    def get_audit_log(
+        self, limit: int = 50, event_type: str | None = None
+    ) -> list[AuditLogEntry]:
+        """Return recent audit log entries."""
+
     # -- order lifecycle -----------------------------------------------------
 
     @abstractmethod

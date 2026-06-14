@@ -104,6 +104,7 @@ class LiveTradingRuntimeUseCase:
         bot_loop: BotLoop | None = None,
         strategy_validator: StrategyValidator | None = None,
         account_event_handler: AccountEventHandler | None = None,
+        live_state: Any | None = None,
     ) -> None:
         self._exchange = exchange_gateway
         self._evaluator = strategy_evaluator
@@ -119,6 +120,7 @@ class LiveTradingRuntimeUseCase:
         self._bot_loop = bot_loop
         self._strategy_validator = strategy_validator
         self._account_handler = account_event_handler
+        self._live_state = live_state
         self._submitter = OrderSubmitter(
             exchange_gateway, order_normalizer, state_repository
         )
@@ -141,6 +143,14 @@ class LiveTradingRuntimeUseCase:
         self._enriched_frame: Any = None
 
     # -- public API ----------------------------------------------------------
+
+    def set_live_state(self, state: object) -> None:
+        """Attach a BotLiveState for MCP status updates.
+
+        Called by :class:`BotManager` after construction so the runtime
+        thread can update live state fields on each candle/signal/order.
+        """
+        self._live_state = state
 
     def start(
         self,

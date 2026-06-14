@@ -343,6 +343,107 @@ class SqliteBotStateRepository(BotStateRepository):
             return None
         return _lifecycle_from_row(row)
 
+    # -- run history queries -------------------------------------------------
+
+    def get_bot_run(self, run_id: str) -> BotRun | None:
+        row = self._query_one(
+            "SELECT run_id, strategy_name, strategy_hash, symbol, "
+            "interval, mode, started_at, ended_at "
+            "FROM bot_runs WHERE run_id = ?",
+            (run_id,),
+        )
+        if row is None:
+            return None
+        return _bot_run_from_row(row)
+
+    def list_bot_runs(
+        self, limit: int = 20, mode_filter: str | None = None
+    ) -> list[BotRun]:
+        sql = (
+            "SELECT run_id, strategy_name, strategy_hash, symbol, "
+            "interval, mode, started_at, ended_at "
+            "FROM bot_runs "
+        )
+        params: tuple = ()
+        if mode_filter:
+            sql += "WHERE mode = ? "
+            params = (mode_filter,)
+        sql += "ORDER BY started_at DESC LIMIT ?"
+        params = params + (limit,)
+        rows = self._connection.execute(sql, params).fetchall()
+        return [_bot_run_from_row(r) for r in rows]
+
+    def get_signals_for_run(self, run_id: str) -> list[ProcessedSignal]:
+        rows = self._connection.execute(
+            "SELECT signal_key, bot_run_id, signal_action, bar_timestamp, "
+            "created_at FROM processed_signals WHERE bot_run_id = ? "
+            "ORDER BY created_at",
+            (run_id,),
+        ).fetchall()
+        return [
+            ProcessedSignal(
+                signal_key=r[0],
+                bot_run_id=r[1],
+                signal_action=r[2],
+                bar_timestamp=r[3],
+                created_at=datetime.fromisoformat(r[4]),
+            )
+            for r in rows
+        ]
+
+    def get_orders_for_run(self, run_id: str) -> list[OrderResponseRecord]:
+        rows = self._connection.execute(
+            "SELECT response_id, intent_id, bot_run_id, response_json, "
+            "status, created_at FROM order_responses WHERE bot_run_id = ? "
+            "ORDER BY created_at",
+            (run_id,),
+        ).fetchall()
+        return [
+            OrderResponseRecord(
+                response_id=r[0],
+                intent_id=r[1],
+                bot_run_id=r[2],
+                response_json=r[3],
+                status=r[4],
+                created_at=datetime.fromisoformat(r[5]),
+            )
+            for r in rows
+        ]
+
+    def get_fills_for_run(self, run_id: str) -> list[FillRecord]:
+        rows = self._connection.execute(
+            "SELECT fill_id, bot_run_id, order_id, symbol, side, size, price, "
+            "fee, filled_at FROM fills WHERE bot_run_id = ? "
+            "ORDER BY filled_at",
+            (run_id,),
+        ).fetchall()
+        return [_fill_from_row(r) for r in rows]
+
+    def get_risk_events_for_run(self, run_id: str) -> list[RiskEventRecord]:
+        rows = self._connection.execute(
+            "SELECT event_id, bot_run_id, event_type, signal_key, decision, "
+            "reason, created_at FROM risk_events WHERE bot_run_id = ? "
+            "ORDER BY created_at",
+            (run_id,),
+        ).fetchall()
+        return [_risk_event_from_row(r) for r in rows]
+
+    def get_audit_log(
+        self, limit: int = 50, event_type: str | None = None
+    ) -> list[AuditLogEntry]:
+        sql = (
+            "SELECT entry_id, bot_run_id, event_type, event_data_json, created_at "
+            "FROM audit_log "
+        )
+        params: tuple = ()
+        if event_type:
+            sql += "WHERE event_type = ? "
+            params = (event_type,)
+        sql += "ORDER BY created_at DESC LIMIT ?"
+        params = params + (limit,)
+        rows = self._connection.execute(sql, params).fetchall()
+        return [_audit_from_row(r) for r in rows]
+
     def save_order_lifecycle(self, lifecycle: OrderLifecycle) -> None:
         now_text = _to_utc_text(datetime.now(UTC))
         self._execute(
@@ -417,4 +518,57 @@ def _lifecycle_from_row(row: tuple) -> OrderLifecycle:
         remaining_size=Decimal(row[4]),
         filled_size=Decimal(row[5]),
         state=OrderState(row[6]),
+    )
+
+
+def _bot_run_from_row(row: tuple) -> BotRun:
+    """Map a ``bot_runs`` row to a domain :class:`BotRun`."""
+    return BotRun(
+        run_id=row[0],
+        strategy_name=row[1],
+        strategy_hash=row[2],
+        symbol=row[3],
+        interval=row[4],
+        mode=row[5],
+        started_at=datetime.fromisoformat(row[6]),
+        ended_at=datetime.fromisoformat(row[7]) if row[7] else None,
+    )
+
+
+def _fill_from_row(row: tuple) -> FillRecord:
+    """Map a ``fills`` row to a domain :class:`FillRecord`."""
+    return FillRecord(
+        fill_id=row[0],
+        bot_run_id=row[1],
+        order_id=row[2],
+        symbol=row[3],
+        side=row[4],
+        size=Decimal(row[5]),
+        price=Decimal(row[6]),
+        fee=Decimal(row[7]),
+        filled_at=datetime.fromisoformat(row[8]),
+    )
+
+
+def _risk_event_from_row(row: tuple) -> RiskEventRecord:
+    """Map a ``risk_events`` row to a domain :class:`RiskEventRecord`."""
+    return RiskEventRecord(
+        event_id=row[0],
+        bot_run_id=row[1],
+        event_type=row[2],
+        signal_key=row[3],
+        decision=row[4],
+        reason=row[5] if row[5] else "",
+        created_at=datetime.fromisoformat(row[6]),
+    )
+
+
+def _audit_from_row(row: tuple) -> AuditLogEntry:
+    """Map an ``audit_log`` row to a domain :class:`AuditLogEntry`."""
+    return AuditLogEntry(
+        entry_id=row[0],
+        bot_run_id=row[1],
+        event_type=row[2],
+        event_data_json=row[3],
+        created_at=datetime.fromisoformat(row[4]),
     )
