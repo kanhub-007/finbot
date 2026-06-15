@@ -210,6 +210,63 @@ class TestNoFinbarInProductionCode:
         )
 
 
+_PACKAGE_INFRA_ONLY_SUBPACKAGES = {"parser", "evaluation", "indicators"}
+
+
+class TestPackageSubpackageAllowlist:
+    """finbar_strategy_runtime.parser/evaluation/indicators are infra-only.
+
+    The package's pure ``domain.entities.*`` / ``domain.interfaces.*``
+    subpackages are a legitimate domain-layer dependency (ADR-5). The
+    ``parser`` (PyYAML), ``evaluation`` (stateful engine), and
+    ``indicators`` (pandas/numpy) subpackages are infrastructure-tier and
+    must stay out of Finbot's domain/application/presentation layers —
+    they live behind concrete adapters in infrastructure/, wired in
+    startup/.
+    """
+
+    @staticmethod
+    def _package_imports(file_path: Path) -> set[str]:
+        """Return the set of finbar_strategy_runtime.* import roots in a file."""
+        imports = _collect_imports(file_path).get("finbar_strategy_runtime", set())
+        return imports
+
+    def _violation_for(self, imp: str) -> str | None:
+        """Return the offending subpackage name, or None if the import is pure."""
+        parts = imp.split(".")
+        if len(parts) >= 2 and parts[1] in _PACKAGE_INFRA_ONLY_SUBPACKAGES:
+            return imp
+        return None
+
+    @pytest.mark.parametrize(
+        "file_path",
+        [
+            p
+            for p in (
+                _walk_finbot_sources("core/domain")
+                + _walk_finbot_sources("core/application")
+                + _walk_finbot_sources("presentation")
+            )
+            if not _is_init_only_module(str(p))
+        ],
+        ids=lambda p: str(p.relative_to(Path(__file__).resolve().parents[2])),
+    )
+    def test_inner_layers_do_not_import_package_infra_subpackages(
+        self, file_path: Path
+    ):
+        violations = [
+            imp
+            for imp in self._package_imports(file_path)
+            if self._violation_for(imp)
+        ]
+        assert not violations, (
+            f"{file_path.name} imports package infra subpackages: "
+            f"{sorted(violations)}. Only finbar_strategy_runtime.domain.* "
+            f"is permitted in domain/application/presentation layers; "
+            f"parser/evaluation/indicators belong to infrastructure only."
+        )
+
+
 class TestCopiedRuntimeModules:
     """Guardrails for code copied from Finbar into finbot/infrastructure/strategy/.
 

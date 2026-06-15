@@ -2,7 +2,10 @@
 
 from abc import ABC, abstractmethod
 
-from finbot.core.domain.entities.strategy_definition import StrategyDefinition
+from finbar_strategy_runtime.domain.entities.strategy_definition import (
+    StrategyDefinition,
+)
+
 from finbot.core.domain.interfaces.strategy_evaluator import StrategyEvaluator
 
 

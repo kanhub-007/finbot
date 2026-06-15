@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Live Hyperliquid trading runtime for Finbar strategies"
 requires-python = ">=3.12"
 dependencies = [
+    "finbar-strategy-runtime[pandas,yaml]>=0.1.0,<0.2.0",
     "hyperliquid-python-sdk>=0.10.0",
     "numpy>=1.26.0",
     "pandas>=2.0.0",
