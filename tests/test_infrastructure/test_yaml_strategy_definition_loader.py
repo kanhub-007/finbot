@@ -140,3 +140,50 @@ class TestLoaderSurfacesPackageRequiredColumns:
         columns = loader.last_required_columns()
         assert isinstance(columns, list)
         assert "value_area_width_pct" in columns
+
+
+class TestRequiredColumnsAreConcreteNotAliases:
+    """Required columns must be the package's CONCRETE column names, not the
+    strategy-local indicator aliases.
+
+    This is the bug the migration fixes: the old factory derived required
+    columns as ``{ind.name for ind in definition.indicators}`` (the alias).
+    For a dynamic-period indicator the alias (``my_sma``) differs from the
+    concrete computed column (``sma_37``), so the old derivation pointed the
+    enrichment validator at a column that never exists on the frame.
+    """
+
+    def test_dynamic_period_indicator_yields_concrete_column(self) -> None:
+        loader = _loader()
+        definition = loader.load_from_file(str(FIXTURES_DIR / "dyn_sma_cross.yaml"))
+        columns = loader.last_required_columns()
+
+        # The alias is ``my_sma``; the concrete computed column is ``sma_37``.
+        assert "sma_37" in columns
+        assert "my_sma" not in columns
+        # Sanity: the alias is indeed what the old derivation would have used.
+        assert any(ind.name == "my_sma" for ind in definition.indicators)
+
+    def test_adding_an_indicator_appears_in_required_columns(self) -> None:
+        """A newly-referenced indicator surfaces in required_columns automatically."""
+        loader = _loader()
+        loader.load_from_file(str(FIXTURES_DIR / "dyn_sma_cross.yaml"))
+
+        # Add an EMA indicator AND reference it in the entry condition.
+        with open(FIXTURES_DIR / "dyn_sma_cross.yaml", encoding="utf-8") as f:
+            base = f.read()
+        amended = base.replace(
+            '  - name: my_sma\n    type: sma\n    period: "{{ sma_period }}"',
+            '  - name: my_sma\n    type: sma\n    period: "{{ sma_period }}"\n'
+            '  - name: trend\n    type: ema\n    period: "{{ sma_period }}"',
+        ).replace(
+            '        operator: ">"\n        left: close\n        right: my_sma',
+            '        operator: ">"\n        left: close\n        right: trend',
+        )
+        loader.load_from_text(amended)
+        after = set(loader.last_required_columns())
+
+        # The newly-referenced EMA's concrete column appears; the now-unreferenced
+        # SMA concrete column drops out (it was only referenced before).
+        assert "ema_37" in after
+        assert "sma_37" not in after

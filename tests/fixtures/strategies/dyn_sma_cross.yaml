@@ -1,0 +1,42 @@
+# Dynamic-period SMA strategy fixture for testing concrete-column derivation.
+#
+# The strategy-local indicator *alias* is ``my_sma`` but the concrete
+# enriched column the indicator calculator produces is ``sma_37``
+# (type ``sma`` with period 37). This fixture exists to prove that
+# Finbot derives required enriched columns from the package's concrete
+# names, not the strategy-local aliases (the bug fixed by the
+# import-runtime migration).
+
+schema_version: "2.0"
+name: dyn_sma_cross
+description: >
+  Minimal SMA-cross strategy with a dynamic period, used to verify that
+  required enriched columns use concrete names (sma_37), not aliases.
+
+parameters:
+  sma_period:
+    type: int
+    default: 37
+    minimum: 1
+    maximum: 500
+
+timeframes:
+  primary: 1h
+
+indicators:
+  - name: my_sma
+    type: sma
+    period: "{{ sma_period }}"
+
+sides:
+  long:
+    entry:
+      condition:
+        operator: ">"
+        left: close
+        right: my_sma
+
+risk:
+  stop_loss:
+    type: atr
+    multiplier: 2
