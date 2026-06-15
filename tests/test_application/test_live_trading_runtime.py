@@ -396,6 +396,75 @@ def test_yaml_strategy_returns_hold_for_non_matching_bar() -> None:
     assert result.signal_action == "hold"
 
 
+class TestBothTargetFixturesStartInDryRun:
+    """Migration preserves existing behaviour: both AMT fixtures start in
+    dry-run via the package evaluator and produce the expected signal on a
+    known triggering bar (parity is now structural — same package both
+    sides, no copied runtime, no parity test importing the monolith)."""
+
+    @staticmethod
+    def _runtime_for(strategy_path: str, latest_bar: dict):
+        from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
+            SharedRuntimeStrategyEvaluatorFactory,
+        )
+        from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
+            YamlStrategyDefinitionLoader,
+        )
+
+        loader = YamlStrategyDefinitionLoader()
+        definition = loader.load_from_file(strategy_path)
+        evaluator = SharedRuntimeStrategyEvaluatorFactory().create(
+            definition=definition,
+            symbol="BTC",
+            interval="1h",
+            strategy_hash="migration",
+        )
+        return _create_runtime(
+            evaluator=evaluator,
+            indicator_engine=InMemoryIndicatorEngine(latest_bar=latest_bar),
+            required_columns=set(loader.last_required_columns()),
+        )
+
+    def test_amt_dip_buyer_enters_on_acceptance_into_value(self) -> None:
+        path = "tests/fixtures/strategies/amt_dip_buyer_final.yaml"
+        runtime = self._runtime_for(
+            path,
+            indicator_bar(
+                atr=2.0,
+                vp_vah=110.0,
+                vp_val=90.0,
+                acceptance_into_value=True,
+                above_value=False,
+            ),
+        )
+        runtime._start_session(path, "migration", "BTC", "1h")
+
+        result = runtime.process_closed_candle(new_closed_candle())
+
+        assert result.enrichment_valid is True
+        assert result.signal_action == "long_entry"
+
+    def test_amt_v2_enters_when_value_area_is_narrow(self) -> None:
+        path = "tests/fixtures/strategies/amt_v2_vol_filter.yaml"
+        runtime = self._runtime_for(
+            path,
+            indicator_bar(
+                atr=2.0,
+                vp_vah=110.0,
+                vp_val=90.0,
+                value_area_width_pct=1.0,  # narrow (< 1.5) passes the filter
+                acceptance_into_value=True,
+                above_value=False,
+            ),
+        )
+        runtime._start_session(path, "migration", "BTC", "1h")
+
+        result = runtime.process_closed_candle(new_closed_candle())
+
+        assert result.enrichment_valid is True
+        assert result.signal_action == "long_entry"
+
+
 # ---------------------------------------------------------------------------
 # Scenario 1: Dry-run processes closed candles without submitting
 # ---------------------------------------------------------------------------
