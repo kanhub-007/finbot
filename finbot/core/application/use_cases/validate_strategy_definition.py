@@ -15,21 +15,6 @@ from finbot.core.domain.interfaces.strategy_definition_loader import (
 )
 from finbot.core.domain.interfaces.strategy_validator import StrategyValidator
 
-# Indicators required by the two AMT target strategies.
-_KNOWN_INDICATORS = frozenset(
-    {
-        "atr",
-        "vp_vah",
-        "vp_val",
-        "vp_poc",
-        "above_value",
-        "below_value",
-        "inside_value",
-        "acceptance_into_value",
-        "value_area_width_pct",
-    }
-)
-
 # Risk types supported for live execution.
 _SUPPORTED_RISK_TYPES = frozenset({"atr", "risk_reward"})
 
@@ -39,12 +24,32 @@ _EXECUTION_MODES = ("replay", "dry_run", "testnet", "live")
 class ValidateStrategyUseCase(StrategyValidator):
     """Validate a strategy definition and report compatibility.
 
+    Indicator/operator/schema support is delegated to the package parser
+    (the authority) and an injected, package-derived ``supported_indicators``
+    set used for diagnostics — there is no hand-maintained indicator list
+    to drift. Finbot owns live-mode policy (e.g. "missing stop loss in live
+    mode = reject") on top of the package's schema validation.
+
     Depends on StrategyDefinitionLoader (domain interface), not on the
-    concrete YAML parser. Implements StrategyValidator.
+    concrete YAML parser.
     """
 
-    def __init__(self, loader: StrategyDefinitionLoader):
+    def __init__(
+        self,
+        loader: StrategyDefinitionLoader,
+        *,
+        supported_indicators: frozenset[str] | None = None,
+        supported_schema_versions: frozenset[str] | None = None,
+        runtime_package_name: str = "finbar-strategy-runtime",
+        runtime_package_version: str = "",
+    ):
         self._loader = loader
+        self._supported_indicators = supported_indicators
+        self._supported_schema_versions = supported_schema_versions or frozenset(
+            {"2.0"}
+        )
+        self._runtime_package_name = runtime_package_name
+        self._runtime_package_version = runtime_package_version
 
     def validate(self, request: ValidateStrategyRequest) -> ValidateStrategyResult:
         """Parse and validate a strategy, returning errors/warnings."""
@@ -73,37 +78,56 @@ class ValidateStrategyUseCase(StrategyValidator):
         validation = self.validate(request)
         if not validation.valid:
             modes = {m: {"parse": "error"} for m in _EXECUTION_MODES}
-            return StrategyCompatibilityResult(
-                strategy_name=validation.strategy_name or "invalid",
-                modes=modes,
-            )
+            return self._result(validation.strategy_name or "invalid", modes)
 
         # definition was already parsed by validate() above.
         definition = validation.definition
         if definition is None:
             modes = {m: {"parse": "error"} for m in _EXECUTION_MODES}
-            return StrategyCompatibilityResult(
-                strategy_name=validation.strategy_name or "invalid",
-                modes=modes,
-            )
+            return self._result(validation.strategy_name or "invalid", modes)
 
         modes = self._build_compatibility_modes(definition)
-        return StrategyCompatibilityResult(strategy_name=definition.name, modes=modes)
+        return self._result(definition.name, modes)
+
+    def _result(self, name: str, modes: dict) -> StrategyCompatibilityResult:
+        """Build a compatibility result carrying runtime package identity."""
+        return StrategyCompatibilityResult(
+            strategy_name=name,
+            modes=modes,
+            runtime_package_name=self._runtime_package_name,
+            runtime_package_version=self._runtime_package_version,
+            supported_schema_versions=self._supported_schema_versions,
+        )
 
     def _build_compatibility_modes(self, definition) -> dict:
         modes: dict[str, dict[str, str]] = {}
         for mode in _EXECUTION_MODES:
             features: dict[str, str] = {"parse": "supported"}
+            self._check_schema(definition, features)
             self._check_indicators(definition, features)
             self._check_risk(definition, features)
             self._check_sides(definition, features, mode)
             modes[mode] = features
         return modes
 
+    def _check_schema(self, definition, features) -> None:
+        """Flag schema versions the installed package does not accept."""
+        if definition.schema_version not in self._supported_schema_versions:
+            features["schema_version"] = "unsupported"
+
     def _check_indicators(self, definition, features) -> None:
+        """Flag indicator types not in the package-derived supported set.
+
+        The package parser is the authority and already rejects unknown
+        indicators at parse time, so this only runs on valid strategies.
+        When no supported set is injected, this check is skipped (the
+        parser has already enforced it).
+        """
+        if self._supported_indicators is None:
+            return
         unknown: list[str] = []
         for ind in definition.indicators:
-            if ind.type not in _KNOWN_INDICATORS:
+            if ind.type not in self._supported_indicators:
                 unknown.append(ind.type)
         if unknown:
             features["unknown_indicators"] = ", ".join(sorted(set(unknown)))

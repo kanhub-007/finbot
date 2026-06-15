@@ -151,7 +151,17 @@ def create_run_bot_request(
 
 def create_validate_strategy_use_case() -> ValidateStrategyUseCase:
     """Create a fully wired validate-strategy use case."""
-    return ValidateStrategyUseCase(loader=YamlStrategyDefinitionLoader())
+    import finbar_strategy_runtime as _runtime
+
+    from finbot.infrastructure.adapters.package_capability_provider import (
+        supported_indicator_types,
+    )
+
+    return ValidateStrategyUseCase(
+        loader=YamlStrategyDefinitionLoader(),
+        supported_indicators=supported_indicator_types(),
+        runtime_package_version=_runtime.__version__,
+    )
 
 
 def create_replay_strategy_use_case(
@@ -299,9 +309,6 @@ def create_live_trading_runtime_use_case(
     from finbot.core.application.use_cases.live_trading_runtime import (
         LiveTradingRuntimeUseCase,
     )
-    from finbot.core.application.use_cases.validate_strategy_definition import (
-        ValidateStrategyUseCase,
-    )
     from finbot.core.domain.entities.trading_mode import TradingMode
     from finbot.core.domain.services.enrichment_validator import (
         EnrichmentValidator,
@@ -405,7 +412,7 @@ def create_live_trading_runtime_use_case(
             ]
         ),
         bot_loop=bot_loop,
-        strategy_validator=ValidateStrategyUseCase(YamlStrategyDefinitionLoader()),
+        strategy_validator=create_validate_strategy_use_case(),
     )
 
 
