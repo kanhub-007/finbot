@@ -52,9 +52,26 @@ class YamlStrategyDefinitionLoader(StrategyDefinitionLoader):
     def last_required_columns(self) -> list[str]:
         """Concrete enriched columns required by the last-loaded strategy.
 
-        Sourced from the package validation result's ``required_columns``.
+        Sourced from the package validation result's ``required_columns`` —
+        the columns directly referenced by condition trees / risk stops
+        (e.g. ``atr``, ``above_value``). Used by Finbot's EnrichmentValidator.
         Returns an empty list when nothing has been loaded yet.
         """
         if self._last_result is None:
             return []
         return list(self._last_result.required_columns)
+
+    def last_required_indicators(self) -> list[str]:
+        """All concrete indicators declared by the last-loaded strategy.
+
+        Sourced from the package validation result's ``required_indicators``
+        — every declared indicator's concrete column name, including
+        intermediate indicators (e.g. ``vp_vah``/``vp_val``) that only feed
+        composites (``above_value``). Used by Finbot's IndicatorCalculator,
+        which must be asked to compute the full chain or the composites read
+        NaN. Distinct from :meth:`last_required_columns`.
+        Returns an empty list when nothing has been loaded yet.
+        """
+        if self._last_result is None:
+            return []
+        return list(self._last_result.required_indicators)

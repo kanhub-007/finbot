@@ -97,6 +97,7 @@ class LiveTradingRuntimeUseCase:
         mode: TradingMode,
         warmup_bars: list[dict[str, Any]] | None = None,
         required_columns: set[str] | None = None,
+        required_indicators: list[str] | None = None,
         order_planner: OrderPlanner | None = None,
         market_metadata_provider: MarketMetadataProvider | None = None,
         order_normalizer: OrderNormalizer | None = None,
@@ -125,6 +126,12 @@ class LiveTradingRuntimeUseCase:
             exchange_gateway, order_normalizer, state_repository
         )
         self._required_columns: set[str] = required_columns or set()
+        # Ordered: the package calculator computes indicators in the given
+        # order, so composites (above_value) must follow their intermediates
+        # (vp_vah/vp_val). A set would scramble order and yield NaN composites.
+        self._required_indicators: list[str] = (
+            list(required_indicators) if required_indicators else []
+        )
         self._bot_run_id: str = ""
         self._strategy_name: str = ""
         self._strategy_hash: str = ""
@@ -399,7 +406,9 @@ class LiveTradingRuntimeUseCase:
                 self._enriched_frame, self._warmup.latest_bar
             )
             df = self._trim_frame(df)
-        enriched = self._indicator_calc.calculate(df, list(self._required_columns))
+        enriched = self._indicator_calc.calculate(
+            df, self._required_indicators or list(self._required_columns)
+        )
         self._enriched_frame = enriched
         return enriched
 

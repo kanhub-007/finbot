@@ -164,6 +164,30 @@ class TestRequiredColumnsAreConcreteNotAliases:
         # Sanity: the alias is indeed what the old derivation would have used.
         assert any(ind.name == "my_sma" for ind in definition.indicators)
 
+    def test_required_indicators_includes_intermediate_columns(self) -> None:
+        """required_indicators lists ALL declared indicators, including
+        intermediates (vp_vah/vp_val) that required_columns omits.
+
+        The indicator calculator needs the full chain; the enrichment
+        validator only needs directly-referenced columns. Mixing them up
+        causes composites to read NaN in a live session.
+        """
+        loader = _loader()
+        loader.load_from_file(str(FIXTURES_DIR / "amt_dip_buyer_final.yaml"))
+
+        columns = set(loader.last_required_columns())
+        indicators = set(loader.last_required_indicators())
+
+        # Intermediates: present in required_indicators, absent from required_columns.
+        assert "vp_vah" in indicators and "vp_val" in indicators
+        assert "vp_vah" not in columns and "vp_val" not in columns
+        # Composites present in both.
+        assert "above_value" in indicators and "above_value" in columns
+        # required_indicators is ordered (the calculator is order-sensitive).
+        inds = loader.last_required_indicators()
+        assert isinstance(inds, list)
+        assert inds.index("vp_vah") < inds.index("above_value")
+
     def test_adding_an_indicator_appears_in_required_columns(self) -> None:
         """A newly-referenced indicator surfaces in required_columns automatically."""
         loader = _loader()

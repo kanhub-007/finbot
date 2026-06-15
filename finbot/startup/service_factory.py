@@ -381,6 +381,12 @@ def create_live_trading_runtime_use_case(
     # Required enriched columns come from the package validation result
     # (concrete, directly-referenced columns), not the strategy-local aliases.
     required_columns = set(loader.last_required_columns())
+    # The indicator calculator must compute the FULL declared chain, including
+    # intermediate indicators (vp_vah/vp_val) that only feed composites
+    # (above_value). required_columns alone omits them and the composites read
+    # NaN. The list order matters too: the package calculator computes
+    # indicators in order, so composites must follow their intermediates.
+    required_indicators = loader.last_required_indicators()
 
     # Pre-load warmup bars from Hyperliquid when using live data
     if warmup_bars is None and live_data:
@@ -396,6 +402,7 @@ def create_live_trading_runtime_use_case(
         mode=trading_mode,
         warmup_bars=warmup_bars,
         required_columns=required_columns,
+        required_indicators=required_indicators,
         order_planner=OrderPlanner(
             gates=[
                 ModeGate(
