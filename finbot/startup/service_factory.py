@@ -372,7 +372,7 @@ def create_live_trading_runtime_use_case(
     )
 
     # Required enriched columns come from the package validation result
-    # (concrete names like vp_vah), not the strategy-local aliases.
+    # (concrete, directly-referenced columns), not the strategy-local aliases.
     required_columns = set(loader.last_required_columns())
 
     # Pre-load warmup bars from Hyperliquid when using live data
