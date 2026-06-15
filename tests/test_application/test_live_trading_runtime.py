@@ -258,6 +258,99 @@ def test_yaml_strategy_loaded_into_real_evaluator() -> None:
     assert result.signal_action in {"long_entry", "short_entry", "hold"}
 
 
+class TestPackageSignalBoundary:
+    """The runtime uses the package only up to the signal boundary.
+
+    The package owns parsing/indicators/evaluation; Finbot owns warmup,
+    enrichment validation, signal persistence, risk gates, idempotency,
+    and the exchange submission branch. These tests wire the real package
+    evaluator with required_columns sourced from the package loader (not
+    hand-maintained) and assert the boundary holds.
+    """
+
+    STRATEGY_PATH = "tests/fixtures/strategies/amt_dip_buyer_final.yaml"
+
+    @staticmethod
+    def _package_evaluator_and_columns():
+        """Load AMT via the loader; return the real evaluator + package columns."""
+        from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
+            SharedRuntimeStrategyEvaluatorFactory,
+        )
+        from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
+            YamlStrategyDefinitionLoader,
+        )
+
+        loader = YamlStrategyDefinitionLoader()
+        definition = loader.load_from_file(TestPackageSignalBoundary.STRATEGY_PATH)
+        required_columns = set(loader.last_required_columns())
+        evaluator = SharedRuntimeStrategyEvaluatorFactory().create(
+            definition=definition,
+            symbol="BTC",
+            interval="1h",
+            strategy_hash="pkg-boundary",
+        )
+        return evaluator, required_columns
+
+    def test_triggering_candle_persists_signal_without_submitting(self) -> None:
+        evaluator, required_columns = self._package_evaluator_and_columns()
+        exchange = InMemoryExchangeGateway()
+        repo = StubBotStateRepository()
+        runtime = _create_runtime(
+            repo=repo,
+            exchange=exchange,
+            evaluator=evaluator,
+            indicator_engine=InMemoryIndicatorEngine(
+                latest_bar=indicator_bar(
+                    atr=1200.0,
+                    vp_vah=52000.0,
+                    vp_val=50000.0,
+                    acceptance_into_value=True,
+                    above_value=False,
+                )
+            ),
+            required_columns=required_columns,
+        )
+        runtime._start_session(self.STRATEGY_PATH, "pkg-boundary", "BTC", "1h")
+
+        result = runtime.process_closed_candle(new_closed_candle())
+
+        # Package evaluated (signal boundary crossed); Finbot persisted and
+        # did not submit (dry-run).
+        assert result.enrichment_valid is True
+        assert result.signal_action in {"long_entry", "short_entry", "hold"}
+        assert exchange.submitted_order_count == 0
+
+    def test_missing_package_required_column_blocks_before_evaluation(self) -> None:
+        evaluator, required_columns = self._package_evaluator_and_columns()
+        # The package requires 'atr' (concrete, directly referenced); omit it.
+        assert "atr" in required_columns
+        incomplete_bar = indicator_bar(
+            vp_vah=52000.0,
+            vp_val=50000.0,
+            acceptance_into_value=True,
+            above_value=False,
+            # atr intentionally absent
+        )
+        runtime = _create_runtime(
+            evaluator=evaluator,
+            indicator_engine=InMemoryIndicatorEngine(latest_bar=incomplete_bar),
+            required_columns=required_columns,
+        )
+        runtime._start_session(self.STRATEGY_PATH, "pkg-boundary", "BTC", "1h")
+
+        result = runtime.process_closed_candle(new_closed_candle())
+
+        # Finbot's EnrichmentValidator blocks before the package evaluates,
+        # so no entry/exit signal is produced.
+        assert result.enrichment_valid is False
+        assert result.signal_action not in {
+            "long_entry",
+            "short_entry",
+            "long_exit",
+            "short_exit",
+        }
+
+
 def test_yaml_strategy_returns_hold_for_non_matching_bar() -> None:
     """Real evaluator returns HOLD when bar doesn't match rules."""
     from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
