@@ -18,8 +18,10 @@ import math
 
 import numpy as np
 import pandas as pd
+from finbar_strategy_runtime.domain.entities.volume_profile_result import (
+    VolumeProfileResult,
+)
 
-from finbot.core.domain.entities.volume_profile_result import VolumeProfileResult
 from finbot.core.domain.services._profile_utils import expand_value_area
 
 # ---------------------------------------------------------------------------

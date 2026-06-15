@@ -36,18 +36,10 @@ def register_bot_history_tools(mcp: FastMCP) -> None:
                     "symbol": r.symbol,
                     "interval": r.interval,
                     "mode": r.mode,
-                    "started_at": (
-                        r.started_at.isoformat() if r.started_at else None
-                    ),
-                    "ended_at": (
-                        r.ended_at.isoformat() if r.ended_at else None
-                    ),
-                    "signal_count": len(
-                        manager.get_signals_for_run(r.run_id)
-                    ),
-                    "order_count": len(
-                        manager.get_orders_for_run(r.run_id)
-                    ),
+                    "started_at": (r.started_at.isoformat() if r.started_at else None),
+                    "ended_at": (r.ended_at.isoformat() if r.ended_at else None),
+                    "signal_count": len(manager.get_signals_for_run(r.run_id)),
+                    "order_count": len(manager.get_orders_for_run(r.run_id)),
                     "fill_count": len(manager.get_fills_for_run(r.run_id)),
                 }
                 for r in runs
@@ -87,9 +79,7 @@ def register_bot_history_tools(mcp: FastMCP) -> None:
                     "started_at": (
                         run.started_at.isoformat() if run.started_at else None
                     ),
-                    "ended_at": (
-                        run.ended_at.isoformat() if run.ended_at else None
-                    ),
+                    "ended_at": (run.ended_at.isoformat() if run.ended_at else None),
                 },
                 "summary": {
                     "signal_count": len(signals),

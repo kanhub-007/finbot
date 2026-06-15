@@ -11,12 +11,17 @@ adapter is exercised against real parsed definitions.
 from decimal import Decimal
 
 import pytest
+from finbar_strategy_runtime.domain.entities.signal_result import SignalResult
+from finbar_strategy_runtime.domain.interfaces.trading_strategy import TradingStrategy
 
 from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.interfaces.strategy_evaluator import StrategyEvaluator
+from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator import (
+    SharedRuntimeStrategyEvaluator,
+)
 from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
     SharedRuntimeStrategyEvaluatorFactory,
 )
@@ -59,9 +64,7 @@ class TestSharedRuntimeStrategyEvaluatorFactory:
 
         assert isinstance(evaluator, StrategyEvaluator)
 
-    def test_triggered_bar_produces_entry_signal_with_context(
-        self, amt_def
-    ) -> None:
+    def test_triggered_bar_produces_entry_signal_with_context(self, amt_def) -> None:
         factory = SharedRuntimeStrategyEvaluatorFactory()
         evaluator = factory.create(
             amt_def, symbol="BTC", interval="1h", strategy_hash="abc"
@@ -81,9 +84,7 @@ class TestSharedRuntimeStrategyEvaluatorFactory:
         assert decision.interval == "1h"
         assert decision.strategy_hash == "abc"
 
-    def test_hold_bar_produces_hold_with_populated_signal_key(
-        self, amt_def
-    ) -> None:
+    def test_hold_bar_produces_hold_with_populated_signal_key(self, amt_def) -> None:
         factory = SharedRuntimeStrategyEvaluatorFactory()
         evaluator = factory.create(
             amt_def, symbol="BTC", interval="1h", strategy_hash="abc"
@@ -151,3 +152,32 @@ class TestSharedRuntimeStrategyEvaluatorFactory:
             _flat_position(),
         )
         assert decision.action == SignalAction.LONG_ENTRY
+
+
+class _BogusStrategy(TradingStrategy):
+    """Fake package strategy that emits an unmappable signal.
+
+    A real (in-memory) implementation of the package TradingStrategy
+    interface used to exercise the adapter's error path. It returns a
+    SignalResult that matches no row of the authoritative mapping table.
+    """
+
+    def meta(self):  # pragma: no cover - not exercised by the adapter
+        raise NotImplementedError
+
+    def on_bar(self, bar, position) -> SignalResult:
+        return SignalResult(action="bogus", direction="weird")
+
+
+class TestSharedRuntimeStrategyEvaluatorMappingErrors:
+    def test_unmappable_signal_raises_value_error(self) -> None:
+        """A package signal that matches no mapping row raises ValueError."""
+        evaluator = SharedRuntimeStrategyEvaluator(
+            _BogusStrategy(),
+            symbol="BTC",
+            interval="1h",
+            strategy_hash="abc",
+        )
+
+        with pytest.raises(ValueError, match="Unmappable package signal"):
+            evaluator.evaluate(_bar(close=100.0), _flat_position())

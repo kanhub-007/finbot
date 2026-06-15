@@ -5,8 +5,8 @@ from pathlib import Path
 from finbot.core.application.use_cases.replay_strategy import ReplayStrategyUseCase
 from finbot.core.domain.dto.replay_strategy_request import ReplayStrategyRequest
 from finbot.core.domain.services.warmup_window import WarmupWindow
-from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
-    RuleBasedStrategyEvaluatorFactory,
+from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
+    SharedRuntimeStrategyEvaluatorFactory,
 )
 from finbot.infrastructure.strategy.csv_bar_loader import CsvBarLoader
 from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
@@ -20,7 +20,7 @@ def _use_case(warmup: WarmupWindow | None = None) -> ReplayStrategyUseCase:
     return ReplayStrategyUseCase(
         loader=YamlStrategyDefinitionLoader(),
         bar_loader=CsvBarLoader(),
-        evaluator_factory=RuleBasedStrategyEvaluatorFactory(),
+        evaluator_factory=SharedRuntimeStrategyEvaluatorFactory(),
         warmup=warmup,
     )
 

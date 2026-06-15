@@ -255,9 +255,7 @@ class TestPackageSubpackageAllowlist:
         self, file_path: Path
     ):
         violations = [
-            imp
-            for imp in self._package_imports(file_path)
-            if self._violation_for(imp)
+            imp for imp in self._package_imports(file_path) if self._violation_for(imp)
         ]
         assert not violations, (
             f"{file_path.name} imports package infra subpackages: "
@@ -267,63 +265,8 @@ class TestPackageSubpackageAllowlist:
         )
 
 
-class TestCopiedRuntimeModules:
-    """Guardrails for code copied from Finbar into finbot/infrastructure/strategy/.
-
-    These tests will be empty (trivially pass) until files are copied in
-    later phases. Once files exist they prevent accidental Finbar imports
-    and ban Finbar presentation/startup code.
-    """
-
-    @staticmethod
-    def _strategy_runtime_files() -> list[Path]:
-        root = Path(__file__).resolve().parents[2]
-        target = root / "finbot" / "infrastructure" / "strategy"
-        if not target.is_dir():
-            return []
-        return sorted(
-            p for p in target.rglob("*.py") if not _is_init_only_module(str(p))
-        )
-
-    def test_copied_runtime_modules_do_not_import_finbar(self) -> None:
-        """Every file under infrastructure/strategy/ must not import finbar."""
-        files = self._strategy_runtime_files()
-        if not files:
-            pytest.skip("No copied runtime modules yet")
-
-        root = Path(__file__).resolve().parents[2]
-        violations: dict[str, set[str]] = {}
-        for file_path in files:
-            imports = _collect_imports(file_path)
-            if "finbar" in imports:
-                violations[str(file_path.relative_to(root))] = imports["finbar"]
-
-        assert not violations, (
-            f"Copied runtime modules import finbar: {violations}. "
-            f"All imports must be rewritten to finbot.*."
-        )
-
-    def test_copied_runtime_no_finbar_presentation_or_startup(self) -> None:
-        """Copied modules must not transitively pull in Finbar presentation/startup."""
-        files = self._strategy_runtime_files()
-        if not files:
-            pytest.skip("No copied runtime modules yet")
-
-        root = Path(__file__).resolve().parents[2]
-        violations: dict[str, set[str]] = {}
-        for file_path in files:
-            imports = _collect_imports(file_path)
-            if "finbar" in imports:
-                for imp in imports["finbar"]:
-                    parts = imp.split(".")
-                    if len(parts) >= 3 and parts[1] in (
-                        "presentation",
-                        "startup",
-                    ):
-                        key = str(file_path.relative_to(root))
-                        violations.setdefault(key, set()).add(imp)
-
-        assert not violations, (
-            f"Copied runtime modules import Finbar presentation/startup: "
-            f"{violations}. Only strategy runtime code may be copied."
-        )
+# Note: the old ``TestCopiedRuntimeModules`` guardrails (which policed
+# the copied Finbar runtime under infrastructure/strategy/) have been
+# removed. The copy is deleted in favour of the finbar-strategy-runtime
+# package, and the stronger deletion guarantees now live in
+# tests/test_architecture/test_copied_code_removed.py.

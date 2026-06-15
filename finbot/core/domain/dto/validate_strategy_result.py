@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from finbot.core.domain.entities.strategy_definition import (
+    from finbar_strategy_runtime.domain.entities.strategy_definition import (
         StrategyDefinition,
     )
 

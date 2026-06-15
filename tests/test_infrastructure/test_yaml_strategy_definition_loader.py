@@ -3,8 +3,10 @@
 from pathlib import Path
 
 import pytest
+from finbar_strategy_runtime.domain.entities.strategy_definition import (
+    StrategyDefinition,
+)
 
-from finbot.core.domain.entities.strategy_definition import StrategyDefinition
 from finbot.core.domain.entities.strategy_load_error import StrategyLoadError
 from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
     YamlStrategyDefinitionLoader,
@@ -101,3 +103,40 @@ class TestYamlStrategyDefinitionLoader:
         loader = _loader()
         with pytest.raises(FileNotFoundError):
             loader.load_from_file("../../../etc/passwd")
+
+
+class TestLoaderSurfacesPackageRequiredColumns:
+    """The loader must surface the package validation result's
+    required_columns so the runtime/enrichment validator read the
+    *concrete, directly-referenced* columns, not the strategy-local
+    aliases.
+
+    Note: the package's RequiredColumnCollector returns OHLCV plus the
+    columns referenced directly in condition trees / risk stops. For the
+    AMT strategy, vp_vah/vp_val are intermediate (only used to compute
+    the composite above_value/acceptance_into_value indicators), so they
+    are intentionally NOT in required_columns — the validator only needs
+    the final, directly-evaluated columns.
+    """
+
+    def test_last_required_columns_contains_concrete_referenced_names(self) -> None:
+        loader = _loader()
+        loader.load_from_file(str(FIXTURES_DIR / "amt_dip_buyer_final.yaml"))
+
+        columns = loader.last_required_columns()
+        # Directly-referenced concrete indicator columns + engine OHLCV.
+        assert "atr" in columns
+        assert "above_value" in columns
+        assert "acceptance_into_value" in columns
+        assert "open" in columns and "close" in columns
+
+    def test_last_required_columns_empty_before_any_load(self) -> None:
+        assert _loader().last_required_columns() == []
+
+    def test_required_columns_survive_round_trip_as_list(self) -> None:
+        loader = _loader()
+        loader.load_from_file(str(FIXTURES_DIR / "amt_v2_vol_filter.yaml"))
+
+        columns = loader.last_required_columns()
+        assert isinstance(columns, list)
+        assert "value_area_width_pct" in columns

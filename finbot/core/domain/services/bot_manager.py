@@ -278,9 +278,7 @@ class BotManager:
         )
 
         side = (
-            OrderSide.SELL
-            if pos.direction == PositionDirection.LONG
-            else OrderSide.BUY
+            OrderSide.SELL if pos.direction == PositionDirection.LONG else OrderSide.BUY
         )
         intent = OrderIntent(
             symbol=symbol,
@@ -307,9 +305,7 @@ class BotManager:
         return None
 
     @staticmethod
-    def _validate_start_inputs(
-        strategy_path: str, mode: str
-    ) -> dict[str, str] | None:
+    def _validate_start_inputs(strategy_path: str, mode: str) -> dict[str, str] | None:
         if not Path(strategy_path).exists():
             return {
                 "status": "rejected",

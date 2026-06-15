@@ -48,8 +48,4 @@ class BotLiveState:
     def snapshot(self) -> dict[str, object]:
         """Return a thread-safe copy of all public fields as a dict."""
         with self._lock:
-            return {
-                k: v
-                for k, v in self.__dict__.items()
-                if not k.startswith("_")
-            }
+            return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}

@@ -17,17 +17,14 @@ from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 from finbot.infrastructure.adapters.dry_run_exchange_gateway import (
     DryRunExchangeGateway,
 )
-from finbot.infrastructure.adapters.finbar_strategy_evaluator import (
-    FinbarStrategyEvaluator,
-)
 from finbot.infrastructure.adapters.hyperliquid_exchange_gateway import (
     HyperliquidExchangeGateway,
 )
 from finbot.infrastructure.adapters.in_memory_market_data_stream import (
     InMemoryMarketDataStream,
 )
-from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
-    RuleBasedStrategyEvaluatorFactory,
+from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
+    SharedRuntimeStrategyEvaluatorFactory,
 )
 from finbot.infrastructure.repositories.in_memory_bot_state_repository import (
     InMemoryBotStateRepository,
@@ -88,6 +85,8 @@ def create_exchange_gateway(settings: Settings) -> ExchangeGateway:
 def create_run_bot_use_case(
     settings: Settings,
     strategy_path: str,
+    symbol: str = "",
+    interval: str = "",
     live_data: bool = False,
 ) -> RunBotUseCase:
     """Create a fully wired run-bot use case.
@@ -110,9 +109,29 @@ def create_run_bot_use_case(
     return RunBotUseCase(
         exchange_gateway=_build_exchange_gateway(settings, mode),
         market_data_stream=stream,
-        strategy_evaluator=FinbarStrategyEvaluator(strategy_path),
+        strategy_evaluator=_build_strategy_evaluator(strategy_path, symbol, interval),
         state_repository=InMemoryBotStateRepository(),
     )
+
+
+def _build_strategy_evaluator(strategy_path: str, symbol: str, interval: str):
+    """Load a strategy file and wrap its package strategy in a Finbot adapter.
+
+    Used by legacy validate-and-exit wiring; the live runtime builds its
+    own evaluator via the shared factory.
+    """
+    from finbot.core.domain.interfaces.strategy_evaluator import StrategyEvaluator
+
+    loader = YamlStrategyDefinitionLoader()
+    definition = loader.load_from_file(strategy_path)
+    strategy_hash = _hash_strategy_file(strategy_path)
+    evaluator: StrategyEvaluator = SharedRuntimeStrategyEvaluatorFactory().create(
+        definition=definition,
+        symbol=symbol,
+        interval=interval,
+        strategy_hash=strategy_hash,
+    )
+    return evaluator
 
 
 def create_run_bot_request(
@@ -152,7 +171,7 @@ def create_replay_strategy_use_case(
     return ReplayStrategyUseCase(
         loader=YamlStrategyDefinitionLoader(),
         bar_loader=CsvBarLoader(),
-        evaluator_factory=RuleBasedStrategyEvaluatorFactory(),
+        evaluator_factory=SharedRuntimeStrategyEvaluatorFactory(),
         warmup=warmup,
     )
 
@@ -268,9 +287,9 @@ def create_live_trading_runtime_use_case(
 ):
     """Create a fully wired LiveTradingRuntimeUseCase.
 
-    Loads the YAML strategy, creates a real ``RuleBasedStrategyEvaluator``
-    via the factory, and wires all adapters.  Never uses the placeholder
-    ``FinbarStrategyEvaluator`` in the live path.
+    Loads the YAML strategy, creates a real ``SharedRuntimeStrategyEvaluator``
+    via the shared runtime factory, and wires all adapters.  Never uses a
+    placeholder evaluator in the live path.
 
     When ``live_data`` is True (or *bot_loop* is omitted on the
     testnet/live path) a :class:`BotEventLoop` owning the market data
@@ -313,8 +332,8 @@ def create_live_trading_runtime_use_case(
     from finbot.infrastructure.strategy.pandas_bar_frame_converter import (
         PandasBarFrameConverter,
     )
-    from finbot.infrastructure.strategy.pandas_ta_indicator_calculator import (
-        PandasTaIndicatorCalculator,
+    from finbot.infrastructure.strategy.shared_runtime_indicator_calculator import (
+        SharedRuntimeIndicatorCalculator,
     )
 
     trading_mode = TradingMode(mode)
@@ -345,15 +364,16 @@ def create_live_trading_runtime_use_case(
     loader = YamlStrategyDefinitionLoader()
     definition = loader.load_from_file(strategy_path)
     strategy_hash = _hash_strategy_file(strategy_path)
-    evaluator = RuleBasedStrategyEvaluatorFactory().create(
+    evaluator = SharedRuntimeStrategyEvaluatorFactory().create(
         definition=definition,
         symbol=symbol,
         interval=interval,
         strategy_hash=strategy_hash,
     )
 
-    # Collect required indicator columns from strategy definition
-    required_columns = {ind.name for ind in definition.indicators}
+    # Required enriched columns come from the package validation result
+    # (concrete names like vp_vah), not the strategy-local aliases.
+    required_columns = set(loader.last_required_columns())
 
     # Pre-load warmup bars from Hyperliquid when using live data
     if warmup_bars is None and live_data:
@@ -363,7 +383,7 @@ def create_live_trading_runtime_use_case(
         exchange_gateway=gateway,
         strategy_evaluator=evaluator,
         state_repository=repo,
-        indicator_calculator=PandasTaIndicatorCalculator(),
+        indicator_calculator=SharedRuntimeIndicatorCalculator(),
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=PandasBarFrameConverter(),
         mode=trading_mode,

@@ -47,6 +47,3 @@ target-version = ["py312"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-markers = [
-    "finbar_parity: optional tests comparing Finbot runtime against Finbar",
-]

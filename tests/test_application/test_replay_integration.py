@@ -6,8 +6,8 @@ from finbot.core.application.use_cases.replay_strategy import (
     ReplayStrategyUseCase,
 )
 from finbot.core.domain.dto.replay_strategy_request import ReplayStrategyRequest
-from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
-    RuleBasedStrategyEvaluatorFactory,
+from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
+    SharedRuntimeStrategyEvaluatorFactory,
 )
 from finbot.infrastructure.strategy.csv_bar_loader import CsvBarLoader
 from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
@@ -29,7 +29,7 @@ def test_replay_produces_entry_signals() -> None:
     use_case = ReplayStrategyUseCase(
         loader=YamlStrategyDefinitionLoader(),
         bar_loader=CsvBarLoader(),
-        evaluator_factory=RuleBasedStrategyEvaluatorFactory(),
+        evaluator_factory=SharedRuntimeStrategyEvaluatorFactory(),
     )
 
     result = use_case.execute(
@@ -59,7 +59,7 @@ def test_replay_with_warmup_filters_early_bars() -> None:
     use_case = ReplayStrategyUseCase(
         loader=YamlStrategyDefinitionLoader(),
         bar_loader=CsvBarLoader(),
-        evaluator_factory=RuleBasedStrategyEvaluatorFactory(),
+        evaluator_factory=SharedRuntimeStrategyEvaluatorFactory(),
         warmup=WarmupWindow(min_bars=50),
     )
 

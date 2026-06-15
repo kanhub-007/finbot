@@ -11,9 +11,6 @@ from finbot.core.domain.entities.trading_mode import TradingMode
 from finbot.infrastructure.adapters.dry_run_exchange_gateway import (
     DryRunExchangeGateway,
 )
-from finbot.infrastructure.adapters.finbar_strategy_evaluator import (
-    FinbarStrategyEvaluator,
-)
 from finbot.infrastructure.adapters.in_memory_market_data_stream import (
     InMemoryMarketDataStream,
 )
@@ -21,13 +18,36 @@ from finbot.infrastructure.repositories.in_memory_bot_state_repository import (
     InMemoryBotStateRepository,
 )
 
+_DEFAULT_FIXTURE_STRATEGY = "tests/fixtures/strategies/amt_dip_buyer_final.yaml"
 
-def create_dry_run_use_case(strategy_path: str = "strategy.yaml") -> RunBotUseCase:
+
+def _load_evaluator(strategy_path: str):
+    """Load a strategy and wrap its package strategy in a Finbot evaluator."""
+    from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
+        SharedRuntimeStrategyEvaluatorFactory,
+    )
+    from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
+        YamlStrategyDefinitionLoader,
+    )
+
+    loader = YamlStrategyDefinitionLoader()
+    definition = loader.load_from_file(strategy_path)
+    return SharedRuntimeStrategyEvaluatorFactory().create(
+        definition=definition,
+        symbol="",
+        interval="",
+        strategy_hash="test",
+    )
+
+
+def create_dry_run_use_case(
+    strategy_path: str = _DEFAULT_FIXTURE_STRATEGY,
+) -> RunBotUseCase:
     """Return a use case wired with all in-memory/fake adapters."""
     return RunBotUseCase(
         exchange_gateway=DryRunExchangeGateway(),
         market_data_stream=InMemoryMarketDataStream(),
-        strategy_evaluator=FinbarStrategyEvaluator(strategy_path),
+        strategy_evaluator=_load_evaluator(strategy_path),
         state_repository=InMemoryBotStateRepository(),
     )
 

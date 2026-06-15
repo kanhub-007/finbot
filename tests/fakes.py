@@ -325,9 +325,7 @@ class StubBotStateRepository(BotStateRepository):
     def get_bot_run(self, run_id: str) -> object | None:
         return next((r for r in self._bot_runs if r.run_id == run_id), None)
 
-    def list_bot_runs(
-        self, limit: int = 20, mode_filter: str | None = None
-    ) -> list:
+    def list_bot_runs(self, limit: int = 20, mode_filter: str | None = None) -> list:
         runs = list(self._bot_runs)
         if mode_filter:
             runs = [r for r in runs if r.mode == mode_filter]
@@ -346,9 +344,7 @@ class StubBotStateRepository(BotStateRepository):
     def get_risk_events_for_run(self, run_id: str) -> list:
         return [e for e in self._risk_events if e.bot_run_id == run_id]
 
-    def get_audit_log(
-        self, limit: int = 50, event_type: str | None = None
-    ) -> list:
+    def get_audit_log(self, limit: int = 50, event_type: str | None = None) -> list:
         entries = list(self._audit_entries)
         if event_type:
             entries = [e for e in entries if e.event_type == event_type]

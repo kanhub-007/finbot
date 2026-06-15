@@ -33,9 +33,7 @@ def register_safety_tools(mcp: FastMCP) -> None:
         result["bot_stopped"] = stop_result["status"] == "stopped"
 
         if not manager.has_exchange:
-            result["message"] = (
-                "No exchange gateway wired — orders not cancelled."
-            )
+            result["message"] = "No exchange gateway wired — orders not cancelled."
             return json.dumps(result, indent=2)
 
         if cancel_orders and symbol:

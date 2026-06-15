@@ -170,6 +170,8 @@ def _cmd_run(args) -> None:
         use_case = create_run_bot_use_case(
             settings,
             args.strategy,
+            symbol=args.symbol,
+            interval=args.interval,
             live_data=False,
         )
         request = create_run_bot_request(

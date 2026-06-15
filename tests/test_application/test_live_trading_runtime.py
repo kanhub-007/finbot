@@ -212,8 +212,8 @@ def test_out_of_order_candle_ignored_on_gap_detection() -> None:
 
 def test_yaml_strategy_loaded_into_real_evaluator() -> None:
     """Real evaluator is used, returns non-HOLD for matching bars."""
-    from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
-        RuleBasedStrategyEvaluatorFactory,
+    from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
+        SharedRuntimeStrategyEvaluatorFactory,
     )
     from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
         YamlStrategyDefinitionLoader,
@@ -222,7 +222,7 @@ def test_yaml_strategy_loaded_into_real_evaluator() -> None:
     strategy_path = "tests/fixtures/strategies/amt_dip_buyer_final.yaml"
     definition = YamlStrategyDefinitionLoader().load_from_file(strategy_path)
     strategy_hash = "test-hash-amt-dip"
-    real_evaluator = RuleBasedStrategyEvaluatorFactory().create(
+    real_evaluator = SharedRuntimeStrategyEvaluatorFactory().create(
         definition=definition,
         symbol="BTC",
         interval="1h",
@@ -260,8 +260,8 @@ def test_yaml_strategy_loaded_into_real_evaluator() -> None:
 
 def test_yaml_strategy_returns_hold_for_non_matching_bar() -> None:
     """Real evaluator returns HOLD when bar doesn't match rules."""
-    from finbot.infrastructure.adapters.rule_based_strategy_evaluator_factory import (
-        RuleBasedStrategyEvaluatorFactory,
+    from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
+        SharedRuntimeStrategyEvaluatorFactory,
     )
     from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
         YamlStrategyDefinitionLoader,
@@ -269,7 +269,7 @@ def test_yaml_strategy_returns_hold_for_non_matching_bar() -> None:
 
     strategy_path = "tests/fixtures/strategies/amt_dip_buyer_final.yaml"
     definition = YamlStrategyDefinitionLoader().load_from_file(strategy_path)
-    real_evaluator = RuleBasedStrategyEvaluatorFactory().create(
+    real_evaluator = SharedRuntimeStrategyEvaluatorFactory().create(
         definition=definition,
         symbol="BTC",
         interval="1h",
