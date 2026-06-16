@@ -138,14 +138,17 @@ class AccountEventHandler:
             with tx():
                 if not self._apply_fill_transition(order_id, size):
                     return {"status": "transition_rejected"}
-                self._repo.record_fill(fill)
+                # Apply to the Trade ledger first so its internal
+                # idempotency checks see the fill as NOT yet recorded
+                # (has_fill returns False for a new fill).
                 self._trade_ledger.apply_fill(fill)
+                self._repo.record_fill(fill)
             return {"status": "processed"}
         # In-memory repos have no fsync cost; apply directly.
         if not self._apply_fill_transition(order_id, size):
             return {"status": "transition_rejected"}
-        self._repo.record_fill(fill)
         self._trade_ledger.apply_fill(fill)
+        self._repo.record_fill(fill)
         return {"status": "processed"}
 
     def _apply_fill_transition(self, order_id: str, size: Decimal) -> bool:

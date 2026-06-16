@@ -12,6 +12,7 @@ from uuid import uuid4
 from finbot.core.domain.dto.fill_outcome import FillOutcome
 from finbot.core.domain.entities.fill_record import FillRecord
 from finbot.core.domain.entities.position_direction import PositionDirection
+from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.trade import Trade
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
@@ -35,6 +36,7 @@ class TradeLedger:
     def __init__(self, repo: BotStateRepository, strategy_hash: str = "") -> None:
         self._repo = repo
         self._strategy_hash = strategy_hash
+        self._applied_fill_ids: set[str] = set()
 
     def apply_fill(self, fill: FillRecord) -> FillOutcome:
         """Classify and apply a fill to the Trade book.
@@ -46,30 +48,18 @@ class TradeLedger:
 
         Persists via the repository (caller owns the transaction).
         """
-        # Idempotency: skip fills we've already seen.
-        fill_key = f"fill:{fill.fill_id}"
-        existing = self._repo.get_open_trade(fill.symbol)
-        if existing is None:
-            # Check if this fill was already applied to a closed trade by
-            # scanning closed trades (idempotent for replayed fills on
-            # already-closed positions).
-            # We use a simple approach: check if the fill_id was recorded.
-            # The repo's has_fill method tells us if the fill was persisted.
-            if self._repo.has_fill(fill.fill_id):
-                return FillOutcome(status="duplicate")
-        else:
-            # Check if this fill_id was already applied to the open trade.
-            # We track applied fill_ids via a simple set on the ledger
-            # (not persisted — idempotency per session; crashes lose
-            # this cache but the repo's has_fill catches replay).
-            applied_key = f"applied:{fill.fill_id}"
-            if applied_key in getattr(self, "_applied_fill_ids", set()):
-                return FillOutcome(status="duplicate")
+        # Idempotency: skip fills we've already seen this session.
+        if fill.fill_id in self._applied_fill_ids:
+            return FillOutcome(status="duplicate")
 
-        # Persist the fill id cache.
-        if not hasattr(self, "_applied_fill_ids"):
-            object.__setattr__(self, "_applied_fill_ids", set[str]())
-        self._applied_fill_ids.add(f"applied:{fill.fill_id}")
+        # Cross-session idempotency: if no open trade exists for this
+        # symbol and the fill was already persisted (from a prior session),
+        # it's a replay of a fill that already opened+closed a trade.
+        existing = self._repo.get_open_trade(fill.symbol)
+        if existing is None and self._repo.has_fill(fill.fill_id):
+            return FillOutcome(status="duplicate")
+
+        self._applied_fill_ids.add(fill.fill_id)
 
         open_trade = self._repo.get_open_trade(fill.symbol)
 
@@ -126,7 +116,7 @@ class TradeLedger:
 
     def reconstruct_open(
         self,
-        position,
+        position: PositionSnapshot,
         *,
         bot_run_id: str,
         strategy_hash: str = "",

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime as _dt
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -576,8 +577,6 @@ class LiveTradingRuntimeUseCase:
         self, bar: dict[str, Any], position: PositionSnapshot
     ) -> dict[str, Any]:
         """Assemble the context dict consumed by the risk gates."""
-        from datetime import UTC, datetime
-
         return {
             "bar": bar,
             "symbol": self._symbol,
@@ -588,7 +587,7 @@ class LiveTradingRuntimeUseCase:
                 self._exchange.list_open_orders(self._symbol or "")
             ),
             "daily_loss_usd": self._trade_ledger.realized_loss_on(
-                datetime.now(UTC).date()
+                _dt.now(UTC).date()
             ),
         }
 
@@ -666,8 +665,6 @@ class LiveTradingRuntimeUseCase:
 
         Returns None when the warmup window has no latest bar.
         """
-        from datetime import UTC, datetime
-
         bar = self._warmup.latest_bar
         if bar is None:
             return None
@@ -683,7 +680,7 @@ class LiveTradingRuntimeUseCase:
             price=ref_price,
             fee=Decimal("0"),
             fill_id=f"dry:{intent_id}",
-            filled_at=datetime.now(UTC),
+            filled_at=_dt.now(UTC),
         )
 
 

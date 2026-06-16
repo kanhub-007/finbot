@@ -248,3 +248,37 @@ def test_unknown_order_update_blocks_new_orders() -> None:
     )
 
     assert repo._lifecycles["intent-8"].state == OrderState.UNKNOWN_RECONCILE_REQUIRED
+
+
+def test_fill_opens_trade_atomically() -> None:
+    """A buy fill through AccountEventHandler opens a Trade.
+
+    Regression test: TradeLedger.apply_fill must NOT see the fill as
+    already recorded (has_fill returns False on first call) — the fill
+    record and Trade update happen atomically but apply_fill must run
+    before record_fill.
+    """
+    repo = StubBotStateRepository()
+    runtime = _make_runtime(repo)
+    _start_session_with_intent(runtime, repo, "intent-9")
+    repo._lifecycles["intent-9"].state = OrderState.OPEN
+
+    runtime.process_account_event(
+        {
+            "type": "fill",
+            "order_id": "intent-9",
+            "fill_id": "fill-trade-1",
+            "size": str(Decimal("0.1")),
+            "price": str(Decimal("50000")),
+            "fee": str(Decimal("0.5")),
+        }
+    )
+
+    # A Trade should now be open.
+    trade = repo.get_open_trade("BTC")
+    assert trade is not None, (
+        "Fill should have opened a Trade — apply_fill must run before "
+        "record_fill so has_fill returns False on the first call"
+    )
+    assert trade.side.value == "long"
+    assert trade.size == Decimal("0.1")

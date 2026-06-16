@@ -4,7 +4,6 @@ Stateless functions that produce new immutable Trade instances from fills.
 No I/O, no repo — trivially unit-testable.
 """
 
-from datetime import datetime
 from decimal import Decimal
 
 from finbot.core.domain.entities.fill_record import FillRecord
@@ -27,11 +26,15 @@ def open_from_fill(
     The fill's side determines the Trade direction: buy → LONG, sell → SHORT.
     The fill's fee is recorded as the initial total_fee.
     """
-    side = (
-        PositionDirection.LONG
-        if fill.side == "buy"
-        else PositionDirection.SHORT
-    )
+    if fill.side == "buy":
+        side = PositionDirection.LONG
+    elif fill.side == "sell":
+        side = PositionDirection.SHORT
+    else:
+        raise ValueError(
+            f"Cannot determine Trade direction from fill side {fill.side!r}; "
+            f"expected 'buy' or 'sell'"
+        )
     return Trade(
         position_id=position_id,
         bot_run_id=fill.bot_run_id,
@@ -51,11 +54,18 @@ def apply_entry_fill(trade: Trade, fill: FillRecord) -> Trade:
     """Accumulate an entry fill into an existing open Trade.
 
     Increases size, recomputes volume-weighted average entry price,
-    and adds the fill's fee.
+    and adds the fill's fee.  When *trade* has no entry price (reconstructed
+    without fill history), the fill's price becomes the new entry price.
     """
-    total_notional = trade.entry_price * trade.size + fill.price * fill.size
     new_size = trade.size + fill.size
-    new_entry_price = total_notional / new_size if new_size > 0 else trade.entry_price
+    if trade.entry_price is None:
+        # Reconstructed trade with unknown entry — use fill price as baseline.
+        new_entry_price = fill.price
+    elif new_size == Decimal("0"):
+        new_entry_price = trade.entry_price
+    else:
+        total_notional = trade.entry_price * trade.size + fill.price * fill.size
+        new_entry_price = total_notional / new_size
     return Trade(
         position_id=trade.position_id,
         bot_run_id=trade.bot_run_id,

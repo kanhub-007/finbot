@@ -34,6 +34,13 @@ from finbot.infrastructure.repositories.sqlite_migrator import (
 )
 
 
+_TRADE_COLS = (
+    "position_id, bot_run_id, symbol, side, size, entry_price, opened_at, "
+    "status, realized_pnl, total_fee, closed_at, close_price, "
+    "strategy_hash, entry_signal_key"
+)
+
+
 class SqliteBotStateRepository(BotStateRepository):
     """SQLite-backed bot state persistence.
 
@@ -543,20 +550,16 @@ class SqliteBotStateRepository(BotStateRepository):
 
     def get_open_trade(self, symbol: str) -> Trade | None:
         row = self._query_one(
-            "SELECT position_id, bot_run_id, symbol, side, size, "
-            "entry_price, opened_at, status, realized_pnl, total_fee, "
-            "closed_at, close_price, strategy_hash, entry_signal_key "
-            "FROM trades WHERE symbol=? AND status='open' ORDER BY opened_at DESC LIMIT 1",
+            f"SELECT {_TRADE_COLS} FROM trades "
+            "WHERE symbol=? AND status='open' ORDER BY opened_at DESC LIMIT 1",
             (symbol,),
         )
         return _trade_from_row(row) if row else None
 
     def list_open_trades(self) -> list[Trade]:
         rows = self._connection.execute(
-            "SELECT position_id, bot_run_id, symbol, side, size, "
-            "entry_price, opened_at, status, realized_pnl, total_fee, "
-            "closed_at, close_price, strategy_hash, entry_signal_key "
-            "FROM trades WHERE status='open' ORDER BY opened_at DESC"
+            f"SELECT {_TRADE_COLS} FROM trades "
+            "WHERE status='open' ORDER BY opened_at DESC"
         ).fetchall()
         return [_trade_from_row(r) for r in rows]
 
@@ -565,35 +568,41 @@ class SqliteBotStateRepository(BotStateRepository):
     ) -> list[Trade]:
         if bot_run_id is not None:
             rows = self._connection.execute(
-                "SELECT position_id, bot_run_id, symbol, side, size, "
-                "entry_price, opened_at, status, realized_pnl, total_fee, "
-                "closed_at, close_price, strategy_hash, entry_signal_key "
-                "FROM trades WHERE status='closed' AND bot_run_id=? "
+                f"SELECT {_TRADE_COLS} FROM trades "
+                "WHERE status='closed' AND bot_run_id=? "
                 "ORDER BY closed_at DESC",
                 (bot_run_id,),
             ).fetchall()
         else:
             rows = self._connection.execute(
-                "SELECT position_id, bot_run_id, symbol, side, size, "
-                "entry_price, opened_at, status, realized_pnl, total_fee, "
-                "closed_at, close_price, strategy_hash, entry_signal_key "
-                "FROM trades WHERE status='closed' "
-                "ORDER BY closed_at DESC"
+                f"SELECT {_TRADE_COLS} FROM trades "
+                "WHERE status='closed' ORDER BY closed_at DESC"
             ).fetchall()
         return [_trade_from_row(r) for r in rows]
 
     def realized_loss_on(self, day: _date) -> Decimal:
-        day_start = datetime(day.year, day.month, day.day, tzinfo=UTC)
-        day_end = datetime(day.year, day.month, day.day, 23, 59, 59, 999999, tzinfo=UTC)
-        row = self._query_one(
-            "SELECT COALESCE(SUM(CAST(realized_pnl AS REAL)), 0) "
-            "FROM trades WHERE status='closed' AND CAST(realized_pnl AS REAL) < 0 "
-            "AND closed_at >= ? AND closed_at <= ?",
-            (_to_utc_text(day_start), _to_utc_text(day_end)),
+        """Sum of absolute realized losses for trades closed on *day*.
+
+        Loads matching rows and sums with Decimal arithmetic to avoid
+        precision loss from CAST to REAL.
+        """
+        day_start = _to_utc_text(
+            datetime(day.year, day.month, day.day, tzinfo=UTC)
         )
-        if row is None or row[0] is None:
-            return Decimal("0")
-        return abs(Decimal(str(row[0])))
+        day_end = _to_utc_text(
+            datetime(day.year, day.month, day.day, 23, 59, 59, 999999, tzinfo=UTC)
+        )
+        rows = self._connection.execute(
+            "SELECT realized_pnl FROM trades "
+            "WHERE status='closed' AND closed_at >= ? AND closed_at <= ?",
+            (day_start, day_end),
+        ).fetchall()
+        total = Decimal("0")
+        for (pnl_text,) in rows:
+            pnl = Decimal(str(pnl_text))
+            if pnl < Decimal("0"):
+                total += pnl
+        return abs(total)
 
     @property
     def _connection(self) -> sqlite3.Connection:
