@@ -296,6 +296,7 @@ def create_live_trading_runtime_use_case(
     live_data: bool = False,
     warmup_bars: list | None = None,
     bot_loop=None,
+    notification_sender: object | None = None,
 ):
     """Create a fully wired LiveTradingRuntimeUseCase.
 
@@ -427,6 +428,7 @@ def create_live_trading_runtime_use_case(
         bot_loop=bot_loop,
         strategy_validator=create_validate_strategy_use_case(),
         trade_ledger=trade_ledger,
+        notification_sender=notification_sender,
     )
 
 

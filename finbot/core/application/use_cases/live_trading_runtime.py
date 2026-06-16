@@ -113,6 +113,7 @@ class LiveTradingRuntimeUseCase:
         strategy_validator: StrategyValidator | None = None,
         account_event_handler: AccountEventHandler | None = None,
         trade_ledger: TradeLedger | None = None,
+        notification_sender: object | None = None,
         live_state: Any | None = None,
     ) -> None:
         self._exchange = exchange_gateway
@@ -130,6 +131,7 @@ class LiveTradingRuntimeUseCase:
         self._strategy_validator = strategy_validator
         self._account_handler = account_event_handler
         self._trade_ledger = trade_ledger or TradeLedger(self._repo)
+        self._notification_sender = notification_sender
         self._live_state = live_state
         self._submitter = OrderSubmitter(
             exchange_gateway, order_normalizer, state_repository
@@ -397,7 +399,8 @@ class LiveTradingRuntimeUseCase:
         """
         if self._account_handler is None:
             self._account_handler = AccountEventHandler(
-                self._repo, self._trade_ledger
+                self._repo, self._trade_ledger,
+                notification_sender=self._notification_sender,
             )
         return self._account_handler.handle(
             event,

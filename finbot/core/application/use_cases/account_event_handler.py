@@ -16,6 +16,9 @@ from typing import Any
 from finbot.core.domain.entities.fill_record import FillRecord
 from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
 from finbot.core.domain.entities.order_state import OrderState
+from finbot.core.domain.interfaces.bot_notification_sender import (
+    BotNotificationSender,
+)
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
@@ -50,9 +53,11 @@ class AccountEventHandler:
         self,
         repo: BotStateRepository,
         trade_ledger: TradeLedger | None = None,
+        notification_sender: BotNotificationSender | None = None,
     ) -> None:
         self._repo = repo
         self._trade_ledger = trade_ledger or TradeLedger(repo)
+        self._notification_sender = notification_sender
 
     def handle(
         self,
@@ -143,12 +148,14 @@ class AccountEventHandler:
                 # (has_fill returns False for a new fill).
                 self._trade_ledger.apply_fill(fill)
                 self._repo.record_fill(fill)
+            self._notify_fill(fill)
             return {"status": "processed"}
         # In-memory repos have no fsync cost; apply directly.
         if not self._apply_fill_transition(order_id, size):
             return {"status": "transition_rejected"}
         self._trade_ledger.apply_fill(fill)
         self._repo.record_fill(fill)
+        self._notify_fill(fill)
         return {"status": "processed"}
 
     def _apply_fill_transition(self, order_id: str, size: Decimal) -> bool:
@@ -196,6 +203,37 @@ class AccountEventHandler:
         lifecycle = self._repo.get_order_lifecycle(order_id)
         fallback = lifecycle.side if lifecycle and lifecycle.side != "unknown" else ""
         return str(event.get("side", fallback))
+
+    # -- notifications -----------------------------------------------------
+
+    def _notify_fill(self, fill: FillRecord) -> None:
+        """Send a trade notification if a sender is configured."""
+        if self._notification_sender is None:
+            return
+        try:
+            # Check if this fill closes or reduces a trade for PnL
+            pnl_str: str | None = None
+            trade = self._trade_ledger.get_open_trade_for_symbol(fill.symbol)
+            if trade and trade.status == "closed":
+                pnl_str = str(trade.realized_pnl)
+
+            from datetime import datetime, timezone
+
+            from finbot.core.domain.events.trade_executed import TradeExecuted
+
+            event = TradeExecuted(
+                run_id=fill.bot_run_id,
+                symbol=fill.symbol,
+                side=fill.side,
+                size=str(fill.size),
+                price=str(fill.price),
+                pnl=pnl_str,
+                order_id=fill.order_id,
+                timestamp=datetime.now(timezone.utc),
+            )
+            self._notification_sender.notify_trade(event)
+        except Exception:
+            logger.debug("Failed to send trade notification", exc_info=True)
 
     # -- lifecycle access ---------------------------------------------------
 

@@ -24,7 +24,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-def _make_runtime_factory(settings: Settings):
+def _make_runtime_factory(settings: Settings, notification_sender=None):
     """Return a callable that creates a LiveTradingRuntimeUseCase.
 
     The callable accepts the same kwargs that BotManager.start() passes
@@ -47,6 +47,7 @@ def _make_runtime_factory(settings: Settings):
             mode=mode,
             live_data=live_data,
             warmup_bars=warmup_bars,
+            notification_sender=notification_sender,
         )
 
     return factory
@@ -78,7 +79,7 @@ def create_server() -> FastMCP:
         telegram = create_telegram_control_plane(settings, chat_repo=chat_repo)
 
     bot_manager = BotManager(
-        runtime_factory=_make_runtime_factory(settings),
+        runtime_factory=_make_runtime_factory(settings, notification_sender),
         repository=repo,
         exchange=exchange,
         settings=settings,
