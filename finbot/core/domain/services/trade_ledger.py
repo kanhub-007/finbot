@@ -32,8 +32,9 @@ class TradeLedger:
         Bot state repository used for trade persistence.
     """
 
-    def __init__(self, repo: BotStateRepository) -> None:
+    def __init__(self, repo: BotStateRepository, strategy_hash: str = "") -> None:
         self._repo = repo
+        self._strategy_hash = strategy_hash
 
     def apply_fill(self, fill: FillRecord) -> FillOutcome:
         """Classify and apply a fill to the Trade book.
@@ -74,7 +75,10 @@ class TradeLedger:
 
         if open_trade is None:
             # No open trade → this fill opens a new Trade.
-            trade = open_from_fill(fill, position_id=uuid4().hex)
+            trade = open_from_fill(
+                fill, position_id=uuid4().hex,
+                strategy_hash=self._strategy_hash,
+            )
             self._repo.open_trade(trade)
             return FillOutcome(
                 status="opened",
