@@ -27,6 +27,7 @@ def register_bot_history_tools(mcp: FastMCP) -> None:
         """Return recent bot runs ordered by most recent first."""
         manager = _get_bot_manager(mcp)
         runs = manager.list_bot_runs(limit=limit, mode_filter=mode)
+        counts = manager.get_run_counts([r.run_id for r in runs])
         result = {
             "count": len(runs),
             "runs": [
@@ -38,9 +39,9 @@ def register_bot_history_tools(mcp: FastMCP) -> None:
                     "mode": r.mode,
                     "started_at": (r.started_at.isoformat() if r.started_at else None),
                     "ended_at": (r.ended_at.isoformat() if r.ended_at else None),
-                    "signal_count": len(manager.get_signals_for_run(r.run_id)),
-                    "order_count": len(manager.get_orders_for_run(r.run_id)),
-                    "fill_count": len(manager.get_fills_for_run(r.run_id)),
+                    "signal_count": counts[r.run_id].signals,
+                    "order_count": counts[r.run_id].orders,
+                    "fill_count": counts[r.run_id].fills,
                 }
                 for r in runs
             ],

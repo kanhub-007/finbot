@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
+from finbot.core.domain.dto.run_counts import RunCounts
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
 from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.fill_record import FillRecord
@@ -238,6 +239,13 @@ class BotManager:
     def get_fills_for_run(self, run_id: str) -> list[FillRecord]:
         """Return all fills for a specific bot run."""
         return self._repo.get_fills_for_run(run_id)
+
+    def get_run_counts(self, run_ids: list[str]) -> dict[str, RunCounts]:
+        """Return signal/order/fill counts for many runs in one batch.
+
+        Used by list endpoints to avoid an N+1 query per run.
+        """
+        return self._repo.get_run_counts(run_ids)
 
     def get_risk_events_for_run(self, run_id: str) -> list[RiskEventRecord]:
         """Return all risk events for a specific bot run."""

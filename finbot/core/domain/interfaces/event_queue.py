@@ -33,5 +33,14 @@ class EventQueue(ABC):
         """Number of events currently in the queue."""
 
     @abstractmethod
+    def account_event_count(self) -> int:
+        """Number of pending account events (fills / order updates).
+
+        Lets the dispatch loop skip the O(q) account-event scan when none
+        are queued (the common case), instead of re-enqueueing every
+        candle each iteration.
+        """
+
+    @abstractmethod
     def clear(self) -> None:
         """Discard all pending events (used during shutdown flush)."""

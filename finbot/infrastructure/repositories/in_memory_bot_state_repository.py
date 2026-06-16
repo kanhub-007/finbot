@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
+from finbot.core.domain.dto.run_counts import RunCounts
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
 from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.fill_record import FillRecord
@@ -172,6 +173,27 @@ class InMemoryBotStateRepository(BotStateRepository):
     def get_fills_for_run(self, run_id: str) -> list[FillRecord]:
         return [f for f in self._fills if f.bot_run_id == run_id]
 
+    def get_run_counts(self, run_ids: list[str]) -> dict[str, RunCounts]:
+        wanted = set(run_ids)
+        signals = _count_by_run((s.bot_run_id for s in self._processed_signals), wanted)
+        orders = _count_by_run(
+            (
+                self._responses[rid]["response"].bot_run_id
+                for rid in self._responses
+                if self._responses[rid].get("response") is not None
+            ),
+            wanted,
+        )
+        fills = _count_by_run((f.bot_run_id for f in self._fills), wanted)
+        return {
+            rid: RunCounts(
+                signals=signals.get(rid, 0),
+                orders=orders.get(rid, 0),
+                fills=fills.get(rid, 0),
+            )
+            for rid in run_ids
+        }
+
     def get_risk_events_for_run(self, run_id: str) -> list[RiskEventRecord]:
         return [e for e in self._risk_events if e.bot_run_id == run_id]
 
@@ -201,15 +223,11 @@ class InMemoryBotStateRepository(BotStateRepository):
     def list_open_trades(self) -> list[Trade]:
         return [t for t in self._trades.values() if t.status == "open"]
 
-    def list_closed_trades(
-        self, *, bot_run_id: str | None = None
-    ) -> list[Trade]:
+    def list_closed_trades(self, *, bot_run_id: str | None = None) -> list[Trade]:
         result = [t for t in self._trades.values() if t.status == "closed"]
         if bot_run_id is not None:
             result = [t for t in result if t.bot_run_id == bot_run_id]
-        result.sort(
-            key=lambda t: t.closed_at or datetime.min, reverse=True
-        )
+        result.sort(key=lambda t: t.closed_at or datetime.min, reverse=True)
         return result
 
     def realized_loss_on(self, day: date) -> Decimal:
@@ -223,3 +241,12 @@ class InMemoryBotStateRepository(BotStateRepository):
                 if t.closed_at is not None and t.closed_at.date() == day:
                     total += t.realized_pnl
         return abs(total)
+
+
+def _count_by_run(bot_run_ids, wanted: set[str]) -> dict[str, int]:
+    """Tally occurrences of each wanted run_id in *bot_run_ids*."""
+    totals: dict[str, int] = {}
+    for rid in bot_run_ids:
+        if rid in wanted:
+            totals[rid] = totals.get(rid, 0) + 1
+    return totals

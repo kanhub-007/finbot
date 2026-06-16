@@ -344,6 +344,31 @@ class StubBotStateRepository(BotStateRepository):
     def get_fills_for_run(self, run_id: str) -> list:
         return [f for f in self._fills if f.bot_run_id == run_id]
 
+    def get_run_counts(self, run_ids: list[str]) -> dict:
+        from finbot.core.domain.dto.run_counts import RunCounts
+
+        wanted = set(run_ids)
+        signals = {}
+        for s in self._processed_signals:
+            if s.bot_run_id in wanted:
+                signals[s.bot_run_id] = signals.get(s.bot_run_id, 0) + 1
+        orders = {}
+        for r in self._order_responses:
+            if r.bot_run_id in wanted:
+                orders[r.bot_run_id] = orders.get(r.bot_run_id, 0) + 1
+        fills = {}
+        for f in self._fills:
+            if f.bot_run_id in wanted:
+                fills[f.bot_run_id] = fills.get(f.bot_run_id, 0) + 1
+        return {
+            rid: RunCounts(
+                signals=signals.get(rid, 0),
+                orders=orders.get(rid, 0),
+                fills=fills.get(rid, 0),
+            )
+            for rid in run_ids
+        }
+
     def get_risk_events_for_run(self, run_id: str) -> list:
         return [e for e in self._risk_events if e.bot_run_id == run_id]
 

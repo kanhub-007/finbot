@@ -32,9 +32,13 @@ class PandasBarFrameConverter(BarFrameConverter):
         return frame.iloc[-1].to_dict()
 
     def append_bar(self, frame: pd.DataFrame, bar: dict) -> pd.DataFrame:
-        """Append one bar to the frame without rebuilding it from scratch.
+        """Append one bar to the frame, returning a new frame.
 
-        Keeps the candle hot path O(1) in frame allocation instead of O(n).
+        Cost is ``O(n)`` — ``pd.concat`` copies every row — but it avoids
+        rebuilding the OHLCV base from the full warmup list each candle.
+        The caller trims the result to the warmup max length so the frame
+        stays bounded. (This does not make the per-candle indicator
+        recompute incremental; that requires a streaming calculator.)
         """
         import pandas as pd
 

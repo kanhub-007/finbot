@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import date as _date, UTC, datetime
+from datetime import UTC, datetime
+from datetime import date as _date
 from decimal import Decimal
 
+from finbot.core.domain.dto.run_counts import RunCounts
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
 from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.fill_record import FillRecord
@@ -32,7 +34,6 @@ from finbot.core.domain.interfaces.bot_state_repository import (
 from finbot.infrastructure.repositories.sqlite_migrator import (
     _ensure_directory,
 )
-
 
 _TRADE_COLS = (
     "position_id, bot_run_id, symbol, side, size, entry_price, opened_at, "
@@ -429,6 +430,37 @@ class SqliteBotStateRepository(BotStateRepository):
             (run_id,),
         ).fetchall()
         return [_fill_from_row(r) for r in rows]
+
+    def get_run_counts(self, run_ids: list[str]) -> dict[str, RunCounts]:
+        """Return per-run signal/order/fill counts via GROUP BY (not N+1).
+
+        Three queries total regardless of how many runs are requested,
+        replacing the prior pattern of three ``fetchall``-per-run calls in
+        list endpoints (which transferred every row just to take ``len()``).
+        """
+        counts: dict[str, list[int]] = {rid: [0, 0, 0] for rid in run_ids}
+        if not run_ids:
+            return {rid: RunCounts(*c) for rid, c in counts.items()}
+
+        placeholders = ",".join("?" for _ in run_ids)
+        params = tuple(run_ids)
+        # (table, result index) — orders come from order_responses since
+        # order_intents has no bot_run_id column.
+        per_table = (
+            ("processed_signals", 0),
+            ("order_responses", 1),
+            ("fills", 2),
+        )
+        for table, idx in per_table:
+            rows = self._connection.execute(
+                f"SELECT bot_run_id, COUNT(*) FROM {table} "
+                f"WHERE bot_run_id IN ({placeholders}) GROUP BY bot_run_id",
+                params,
+            ).fetchall()
+            for rid, n in rows:
+                if rid in counts:
+                    counts[rid][idx] = int(n)
+        return {rid: RunCounts(*c) for rid, c in counts.items()}
 
     def get_risk_events_for_run(self, run_id: str) -> list[RiskEventRecord]:
         rows = self._connection.execute(

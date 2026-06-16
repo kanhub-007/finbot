@@ -114,8 +114,15 @@ class BotEventLoop(BotLoop):
         If the queue is full and a re-enqueue fails, the event is dispatched
         immediately rather than silently dropped — losing a candle would skip
         a strategy evaluation.
+
+        Short-circuits when no account events are pending so the O(q)
+        scan-and-re-enqueue is skipped on the common candle path.
         """
+        if self._queue.account_event_count() == 0:
+            return
         for _ in range(self._queue.size()):
+            if self._queue.account_event_count() == 0:
+                break
             event = self._queue.dequeue(timeout=0)
             if event is None:
                 break

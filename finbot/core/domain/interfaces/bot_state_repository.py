@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from datetime import date
 from decimal import Decimal
 
+from finbot.core.domain.dto.run_counts import RunCounts
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
 from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.fill_record import FillRecord
@@ -139,6 +140,15 @@ class BotStateRepository(ABC):
         """Return all order responses for a specific bot run."""
 
     @abstractmethod
+    def get_run_counts(self, run_ids: list[str]) -> dict[str, RunCounts]:
+        """Return signal/order/fill counts for each run in ``run_ids``.
+
+        Runs with no rows (or not present) map to ``RunCounts(0, 0, 0)``.
+        Implementations should satisfy this with at most one query per
+        table (GROUP BY bot_run_id) instead of N+1 per-run fetches.
+        """
+
+    @abstractmethod
     def get_fills_for_run(self, run_id: str) -> list[FillRecord]:
         """Return all fills for a specific bot run."""
 
@@ -181,9 +191,7 @@ class BotStateRepository(ABC):
         """Return all open trades."""
 
     @abstractmethod
-    def list_closed_trades(
-        self, *, bot_run_id: str | None = None
-    ) -> list[Trade]:
+    def list_closed_trades(self, *, bot_run_id: str | None = None) -> list[Trade]:
         """Return closed trades, optionally filtered by bot run."""
 
     @abstractmethod

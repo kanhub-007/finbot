@@ -14,14 +14,16 @@ from finbot.infrastructure.repositories.in_memory_bot_state_repository import (
     InMemoryBotStateRepository,
 )
 
-
 # -- helpers ---------------------------------------------------------------
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _buy(*, size: str, price: str, fee: str = "0", symbol: str = "BTC", **kw) -> FillRecord:
+def _buy(
+    *, size: str, price: str, fee: str = "0", symbol: str = "BTC", **kw
+) -> FillRecord:
     return FillRecord(
         bot_run_id=kw.get("bot_run_id", "run1"),
         order_id=kw.get("order_id", "oid1"),
@@ -35,7 +37,9 @@ def _buy(*, size: str, price: str, fee: str = "0", symbol: str = "BTC", **kw) ->
     )
 
 
-def _sell(*, size: str, price: str, fee: str = "0", symbol: str = "BTC", **kw) -> FillRecord:
+def _sell(
+    *, size: str, price: str, fee: str = "0", symbol: str = "BTC", **kw
+) -> FillRecord:
     return FillRecord(
         bot_run_id=kw.get("bot_run_id", "run1"),
         order_id=kw.get("order_id", "oid1"),
@@ -91,9 +95,7 @@ class TestEntryFillOpensTrade:
         repo = InMemoryBotStateRepository()
         ledger = TradeLedger(repo)
 
-        ledger.apply_fill(
-            _sell(size="0.1", price="50000", fill_id="f1")
-        )
+        ledger.apply_fill(_sell(size="0.1", price="50000", fill_id="f1"))
 
         trade = repo.get_open_trade("BTC")
         assert trade is not None
@@ -192,9 +194,7 @@ class TestPartialFills:
 
         ledger.apply_fill(_buy(size="0.1", price="50000", fill_id="f1"))
         ledger.apply_fill(_sell(size="0.04", price="53000", fill_id="f2"))
-        outcome = ledger.apply_fill(
-            _sell(size="0.06", price="53000", fill_id="f3")
-        )
+        outcome = ledger.apply_fill(_sell(size="0.06", price="53000", fill_id="f3"))
 
         assert outcome.status == "closed"
         assert repo.get_open_trade("BTC") is None
@@ -248,12 +248,10 @@ class TestRealizedLossOn:
         today = _now().date()
         # Closed today at a loss
         ledger.apply_fill(
-            _buy(size="1", price="50000", fee="1", fill_id="f1",
-                 filled_at=_now())
+            _buy(size="1", price="50000", fee="1", fill_id="f1", filled_at=_now())
         )
         ledger.apply_fill(
-            _sell(size="1", price="49000", fee="1", fill_id="f2",
-                  filled_at=_now())
+            _sell(size="1", price="49000", fee="1", fill_id="f2", filled_at=_now())
         )
 
         loss_today = ledger.realized_loss_on(today)
@@ -270,12 +268,10 @@ class TestRealizedLossOn:
         today = _now().date()
 
         ledger.apply_fill(
-            _buy(size="1", price="50000", fill_id="f1",
-                 filled_at=yesterday)
+            _buy(size="1", price="50000", fill_id="f1", filled_at=yesterday)
         )
         ledger.apply_fill(
-            _sell(size="1", price="49000", fill_id="f2",
-                  filled_at=yesterday)
+            _sell(size="1", price="49000", fill_id="f2", filled_at=yesterday)
         )
 
         loss_today = ledger.realized_loss_on(today)
@@ -286,13 +282,41 @@ class TestRealizedLossOn:
         repo = InMemoryBotStateRepository()
         ledger = TradeLedger(repo)
 
-        ledger.apply_fill(_buy(size="1", price="50000", fill_id="f1",
-                               filled_at=_now()))
-        ledger.apply_fill(_sell(size="1", price="51000", fill_id="f2",
-                                filled_at=_now()))
+        ledger.apply_fill(_buy(size="1", price="50000", fill_id="f1", filled_at=_now()))
+        ledger.apply_fill(
+            _sell(size="1", price="51000", fill_id="f2", filled_at=_now())
+        )
 
         loss = ledger.realized_loss_on(_now().date())
         assert loss == Decimal("0")  # profit doesn't offset losses
+
+    def test_loss_is_cached_then_invalidated_on_close(self) -> None:
+        """Daily loss is cached between reads and refreshed when a trade closes.
+
+        Regression guard for the realised-loss cache: the value read before
+        a close must not stay cached after a close changes it. Classical
+        school — asserts on the observable outcome (the returned total),
+        not on cache internals.
+        """
+        repo = InMemoryBotStateRepository()
+        ledger = TradeLedger(repo)
+        today = _now().date()
+
+        # No trades yet → cache populated with 0.
+        assert ledger.realized_loss_on(today) == Decimal("0")
+
+        # Open + close at a loss today.
+        ledger.apply_fill(
+            _buy(size="1", price="50000", fee="1", fill_id="f1", filled_at=_now())
+        )
+        ledger.apply_fill(
+            _sell(size="1", price="49000", fee="1", fill_id="f2", filled_at=_now())
+        )
+
+        # The close must have invalidated the cache so the new loss is seen.
+        assert ledger.realized_loss_on(today) == Decimal("1001")
+        # A second read with no intervening close returns the same cached value.
+        assert ledger.realized_loss_on(today) == Decimal("1001")
 
 
 # -- Edge cases ------------------------------------------------------------

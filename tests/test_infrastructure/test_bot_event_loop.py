@@ -27,6 +27,25 @@ class TestThreadSafeEventQueue:
         assert event.type == BotEventType.CANDLE
         assert q.size() == 0
 
+    def test_account_event_count_tracks_fills_and_order_updates(self) -> None:
+        """Only account events bump account_event_count; candles do not."""
+        q = ThreadSafeEventQueue()
+        assert q.account_event_count() == 0
+        q.enqueue(BotEvent(type=BotEventType.CANDLE, data={}))
+        q.enqueue(BotEvent(type=BotEventType.CANDLE, data={}))
+        assert q.account_event_count() == 0  # candles don't count
+        q.enqueue(BotEvent(type=BotEventType.FILL, data={}))
+        q.enqueue(BotEvent(type=BotEventType.ORDER_UPDATE, data={}))
+        assert q.account_event_count() == 2
+        # FIFO: dequeuing the two candles leaves the count unchanged.
+        q.dequeue(timeout=0)
+        q.dequeue(timeout=0)
+        assert q.account_event_count() == 2
+        q.dequeue(timeout=0)  # dequeues the FILL — count drops
+        assert q.account_event_count() == 1
+        q.clear()
+        assert q.account_event_count() == 0
+
     def test_dequeue_timeout_returns_none(self) -> None:
         q = ThreadSafeEventQueue()
         assert q.dequeue(timeout=0.01) is None
@@ -216,6 +235,9 @@ class _CountingQueue:
     def size(self) -> int:
         return 0
 
+    def account_event_count(self) -> int:
+        return 0
+
     def clear(self) -> None:
         pass
 
@@ -247,6 +269,34 @@ def test_account_events_drained_before_candle_work() -> None:
     assert order[1] == ("candle", {"ts": 1})
 
 
+def test_drain_skips_when_no_account_events_queued() -> None:
+    """P6: the drain does no scanning when no account events are pending.
+
+    A queue holding only candles must not be scanned/re-enqueued each
+    iteration (the common steady-state and candle-burst path).
+    """
+    from finbot.core.domain.entities.bot_event import BotEvent
+    from finbot.core.domain.entities.bot_event_type import BotEventType
+    from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
+
+    queue = _ScriptedQueue(
+        [
+            BotEvent(type=BotEventType.CANDLE, data={"ts": 1}),
+            BotEvent(type=BotEventType.CANDLE, data={"ts": 2}),
+        ]
+    )
+    dispatched: list = []
+    loop = BotEventLoop(queue, FakeMarketDataStream())
+    loop._dispatch = lambda e: dispatched.append(e)  # type: ignore[assignment]
+
+    loop._drain_account_events()
+
+    # No account events queued → short-circuit: nothing dispatched and the
+    # candles remain untouched (no scan/re-enqueue churn).
+    assert dispatched == []
+    assert queue.size() == 2
+
+
 class _ScriptedQueue:
     """Returns pre-loaded events in order; enqueue appends to the tail."""
 
@@ -264,6 +314,15 @@ class _ScriptedQueue:
 
     def size(self) -> int:
         return len(self._events)
+
+    def account_event_count(self) -> int:
+        from finbot.core.domain.entities.bot_event_type import BotEventType
+
+        return sum(
+            1
+            for e in self._events
+            if e.type in (BotEventType.FILL, BotEventType.ORDER_UPDATE)
+        )
 
     def clear(self) -> None:
         self._events.clear()

@@ -117,6 +117,76 @@ class TestSqliteBotStateRepository:
         )
         repo.record_fill(fill)
 
+    def test_get_run_counts_batches_per_run_counts(self, repo) -> None:
+        """get_run_counts returns per-run counts without N+1 fetches.
+
+        Seeds two runs with differing signal/order/fill rows and asserts the
+        counts come back per run (including (0, 0, 0) for an empty/absent run).
+        """
+        from finbot.core.domain.dto.run_counts import RunCounts
+
+        repo.create_bot_run(
+            BotRun(
+                strategy_name="t",
+                strategy_hash="h",
+                symbol="BTC",
+                interval="1h",
+                mode="dry_run",
+                run_id="r2",
+            )
+        )
+        # r1: 2 signals, 1 order response, 1 fill; r2: 1 signal.
+        for key in ("s1", "s2"):
+            repo.mark_signal_processed(
+                ProcessedSignal(
+                    signal_key=key,
+                    bot_run_id="r1",
+                    signal_action="long_entry",
+                    bar_timestamp="2025-01-01T09:00",
+                )
+            )
+        repo.mark_signal_processed(
+            ProcessedSignal(
+                signal_key="s3",
+                bot_run_id="r2",
+                signal_action="long_entry",
+                bar_timestamp="2025-01-01T09:00",
+            )
+        )
+        intent_id = repo.record_order_intent(
+            OrderIntent(
+                symbol="BTC",
+                side=OrderSide.BUY,
+                size=Decimal("0.001"),
+                order_type=OrderType.LIMIT,
+                limit_price=Decimal("50000"),
+            )
+        )
+        repo.record_order_response(
+            OrderResponseRecord(
+                intent_id=intent_id,
+                bot_run_id="r1",
+                response_json="{}",
+                status="accepted",
+            )
+        )
+        repo.record_fill(
+            FillRecord(
+                bot_run_id="r1",
+                order_id=intent_id,
+                symbol="BTC",
+                side="buy",
+                size=Decimal("0.001"),
+                price=Decimal("50000"),
+            )
+        )
+
+        counts = repo.get_run_counts(["r1", "r2", "r3"])
+        assert counts["r1"] == RunCounts(signals=2, orders=1, fills=1)
+        assert counts["r2"] == RunCounts(signals=1, orders=0, fills=0)
+        assert counts["r3"] == RunCounts(signals=0, orders=0, fills=0)
+        assert repo.get_run_counts([]) == {}
+
     def test_record_reconciliation(self, repo: SqliteBotStateRepository) -> None:
         rec = ReconciliationRecord(
             bot_run_id="r1",

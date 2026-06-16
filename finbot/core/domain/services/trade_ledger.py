@@ -37,6 +37,10 @@ class TradeLedger:
         self._repo = repo
         self._strategy_hash = strategy_hash
         self._applied_fill_ids: set[str] = set()
+        # Cache of realized daily loss per UTC day. The daily-loss gate reads
+        # this on every non-HOLD signal; the value only changes when a trade
+        # closes on that day, so we compute once and invalidate on close.
+        self._daily_loss_cache: dict[date, Decimal] = {}
 
     def apply_fill(self, fill: FillRecord) -> FillOutcome:
         """Classify and apply a fill to the Trade book.
@@ -61,12 +65,16 @@ class TradeLedger:
 
         self._applied_fill_ids.add(fill.fill_id)
 
-        open_trade = self._repo.get_open_trade(fill.symbol)
+        # Reuse the open trade already fetched for the idempotency check —
+        # nothing between the two reads can change it, so a second indexed
+        # lookup is pure waste.
+        open_trade = existing
 
         if open_trade is None:
             # No open trade → this fill opens a new Trade.
             trade = open_from_fill(
-                fill, position_id=uuid4().hex,
+                fill,
+                position_id=uuid4().hex,
                 strategy_hash=self._strategy_hash,
             )
             self._repo.open_trade(trade)
@@ -92,6 +100,9 @@ class TradeLedger:
         trade = apply_exit_fill(open_trade, fill)
         self._repo.update_trade(trade)
         if trade.status == "closed":
+            # A close changes the realized daily-loss sum; drop the cache so
+            # the next signal recomputes from authoritative state.
+            self._daily_loss_cache.clear()
             return FillOutcome(
                 status="closed",
                 position_id=trade.position_id,
@@ -111,8 +122,14 @@ class TradeLedger:
         """Sum of negative realized PnL from trades closed on *day* (UTC).
 
         Positive results contribute 0 — a loss gate counts losses only.
+        Cached per day; invalidated when a trade closes (see apply_fill).
         """
-        return self._repo.realized_loss_on(day)
+        cached = self._daily_loss_cache.get(day)
+        if cached is not None:
+            return cached
+        total = self._repo.realized_loss_on(day)
+        self._daily_loss_cache[day] = total
+        return total
 
     def reconstruct_open(
         self,

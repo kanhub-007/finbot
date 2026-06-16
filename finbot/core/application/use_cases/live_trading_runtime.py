@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime as _dt
+from datetime import UTC
+from datetime import datetime as _dt
 from pathlib import Path
 from typing import Any
 
@@ -426,13 +427,18 @@ class LiveTradingRuntimeUseCase:
         self._started = True
 
     def _enrich_bars(self) -> Any:
-        """Append the latest bar to the cached frame and recompute indicators.
+        """Build the OHLCV frame and recompute indicators for the latest candle.
 
-        On the first ready candle the frame is built once from the warmup
-        window; subsequent candles append a single row and recompute.  This
-        keeps frame construction O(1) amortised instead of rebuilding an
-        n-bar DataFrame every candle.  The frame is capped to the warmup
-        window length so it does not grow unbounded over a long session.
+        The frame is cached and appended to (one row) per candle instead of
+        being rebuilt from the warmup list, then trimmed to the warmup max
+        length so it cannot grow unbounded over a long session.
+
+        Cost note: per-candle work is ``O(max_length)`` — the append+trim
+        copies the frame and the indicator calculator recomputes *every*
+        requested indicator over the full frame each call (the package
+        calculator is stateless). The indicator recompute dominates; making
+        it ``O(1)`` per bar needs a streaming indicator engine, tracked
+        separately. ``max_length`` (default 500) is the bounding knob.
         """
         if self._enriched_frame is None or self._bar_converter.is_empty(
             self._enriched_frame
@@ -450,7 +456,10 @@ class LiveTradingRuntimeUseCase:
         return enriched
 
     def _trim_frame(self, df: Any) -> Any:
-        """Cap the enriched frame to the warmup max length to bound memory."""
+        """Cap the enriched frame to the warmup max length to bound memory.
+
+        No copy is made when the frame is already within the limit.
+        """
         max_len = self._warmup.max_length
         try:
             if hasattr(df, "iloc") and len(df) > max_len:
