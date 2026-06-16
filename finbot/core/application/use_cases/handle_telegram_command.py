@@ -1,0 +1,690 @@
+"""HandleTelegramCommand — central use case for Telegram bot commands."""
+
+from __future__ import annotations
+
+from finbot.core.application.dto.callback_query_request import (
+    CallbackQueryRequest,
+)
+from finbot.core.application.dto.telegram_command_request import (
+    TelegramCommandRequest,
+)
+from finbot.core.application.dto.telegram_command_result import (
+    TelegramCommandResult,
+)
+from finbot.core.domain.entities.telegram_chat import TelegramChat
+from finbot.core.domain.interfaces.strategy_directory import StrategyDirectory
+from finbot.core.domain.interfaces.telegram_chat_repository import (
+    TelegramChatRepository,
+)
+from finbot.core.domain.interfaces.telegram_session_store import (
+    TelegramSessionStore,
+)
+
+_CONTROL_COMMANDS: frozenset[str] = frozenset({
+    "/start", "/stop", "/status", "/run", "/history", "/panic", "/help", "/list",
+})
+
+
+class HandleTelegramCommand:
+    """Central use case that routes Telegram commands and callback queries.
+
+    Authorization fails closed: /whoami is always allowed. All other
+    commands require the user_id to be in the configured allowed_users
+    set. When allowed_users is empty, control commands are denied with
+    a setup-unconfigured message.
+    """
+
+    def __init__(
+        self,
+        *,
+        bot_manager: object,
+        chat_repo: TelegramChatRepository,
+        strategy_dir: StrategyDirectory,
+        session_store: TelegramSessionStore,
+        allowed_users: frozenset[int],
+        live_trading_ack: bool = False,
+    ) -> None:
+        self._bot_manager = bot_manager
+        self._chat_repo = chat_repo
+        self._strategy_dir = strategy_dir
+        self._session_store = session_store
+        self._allowed_users = allowed_users
+        self._live_trading_ack = live_trading_ack
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def execute(self, request: TelegramCommandRequest) -> TelegramCommandResult:
+        """Route a Telegram command to the appropriate handler."""
+        cmd = request.command
+
+        # /whoami is always allowed — no authorization check
+        if cmd == "/whoami":
+            return self._handle_whoami(request)
+
+        # Authorization check for all other commands
+        auth_error = self._authorize(request)
+        if auth_error is not None:
+            return auth_error
+
+        # Route to handler
+        handler = _COMMAND_HANDLERS.get(cmd)
+        if handler is not None:
+            return await handler(self, request)
+
+        # Unknown command
+        return TelegramCommandResult(
+            text=f"Unknown command: {cmd}\nUse /help to see available commands\\."
+        )
+
+    async def handle_callback(
+        self, request: CallbackQueryRequest
+    ) -> TelegramCommandResult:
+        """Handle an inline-keyboard callback query.
+
+        Parses callback_data in the format run:<sid>:<action>:<value>
+        and advances the /run flow state machine.
+        """
+        data = request.callback_data
+        parts = data.split(":")
+
+        # Run flow callbacks
+        if len(parts) >= 4 and parts[0] == "run":
+            sid = parts[1]
+            action = parts[2]
+            value = parts[3]
+            return await self._handle_run_callback(request, sid, action, value)
+
+        # Quick navigation callbacks (from welcome keyboard, etc.)
+        if data in ("/run", "/status", "/history", "/stop", "/help"):
+            return await self.execute(TelegramCommandRequest(
+                command=data, args="",
+                chat_id=request.chat_id,
+                user_id=request.user_id,
+                message_id=request.message_id,
+            ))
+
+        return TelegramCommandResult(
+            text="Invalid selection, please start again with /run\\."
+        )
+
+    # ------------------------------------------------------------------
+    # Authorization
+    # ------------------------------------------------------------------
+
+    def _authorize(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult | None:
+        """Check authorization for control commands.
+
+        Returns None if authorized, or a TelegramCommandResult with
+        the denial message.
+        """
+        # Fail closed: if Telegram is enabled but no users configured
+        if not self._allowed_users:
+            return TelegramCommandResult(
+                text=(
+                    "⛔ *Telegram control not configured\\\\.*\\n\\n"
+                    "No authorized users are set in "
+                    "FINBOT_TELEGRAM_ALLOWED_USERS\\\\.\\n"
+                    "Send /whoami to discover your Telegram user ID, "
+                    "then add it to your environment configuration\\."
+                ),
+                parse_mode="MarkdownV2",
+            )
+
+        if request.user_id not in self._allowed_users:
+            return TelegramCommandResult(
+                text=(
+                    "⛔ *Unauthorized\\\\.*\n"
+                    "You are not authorized to control this trading bot\\.\n"
+                    "Contact the bot administrator to be added\\."
+                ),
+                parse_mode="MarkdownV2",
+            )
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Handlers
+    # ------------------------------------------------------------------
+
+    def _handle_whoami(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
+        """Return the user's Telegram user_id and chat_id."""
+        text = (
+            "Your Telegram IDs:\n"
+            f"User ID: {request.user_id}\n"
+            f"Chat ID: {request.chat_id}\n\n"
+            "Add this to your environment:\n"
+            f"FINBOT_TELEGRAM_ALLOWED_USERS={request.user_id}"
+        )
+        return TelegramCommandResult(text=text)
+
+    async def _handle_start(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
+        """Register the chat for notifications and return the welcome message."""
+        chat = await self._chat_repo.get_chat(request.chat_id)
+        if chat is None:
+            chat = TelegramChat(
+                chat_id=request.chat_id,
+                user_id=request.user_id,
+                notifications_enabled=True,
+            )
+            await self._chat_repo.add_chat(chat)
+
+        return TelegramCommandResult(
+            text=(
+                "🤖 *Finbot Trading Bot*\n"
+                "Connected to Hyperliquid\\. Manage your trading "
+                "strategies from here\\.\n\n"
+                "*Commands:*\n"
+                "/run — Start a trading bot\n"
+                "/stop — Stop the running bot\n"
+                "/status — View bot status & stats\n"
+                "/history — Browse past runs\n"
+                "/panic — 🚨 Emergency stop \\+ cancel orders\n"
+                "/help — Show this message"
+            ),
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {"text": "Run Bot", "callback_data": "/run"},
+                        {"text": "Status", "callback_data": "/status"},
+                    ],
+                    [
+                        {"text": "History", "callback_data": "/history"},
+                        {"text": "Help", "callback_data": "/help"},
+                    ],
+                ]
+            },
+        )
+
+    async def _handle_help(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
+        """Return the command list and safety notes."""
+        return TelegramCommandResult(
+            text=(
+                "*Finbot Commands*\n\n"
+                "/run — Start a trading bot \\(guided setup\\)\n"
+                "/stop — Stop the running bot\n"
+                "/status — View bot status, position & stats\n"
+                "/history — Browse past bot runs\n"
+                "/panic — 🚨 Emergency: cancel orders \\+ close position\n"
+                "/help — Show this message\n\n"
+                "*Safety:*\n"
+                "• Default mode is Dry Run — no real orders\n"
+                "• Live/Testnet require explicit confirmation\n"
+                "• Only one bot can run at a time"
+            ),
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {"text": "Run Bot", "callback_data": "/run"},
+                        {"text": "Status", "callback_data": "/status"},
+                        {"text": "History", "callback_data": "/history"},
+                    ],
+                ]
+            },
+        )
+
+    async def _handle_status(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
+        """Return the bot's current live status or last run summary."""
+        mgr = self._bot_manager
+        status = mgr.get_status()
+
+        is_running = status.get("is_running", False)
+        if is_running:
+            return self._format_running_status(status)
+        else:
+            return self._format_idle_status(status)
+
+    def _format_running_status(self, status: dict) -> TelegramCommandResult:
+        """Format the status response for a running bot."""
+        run_id = str(status.get("bot_run_id", ""))
+        strategy = str(status.get("strategy_name", ""))
+        symbol = str(status.get("symbol", ""))
+        interval = str(status.get("interval", ""))
+        mode = str(status.get("mode", ""))
+        uptime_s = int(status.get("uptime_seconds", 0))
+        hours = uptime_s // 3600
+        minutes = (uptime_s % 3600) // 60
+        total_signals = status.get("total_signals", 0)
+        total_orders = status.get("total_orders", 0)
+        total_fills = status.get("total_fills", 0)
+
+        text = (
+            "📊 *Bot Status*\n"
+            f"State: ▶ Running\n"
+            f"Run ID: {run_id}\n"
+            f"Strategy: {strategy}\n"
+            f"Symbol: {symbol} / {interval}\n"
+            f"Mode: {mode}\n"
+            f"Uptime: {hours}h {minutes}m\n\n"
+            f"*Totals:*\n"
+            f"Signals: {total_signals} | Orders: {total_orders} "
+            f"| Fills: {total_fills}"
+        )
+        return TelegramCommandResult(
+            text=text,
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {"text": "Refresh", "callback_data": "/status"},
+                        {"text": "Stop Bot", "callback_data": "/stop"},
+                    ],
+                ]
+            },
+        )
+
+    def _format_idle_status(self, status: dict) -> TelegramCommandResult:
+        """Format the status response when no bot is running."""
+        last_run = status.get("last_run")
+
+        lines = ["📊 *Bot Status*", "State: ⏸ Idle", "No bot running\\."]
+
+        if last_run is not None:
+            lines.append("")
+            lines.append("*Last Run:* " + str(last_run.get("run_id", "")))
+            lines.append(
+                "Strategy: " + str(last_run.get("strategy_name", ""))
+            )
+            symbol = str(last_run.get("symbol", ""))
+            interval = str(last_run.get("interval", ""))
+            lines.append(f"Symbol: {symbol} / {interval}")
+            ended = str(last_run.get("ended_at", ""))
+            if ended:
+                lines.append(f"Ended: {ended}")
+        else:
+            lines.append("")
+            lines.append("No run history\\.")
+
+        text = "\n".join(lines)
+        return TelegramCommandResult(
+            text=text,
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {"text": "Run new bot", "callback_data": "/run"},
+                        {"text": "History", "callback_data": "/history"},
+                    ],
+                ]
+            },
+        )
+
+    async def _handle_stop(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
+        """Stop the running bot and return a summary."""
+        mgr = self._bot_manager
+        stop_result = mgr.stop()
+
+        if stop_result.get("status") == "no_bot_running":
+            return TelegramCommandResult(
+                text="⏹ No bot is currently running\\.",
+                parse_mode="MarkdownV2",
+            )
+
+        return TelegramCommandResult(
+            text=(
+                "⏹ *Bot stopped\\.*\n"
+                f"Run: {stop_result.get('bot_run_id', '')}"
+            ),
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {"text": "View details", "callback_data": "/history"},
+                        {"text": "Start new bot", "callback_data": "/run"},
+                    ],
+                ]
+            },
+        )
+
+    async def _handle_run(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
+        """Start the guided /run flow or reject if bot is already running."""
+        mgr = self._bot_manager
+        if mgr.is_running():
+            run_id = mgr.get_status().get("bot_run_id", "")
+            return TelegramCommandResult(
+                text=(
+                    f"⚠️ A bot is already running \\({run_id}\\)\\.\n"
+                    "Stop it first with /stop, then start a new one\\."
+                ),
+                parse_mode="MarkdownV2",
+                reply_markup={
+                    "inline_keyboard": [
+                        [
+                            {"text": "Stop current bot", "callback_data": "/stop"},
+                            {"text": "Cancel", "callback_data": "cancel"},
+                        ],
+                    ]
+                },
+            )
+
+        # List strategies
+        strategies = self._strategy_dir.list_strategies()
+        if not strategies:
+            return TelegramCommandResult(
+                text="No strategies found\\. Place \\\\.yaml files in the strategies directory\\.",
+                parse_mode="MarkdownV2",
+            )
+
+        # Create a session for the run flow
+        session = self._session_store.create(request.chat_id, request.message_id)
+        sid = session.session_id
+
+        # Build inline keyboard for strategies (paginated if >10)
+        displayed = strategies[:10]
+        buttons = []
+        for i, s in enumerate(displayed):
+            buttons.append(
+                {"text": s, "callback_data": f"run:{sid}:strat:{i}"}
+            )
+        keyboard_rows = []
+        for i in range(0, len(buttons), 2):
+            keyboard_rows.append(buttons[i : i + 2])
+
+        return TelegramCommandResult(
+            text="*Start a Bot*\nSelect a strategy:",
+            parse_mode="MarkdownV2",
+            reply_markup={"inline_keyboard": keyboard_rows},
+        )
+
+    async def _handle_list(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
+        """List available strategy files."""
+        strategies = self._strategy_dir.list_strategies()
+        if not strategies:
+            return TelegramCommandResult(
+                text="No strategy files found\\.",
+                parse_mode="MarkdownV2",
+            )
+
+        lines = ["📁 *Available Strategies*"]
+        for i, s in enumerate(strategies, 1):
+            lines.append(f"{i}\\. {s}")
+
+        return TelegramCommandResult(
+            text="\n".join(lines),
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {"text": "Run a strategy", "callback_data": "/run"},
+                    ],
+                ]
+            },
+        )
+
+    async def _handle_run_callback(
+        self, request: CallbackQueryRequest,
+        session_id: str, action: str, value: str,
+    ) -> TelegramCommandResult:
+        """Advance the /run guided-flow state machine."""
+        session = self._session_store.get(session_id)
+        if session is None:
+            return TelegramCommandResult(
+                text="Session expired. Please start again with /run\\."
+            )
+
+        if action == "strat":
+            return self._run_cb_strat(session, value)
+        elif action == "sym":
+            return self._run_cb_sym(session, value)
+        elif action == "int":
+            return self._run_cb_int(session, value)
+        elif action == "mode":
+            return self._run_cb_mode(session, value)
+        elif action == "confirm":
+            return self._run_cb_confirm(session, value)
+        else:
+            return TelegramCommandResult(
+                text="Invalid selection, please start again with /run\\."
+            )
+
+    def _run_cb_strat(
+        self, session, idx_str: str
+    ) -> TelegramCommandResult:
+        """User selected a strategy → show symbol picker."""
+        strategies = self._strategy_dir.list_strategies()
+        try:
+            idx = int(idx_str)
+            strategy_name = strategies[idx]
+        except (ValueError, IndexError):
+            return TelegramCommandResult(
+                text="Invalid strategy selection. Please start again with /run\\."
+            )
+
+        session.strategy_path = strategy_name
+        self._session_store.save(session)
+
+        sid = session.session_id
+        buttons = []
+        for sym in _DEFAULT_SYMBOLS:
+            buttons.append(
+                {"text": sym, "callback_data": f"run:{sid}:sym:{sym}"}
+            )
+        keyboard_rows = []
+        for i in range(0, len(buttons), 3):
+            keyboard_rows.append(buttons[i : i + 3])
+
+        return TelegramCommandResult(
+            text=f"Strategy: {strategy_name}\
+Select symbol:",
+            parse_mode="MarkdownV2",
+            reply_markup={"inline_keyboard": keyboard_rows},
+        )
+
+    def _run_cb_sym(
+        self, session, symbol: str
+    ) -> TelegramCommandResult:
+        """User selected a symbol → show interval picker."""
+        session.symbol = symbol
+        self._session_store.save(session)
+
+        sid = session.session_id
+        buttons = []
+        for interval in _DEFAULT_INTERVALS:
+            buttons.append(
+                {"text": interval, "callback_data": f"run:{sid}:int:{interval}"}
+            )
+        keyboard_rows = []
+        for i in range(0, len(buttons), 3):
+            keyboard_rows.append(buttons[i : i + 3])
+
+        return TelegramCommandResult(
+            text=(
+                f"Strategy: {session.strategy_path}\
+"
+                f"Symbol: {symbol}\n"
+                "Select interval:"
+            ),
+            parse_mode="MarkdownV2",
+            reply_markup={"inline_keyboard": keyboard_rows},
+        )
+
+    def _run_cb_int(
+        self, session, interval: str
+    ) -> TelegramCommandResult:
+        """User selected an interval → show mode picker."""
+        session.interval = interval
+        self._session_store.save(session)
+
+        sid = session.session_id
+        return TelegramCommandResult(
+            text=(
+                f"Strategy: {session.strategy_path}\
+"
+                f"Symbol: {session.symbol} / {interval}\n"
+                "Select mode:"
+            ),
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "📊 Dry Run",
+                            "callback_data": f"run:{sid}:mode:dry_run",
+                        },
+                        {
+                            "text": "🧪 Testnet",
+                            "callback_data": f"run:{sid}:mode:testnet",
+                        },
+                    ],
+                    [
+                        {
+                            "text": "⚠ Live",
+                            "callback_data": f"run:{sid}:mode:live",
+                        },
+                    ],
+                ]
+            },
+        )
+
+    def _run_cb_mode(
+        self, session, mode: str
+    ) -> TelegramCommandResult:
+        """User selected a mode — start bot or show live confirmation."""
+        if mode == "live":
+            return self._run_cb_mode_live(session)
+
+        # dry_run or testnet — start immediately
+        return self._start_bot_from_session(session, mode)
+
+    def _run_cb_mode_live(self, session) -> TelegramCommandResult:
+        """Show live trading confirmation prompt."""
+        sid = session.session_id
+        return TelegramCommandResult(
+            text=(
+                "⚠️ *LIVE TRADING CONFIRMATION*\n"
+                f"Strategy: {session.strategy_path}\
+"
+                f"Symbol: {session.symbol} / {session.interval}\n"
+                "Mode: LIVE\n\n"
+                "This will place *real orders* on Hyperliquid "
+                "with real funds\\.\n"
+                "Are you sure?"
+            ),
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "✅ Yes, start live trading",
+                            "callback_data": f"run:{sid}:confirm:yes",
+                        },
+                        {
+                            "text": "❌ Cancel",
+                            "callback_data": f"run:{sid}:confirm:no",
+                        },
+                    ],
+                ]
+            },
+        )
+
+    def _run_cb_confirm(
+        self, session, value: str
+    ) -> TelegramCommandResult:
+        """Handle live trading confirmation."""
+        if value == "yes":
+            return self._start_bot_from_session(session, "live")
+        else:
+            # Return to mode selection
+            return self._run_cb_int(session, session.interval or "1h")
+
+    def _start_bot_from_session(
+        self, session, mode: str
+    ) -> TelegramCommandResult:
+        """Call bot_manager.start() with the accumulated session state."""
+        mgr = self._bot_manager
+        result = mgr.start(
+            strategy_path=session.strategy_path or "",
+            symbol=session.symbol or "",
+            interval=session.interval or "1h",
+            mode=mode,
+            live_trading_ack=self._live_trading_ack,
+        )
+
+        if result.get("status") != "running":
+            return TelegramCommandResult(
+                text=f"❌ Failed to start bot: {result.get('message', 'Unknown error')}\\.",
+                parse_mode="MarkdownV2",
+            )
+
+        run_id = result.get("bot_run_id", "")
+        if mode == "dry_run":
+            return TelegramCommandResult(
+                text=(
+                    "✅ *Bot started\\!*\n"
+                    f"Run ID: {run_id}\n"
+                    f"Strategy: {session.strategy_path}\
+"
+                    f"Symbol: {session.symbol} / {session.interval}\n"
+                    f"Mode: DRY\\_RUN\n\n"
+                    "No real orders will be placed\\.\n"
+                    "Use /status to monitor or /stop to halt\\."
+                ),
+                parse_mode="MarkdownV2",
+                reply_markup={
+                    "inline_keyboard": [
+                        [
+                            {"text": "Status", "callback_data": "/status"},
+                            {"text": "Stop", "callback_data": "/stop"},
+                        ],
+                    ]
+                },
+            )
+        else:
+            return TelegramCommandResult(
+                text=(
+                    "✅ *Bot started\\!*\n"
+                    f"Run ID: {run_id}\n"
+                    f"Strategy: {session.strategy_path}\
+"
+                    f"Symbol: {session.symbol} / {session.interval}\n"
+                    f"Mode: {mode.upper()}\n\n"
+                    "Real orders WILL be placed\\.\n"
+                    "Use /status to monitor or /stop to halt\\."
+                ),
+                parse_mode="MarkdownV2",
+                reply_markup={
+                    "inline_keyboard": [
+                        [
+                            {"text": "Status", "callback_data": "/status"},
+                            {"text": "Stop", "callback_data": "/stop"},
+                        ],
+                    ]
+                },
+            )
+
+
+_DEFAULT_SYMBOLS = ("BTC", "ETH", "SOL", "ARB", "DOGE")
+_DEFAULT_INTERVALS = ("1m", "5m", "15m", "1h", "4h", "1d")
+
+
+# ------------------------------------------------------------------
+# Command routing table
+# ------------------------------------------------------------------
+
+_COMMAND_HANDLERS: dict[str, object] = {
+    "/start": HandleTelegramCommand._handle_start,
+    "/help": HandleTelegramCommand._handle_help,
+    "/status": HandleTelegramCommand._handle_status,
+    "/stop": HandleTelegramCommand._handle_stop,
+    "/run": HandleTelegramCommand._handle_run,
+    "/list": HandleTelegramCommand._handle_list,
+}
