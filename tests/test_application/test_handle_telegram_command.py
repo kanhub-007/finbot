@@ -711,3 +711,65 @@ class TestPanic:
 
         # Should show symbol picker
         assert result.reply_markup is not None
+
+
+class TestMuteUnmute:
+    @pytest.mark.asyncio
+    async def test_mute_disables_notifications(self):
+        """/mute disables notifications for this chat."""
+        from finbot.core.domain.entities.telegram_chat import TelegramChat
+
+        fake_repo = InMemoryTelegramChatRepository()
+        await fake_repo.add_chat(TelegramChat(
+            chat_id=1, user_id=123, notifications_enabled=True
+        ))
+
+        use_case = HandleTelegramCommand(
+            bot_manager=FakeBotManager(),
+            chat_repo=fake_repo,
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+        )
+
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/mute", args="", chat_id=1,
+                user_id=123, message_id=1,
+            )
+        )
+
+        chat = await fake_repo.get_chat(1)
+        assert chat is not None
+        assert chat.notifications_enabled is False
+        assert "muted" in result.text.lower()
+
+    @pytest.mark.asyncio
+    async def test_unmute_reenables_notifications(self):
+        """/unmute re-enables notifications."""
+        from finbot.core.domain.entities.telegram_chat import TelegramChat
+
+        fake_repo = InMemoryTelegramChatRepository()
+        await fake_repo.add_chat(TelegramChat(
+            chat_id=1, user_id=123, notifications_enabled=False
+        ))
+
+        use_case = HandleTelegramCommand(
+            bot_manager=FakeBotManager(),
+            chat_repo=fake_repo,
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+        )
+
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/unmute", args="", chat_id=1,
+                user_id=123, message_id=1,
+            )
+        )
+
+        chat = await fake_repo.get_chat(1)
+        assert chat is not None
+        assert chat.notifications_enabled is True
+        assert "unmuted" in result.text.lower()

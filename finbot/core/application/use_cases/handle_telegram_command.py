@@ -434,6 +434,26 @@ class HandleTelegramCommand:
             },
         )
 
+    async def _handle_mute(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
+        """Suppress notifications for this chat."""
+        await self._chat_repo.set_notifications(request.chat_id, False)
+        return TelegramCommandResult(
+            text="🔕 Notifications muted\\. Use /unmute to resume\\.",
+            parse_mode="MarkdownV2",
+        )
+
+    async def _handle_unmute(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
+        """Resume notifications for this chat."""
+        await self._chat_repo.set_notifications(request.chat_id, True)
+        return TelegramCommandResult(
+            text="🔔 Notifications unmuted\\.",
+            parse_mode="MarkdownV2",
+        )
+
     async def _handle_history(
         self, request: TelegramCommandRequest
     ) -> TelegramCommandResult:
@@ -864,4 +884,6 @@ _COMMAND_HANDLERS: dict[str, object] = {
     "/list": HandleTelegramCommand._handle_list,
     "/history": HandleTelegramCommand._handle_history,
     "/panic": HandleTelegramCommand._handle_panic,
+    "/mute": HandleTelegramCommand._handle_mute,
+    "/unmute": HandleTelegramCommand._handle_unmute,
 }
