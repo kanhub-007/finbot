@@ -356,6 +356,10 @@ def create_live_trading_runtime_use_case(
     else:
         repo = create_in_memory_repository()
 
+    from finbot.core.domain.services.trade_ledger import TradeLedger
+
+    trade_ledger = TradeLedger(repo)
+
     gateway = _build_exchange_gateway(settings, trading_mode)
 
     # Build the bot loop + account stream in the composition root unless the
@@ -420,6 +424,7 @@ def create_live_trading_runtime_use_case(
         ),
         bot_loop=bot_loop,
         strategy_validator=create_validate_strategy_use_case(),
+        trade_ledger=trade_ledger,
     )
 
 

@@ -129,6 +129,31 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         """,
     ),
+    (
+        3,
+        """
+        CREATE TABLE IF NOT EXISTS trades (
+            position_id      TEXT PRIMARY KEY,
+            bot_run_id       TEXT NOT NULL REFERENCES bot_runs(run_id),
+            symbol           TEXT NOT NULL,
+            side             TEXT NOT NULL,
+            size             TEXT NOT NULL,
+            entry_price      TEXT,
+            opened_at        TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            realized_pnl     TEXT NOT NULL DEFAULT '0',
+            total_fee        TEXT NOT NULL DEFAULT '0',
+            closed_at        TEXT,
+            close_price      TEXT,
+            strategy_hash    TEXT NOT NULL DEFAULT '',
+            entry_signal_key TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_trades_symbol_status
+            ON trades(symbol, status);
+        CREATE INDEX IF NOT EXISTS idx_trades_closed_at
+            ON trades(closed_at) WHERE status = 'closed';
+        """,
+    ),
 ]
 
 LATEST_VERSION = max(v for v, _ in MIGRATIONS) if MIGRATIONS else 0

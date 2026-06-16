@@ -16,6 +16,9 @@ from finbot.core.domain.entities.order_response_record import (
     OrderResponseRecord,
 )
 from finbot.core.domain.entities.order_state import OrderState
+from finbot.core.domain.entities.position_direction import (
+    PositionDirection,
+)
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
 from finbot.core.domain.entities.reconciliation_record import (
     ReconciliationRecord,
@@ -490,24 +493,107 @@ class SqliteBotStateRepository(BotStateRepository):
     # -- trades ---------------------------------------------------------------
 
     def open_trade(self, trade: Trade) -> None:
-        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
+        self._execute(
+            "INSERT INTO trades (position_id, bot_run_id, symbol, side, "
+            "size, entry_price, opened_at, status, realized_pnl, total_fee, "
+            "closed_at, close_price, strategy_hash, entry_signal_key) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                trade.position_id,
+                trade.bot_run_id,
+                trade.symbol,
+                trade.side.value,
+                str(trade.size),
+                str(trade.entry_price) if trade.entry_price is not None else None,
+                _to_utc_text(trade.opened_at),
+                trade.status,
+                str(trade.realized_pnl),
+                str(trade.total_fee),
+                _to_utc_text(trade.closed_at) if trade.closed_at else None,
+                str(trade.close_price) if trade.close_price is not None else None,
+                trade.strategy_hash,
+                trade.entry_signal_key,
+            ),
+        )
 
     def update_trade(self, trade: Trade) -> None:
-        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
+        self._execute(
+            "UPDATE trades SET bot_run_id=?, symbol=?, side=?, size=?, "
+            "entry_price=?, opened_at=?, status=?, realized_pnl=?, "
+            "total_fee=?, closed_at=?, close_price=?, "
+            "strategy_hash=?, entry_signal_key=? "
+            "WHERE position_id=?",
+            (
+                trade.bot_run_id,
+                trade.symbol,
+                trade.side.value,
+                str(trade.size),
+                str(trade.entry_price) if trade.entry_price is not None else None,
+                _to_utc_text(trade.opened_at),
+                trade.status,
+                str(trade.realized_pnl),
+                str(trade.total_fee),
+                _to_utc_text(trade.closed_at) if trade.closed_at else None,
+                str(trade.close_price) if trade.close_price is not None else None,
+                trade.strategy_hash,
+                trade.entry_signal_key,
+                trade.position_id,
+            ),
+        )
 
     def get_open_trade(self, symbol: str) -> Trade | None:
-        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
+        row = self._query_one(
+            "SELECT position_id, bot_run_id, symbol, side, size, "
+            "entry_price, opened_at, status, realized_pnl, total_fee, "
+            "closed_at, close_price, strategy_hash, entry_signal_key "
+            "FROM trades WHERE symbol=? AND status='open' ORDER BY opened_at DESC LIMIT 1",
+            (symbol,),
+        )
+        return _trade_from_row(row) if row else None
 
     def list_open_trades(self) -> list[Trade]:
-        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
+        rows = self._connection.execute(
+            "SELECT position_id, bot_run_id, symbol, side, size, "
+            "entry_price, opened_at, status, realized_pnl, total_fee, "
+            "closed_at, close_price, strategy_hash, entry_signal_key "
+            "FROM trades WHERE status='open' ORDER BY opened_at DESC"
+        ).fetchall()
+        return [_trade_from_row(r) for r in rows]
 
     def list_closed_trades(
         self, *, bot_run_id: str | None = None
     ) -> list[Trade]:
-        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
+        if bot_run_id is not None:
+            rows = self._connection.execute(
+                "SELECT position_id, bot_run_id, symbol, side, size, "
+                "entry_price, opened_at, status, realized_pnl, total_fee, "
+                "closed_at, close_price, strategy_hash, entry_signal_key "
+                "FROM trades WHERE status='closed' AND bot_run_id=? "
+                "ORDER BY closed_at DESC",
+                (bot_run_id,),
+            ).fetchall()
+        else:
+            rows = self._connection.execute(
+                "SELECT position_id, bot_run_id, symbol, side, size, "
+                "entry_price, opened_at, status, realized_pnl, total_fee, "
+                "closed_at, close_price, strategy_hash, entry_signal_key "
+                "FROM trades WHERE status='closed' "
+                "ORDER BY closed_at DESC"
+            ).fetchall()
+        return [_trade_from_row(r) for r in rows]
 
     def realized_loss_on(self, day: _date) -> Decimal:
-        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
+        day_start = datetime(day.year, day.month, day.day, tzinfo=UTC)
+        day_end = datetime(day.year, day.month, day.day, 23, 59, 59, 999999, tzinfo=UTC)
+        row = self._query_one(
+            "SELECT COALESCE(SUM(CAST(realized_pnl AS REAL)), 0) "
+            "FROM trades WHERE status='closed' AND CAST(realized_pnl AS REAL) < 0 "
+            "AND closed_at >= ? AND closed_at <= ?",
+            (_to_utc_text(day_start), _to_utc_text(day_end)),
+        )
+        if row is None or row[0] is None:
+            return Decimal("0")
+        return abs(Decimal(str(row[0])))
 
     @property
     def _connection(self) -> sqlite3.Connection:
@@ -594,4 +680,24 @@ def _audit_from_row(row: tuple) -> AuditLogEntry:
         event_type=row[2],
         event_data_json=row[3],
         created_at=datetime.fromisoformat(row[4]),
+    )
+
+
+def _trade_from_row(row: tuple) -> Trade:
+    """Map a ``trades`` row to a domain :class:`Trade`."""
+    return Trade(
+        position_id=row[0],
+        bot_run_id=row[1],
+        symbol=row[2],
+        side=PositionDirection(row[3]),
+        size=Decimal(str(row[4])),
+        entry_price=Decimal(str(row[5])) if row[5] is not None else None,
+        opened_at=datetime.fromisoformat(row[6]),
+        status=row[7],
+        realized_pnl=Decimal(str(row[8])),
+        total_fee=Decimal(str(row[9])),
+        closed_at=datetime.fromisoformat(row[10]) if row[10] else None,
+        close_price=Decimal(str(row[11])) if row[11] is not None else None,
+        strategy_hash=row[12],
+        entry_signal_key=row[13],
     )
