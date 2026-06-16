@@ -1121,8 +1121,9 @@ Place, monitor, cancel, and reconcile testnet orders.
 
 ## Secrets required
 
-- Testnet private key or agent wallet private key.
-- Optional account address if trading on behalf of another account.
+- Agent Wallet private key (testnet) — generated at the testnet API page.
+- Main account address (the wallet whose margin is traded).
+- Never use your main wallet's private key; always use a dedicated Agent Wallet.
 
 ## Tasks
 
@@ -1277,7 +1278,7 @@ FINBOT_MODE=live
 FINBOT_LIVE_TRADING_ACK=true
 ```
 
-2. Require private key/account configuration.
+2. Require Agent Wallet private key and main account address.
 3. Require max notional config.
 4. Require DB persistence enabled.
 5. Require startup reconciliation before first signal.
@@ -1332,8 +1333,13 @@ Requires public wallet/account address, not private key.
 
 ## Order execution
 
-Requires wallet signing. Hyperliquid uses private-key signatures, not normal
-exchange API keys. Prefer an agent/API wallet rather than a main wallet.
+Hyperliquid uses Agent Wallet (API Wallet) signatures, not traditional CEX API
+keys. An Agent Wallet is a dedicated private key authorized to sign trades on
+behalf of your main account — it cannot withdraw funds. Always use an Agent
+Wallet; never put your main wallet's private key in the bot configuration.
+
+> ⚠️ Agent keys expire after 90 days (or 180 if set to MAX). Regenerate on the
+> API page when the bot gets unauthorized errors.
 
 Finbot should not manage deposits, withdrawals, bridging, or transfers in MVP.
 It should only trade already-deposited Hyperliquid collateral.

@@ -114,6 +114,23 @@ finbot panic               Emergency: cancel orders / close position
 
 ---
 
+## Authentication — Agent Wallets
+
+Finbot uses Hyperliquid **Agent Wallets** (API Wallets) for authentication.
+An Agent Wallet is a dedicated private key you authorize to sign trades on
+behalf of your main account. It **cannot withdraw or transfer funds** — if
+compromised, an attacker can only trade, not steal.
+
+**Setup:**
+1. Go to https://app.hyperliquid.xyz/API (or the testnet equivalent)
+2. Click **Generate** to create a new Agent key
+3. Authorize it via an L1 signature from your main wallet
+4. Copy the Agent's private key → `FINBOT_HYPERLIQUID_PRIVATE_KEY`
+5. Your main wallet address → `FINBOT_HYPERLIQUID_ACCOUNT_ADDRESS`
+
+> ⚠️ **Agent keys expire after 90 days (or 180 if set to MAX).** If your bot
+> suddenly gets unauthorized errors, generate a new Agent key on the API page.
+
 ## Live Trading Setup
 
 1. Copy `.env.example` to `.env`
@@ -122,8 +139,8 @@ finbot panic               Emergency: cancel orders / close position
 ```env
 FINBOT_MODE=live                          # dry_run | testnet | live
 FINBOT_LIVE_TRADING_ACK=true              # Required for live
-FINBOT_HYPERLIQUID_PRIVATE_KEY=0x...      # Your 64-byte hex private key
-FINBOT_HYPERLIQUID_ACCOUNT_ADDRESS=0x...  # Your wallet address
+FINBOT_HYPERLIQUID_PRIVATE_KEY=0x...      # Agent Wallet private key (from API page)
+FINBOT_HYPERLIQUID_ACCOUNT_ADDRESS=0x...  # Your MAIN wallet address
 FINBOT_HYPERLIQUID_VAULT_ADDRESS=0x...   # HIP-3 vault address (optional)
 FINBOT_TESTNET=false                      # false = mainnet
 FINBOT_DATABASE_URL=sqlite:///data/finbot_live.db
@@ -186,10 +203,18 @@ finbot run --strategy dip.yaml --symbol ETH  --interval 1h &
 ## Perpetuals (Perps)
 
 Finbot trades Hyperliquid perpetual futures by default. Spot trading is not
-supported. Authentication has two modes:
+supported. Authentication uses **Agent Wallets** (see section above):
 
-- **Personal wallet**: set `FINBOT_HYPERLIQUID_PRIVATE_KEY` and `FINBOT_HYPERLIQUID_ACCOUNT_ADDRESS`
-- **Vault**: also set `FINBOT_HYPERLIQUID_VAULT_ADDRESS` to trade through a vault contract. The private key must belong to an authorized agent.
+- The `FINBOT_HYPERLIQUID_PRIVATE_KEY` is your **Agent Wallet** private key (generated
+  at app.hyperliquid.xyz/API) — it signs trades but cannot withdraw funds.
+- The `FINBOT_HYPERLIQUID_ACCOUNT_ADDRESS` is your **main wallet** address — the
+  account whose margin is traded.
+- **Vault**: also set `FINBOT_HYPERLIQUID_VAULT_ADDRESS` to trade through a vault
+  contract. The Agent key must be authorized for the vault.
+
+> ⚠️ Agent keys expire after 90-180 days. When they expire, the bot gets
+> unauthorized errors — generate a new Agent key on the API page and update
+> `FINBOT_HYPERLIQUID_PRIVATE_KEY`.
 
 ---
 

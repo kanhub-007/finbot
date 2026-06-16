@@ -41,7 +41,11 @@ def check_live_mode(
         reasons.append("FINBOT_LIVE_TRADING_ACK must be 'true'")
 
     if not private_key:
-        reasons.append("FINBOT_HYPERLIQUID_PRIVATE_KEY must be set")
+        reasons.append(
+            "FINBOT_HYPERLIQUID_PRIVATE_KEY must be set "
+            "(use an Agent Wallet key from app.hyperliquid.xyz/API, "
+            "not your main wallet key)"
+        )
 
     if max_position_usd <= 0:
         reasons.append("FINBOT_MAX_POSITION_USD must be > 0")
