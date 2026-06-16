@@ -551,3 +551,163 @@ class TestRunFlow:
         ))
 
         assert fake_manager.start_called is False
+
+
+class TestHistory:
+    @pytest.mark.asyncio
+    async def test_history_returns_paginated_run_list(self):
+        """/history returns a paginated list of recent bot runs."""
+        from finbot.core.domain.entities.bot_run import BotRun
+        from datetime import datetime, timezone
+
+        fake_manager = FakeBotManager(is_running=False)
+        runs = [
+            BotRun(
+                strategy_name="macd_cross.yaml",
+                strategy_hash="abc",
+                symbol="BTC",
+                interval="1h",
+                mode="LIVE",
+                run_id="r_001",
+                started_at=datetime.now(timezone.utc),
+            ),
+            BotRun(
+                strategy_name="trend_follow.yaml",
+                strategy_hash="def",
+                symbol="ETH",
+                interval="4h",
+                mode="dry_run",
+                run_id="r_002",
+                started_at=datetime.now(timezone.utc),
+            ),
+        ]
+        fake_manager.list_bot_runs = lambda limit=20, mode_filter=None: runs[:limit]
+
+        use_case = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+        )
+
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/history", args="", chat_id=1,
+                user_id=123, message_id=1,
+            )
+        )
+
+        assert "r_001" in result.text
+        assert "r_002" in result.text
+        assert result.reply_markup is not None
+
+    @pytest.mark.asyncio
+    async def test_history_no_runs_yet(self):
+        """/history with zero runs shows helpful message."""
+        fake_manager = FakeBotManager(is_running=False)
+        fake_manager.list_bot_runs = lambda limit=20, mode_filter=None: []
+
+        use_case = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+        )
+
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/history", args="", chat_id=1,
+                user_id=123, message_id=1,
+            )
+        )
+
+        assert result.text  # should not crash
+        assert "No runs" in result.text or "runs" in result.text.lower()
+
+
+class TestList:
+    @pytest.mark.asyncio
+    async def test_list_returns_strategy_files(self):
+        """/list shows available strategy files."""
+        use_case = HandleTelegramCommand(
+            bot_manager=FakeBotManager(),
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([
+                "macd_cross.yaml", "trend_follow.yaml"
+            ]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+        )
+
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/list", args="", chat_id=1,
+                user_id=123, message_id=1,
+            )
+        )
+
+        assert "macd_cross" in result.text
+        assert "trend_follow" in result.text
+
+
+class TestPanic:
+    @pytest.mark.asyncio
+    async def test_panic_running_infers_symbol_from_current_run(self):
+        """/panic when running shows symbol and action options."""
+        fake_manager = FakeBotManager(is_running=True, bot_run_id="r_abc123")
+        fake_manager.get_status = lambda: {
+            "is_running": True,
+            "bot_run_id": "r_abc123",
+            "symbol": "BTC",
+            "interval": "1h",
+            "mode": "LIVE",
+            "uptime_seconds": 3600,
+            "total_signals": 10,
+            "total_orders": 5,
+            "total_fills": 4,
+        }
+        fake_manager.cancel_all_orders = lambda symbol: {"status": "ok"}
+        fake_manager.close_position = lambda symbol: {"status": "ok"}
+
+        use_case = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+        )
+
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/panic", args="", chat_id=1,
+                user_id=123, message_id=1,
+            )
+        )
+
+        assert "BTC" in result.text
+        assert result.reply_markup is not None
+
+    @pytest.mark.asyncio
+    async def test_panic_idle_asks_for_symbol_selection(self):
+        """/panic when idle shows symbol picker first."""
+        fake_manager = FakeBotManager(is_running=False)
+
+        use_case = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+        )
+
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/panic", args="", chat_id=1,
+                user_id=123, message_id=1,
+            )
+        )
+
+        # Should show symbol picker
+        assert result.reply_markup is not None

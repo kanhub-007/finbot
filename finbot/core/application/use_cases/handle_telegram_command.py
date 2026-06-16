@@ -96,6 +96,10 @@ class HandleTelegramCommand:
             value = parts[3]
             return await self._handle_run_callback(request, sid, action, value)
 
+        # Panic callbacks
+        if len(parts) >= 2 and parts[0] == "panic":
+            return self._handle_panic_callback(request, parts)
+
         # Quick navigation callbacks (from welcome keyboard, etc.)
         if data in ("/run", "/status", "/history", "/stop", "/help"):
             return await self.execute(TelegramCommandRequest(
@@ -430,6 +434,177 @@ class HandleTelegramCommand:
             },
         )
 
+    async def _handle_history(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
+        """Show a paginated list of recent bot runs."""
+        mgr = self._bot_manager
+        runs = mgr.list_bot_runs(limit=5)
+
+        if not runs:
+            return TelegramCommandResult(
+                text="No runs yet\. Start one with /run\\.",
+                parse_mode="MarkdownV2",
+            )
+
+        lines = ["📋 *Recent Bot Runs*"]
+        for i, run in enumerate(runs, 1):
+            run_id = getattr(run, "run_id", "")
+            strategy = getattr(run, "strategy_name", "")
+            symbol = getattr(run, "symbol", "")
+            interval = getattr(run, "interval", "")
+            mode = getattr(run, "mode", "")
+            lines.append(
+                f"{i}\. {run_id} — {strategy} / {symbol} / {interval}"
+                f"\n{mode}"
+            )
+
+        return TelegramCommandResult(
+            text="\n".join(lines),
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {"text": "◀ Prev", "callback_data": "hist:prev"},
+                        {"text": "Next ▶", "callback_data": "hist:next"},
+                    ],
+                ]
+            },
+        )
+
+    async def _handle_panic(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
+        """Emergency panic — show action options or pick symbol first."""
+        mgr = self._bot_manager
+        if mgr.is_running():
+            status = mgr.get_status()
+            symbol = str(status.get("symbol", ""))
+            suffix = f" — {symbol}" if symbol else ""
+            return TelegramCommandResult(
+                text=f"🚨 *EMERGENCY{suffix}*\nSelect action:",
+                parse_mode="MarkdownV2",
+                reply_markup={
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "Cancel all orders",
+                                "callback_data": f"panic:cancel:{symbol}",
+                            },
+                            {
+                                "text": "Close position",
+                                "callback_data": f"panic:close:{symbol}",
+                            },
+                        ],
+                        [
+                            {
+                                "text": "Both",
+                                "callback_data": f"panic:both:{symbol}",
+                            },
+                            {
+                                "text": "❌ Cancel",
+                                "callback_data": "panic:cancel",
+                            },
+                        ],
+                    ]
+                },
+            )
+        else:
+            # Idle — show symbol picker
+            buttons = []
+            for sym in _DEFAULT_SYMBOLS:
+                buttons.append(
+                    {"text": sym, "callback_data": f"panic:sym:{sym}"}
+                )
+            keyboard_rows = []
+            for i in range(0, len(buttons), 3):
+                keyboard_rows.append(buttons[i : i + 3])
+
+            return TelegramCommandResult(
+                text=(
+                    "🚨 *EMERGENCY*\n"
+                    "No bot is currently running, "
+                    "so select a symbol first:"
+                ),
+                parse_mode="MarkdownV2",
+                reply_markup={"inline_keyboard": keyboard_rows},
+            )
+
+    def _handle_panic_callback(
+        self, request: CallbackQueryRequest, parts: list[str]
+    ) -> TelegramCommandResult:
+        """Handle panic action callbacks."""
+        action = parts[1] if len(parts) > 1 else ""
+
+        if action == "sym":
+            # User selected a symbol while idle — show action options
+            symbol = parts[2] if len(parts) > 2 else ""
+            return TelegramCommandResult(
+                text=f"🚨 *EMERGENCY — {symbol}*\nSelect action:",
+                parse_mode="MarkdownV2",
+                reply_markup={
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "Cancel all orders",
+                                "callback_data": f"panic:cancel:{symbol}",
+                            },
+                            {
+                                "text": "Close position",
+                                "callback_data": f"panic:close:{symbol}",
+                            },
+                        ],
+                        [
+                            {
+                                "text": "Both",
+                                "callback_data": f"panic:both:{symbol}",
+                            },
+                            {
+                                "text": "❌ Cancel",
+                                "callback_data": "panic:abort",
+                            },
+                        ],
+                    ]
+                },
+            )
+
+        if action == "abort":
+            return TelegramCommandResult(
+                text="Panic cancelled\\.",
+                parse_mode="MarkdownV2",
+            )
+
+        # Action selected — show confirmation
+        symbol = parts[2] if len(parts) > 2 else ""
+        action_label = {
+            "cancel": "Cancel all orders",
+            "close": "Close position",
+            "both": "Cancel all orders \+ close position",
+        }.get(action, action)
+
+        return TelegramCommandResult(
+            text=(
+                "⚠️ *PANIC CONFIRMATION*\n"
+                f"This will: {action_label} for {symbol}\n"
+                "Are you sure?"
+            ),
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "✅ Confirm panic",
+                            "callback_data": f"panic:exec:{symbol}:{action}",
+                        },
+                        {
+                            "text": "❌ Cancel",
+                            "callback_data": "panic:abort",
+                        },
+                    ],
+                ]
+            },
+        )
+
     async def _handle_run_callback(
         self, request: CallbackQueryRequest,
         session_id: str, action: str, value: str,
@@ -687,4 +862,6 @@ _COMMAND_HANDLERS: dict[str, object] = {
     "/stop": HandleTelegramCommand._handle_stop,
     "/run": HandleTelegramCommand._handle_run,
     "/list": HandleTelegramCommand._handle_list,
+    "/history": HandleTelegramCommand._handle_history,
+    "/panic": HandleTelegramCommand._handle_panic,
 }
