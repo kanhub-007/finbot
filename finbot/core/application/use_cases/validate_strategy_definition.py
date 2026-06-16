@@ -15,20 +15,17 @@ from finbot.core.domain.interfaces.strategy_definition_loader import (
 )
 from finbot.core.domain.interfaces.strategy_validator import StrategyValidator
 
-# Risk types supported for live execution.
-_SUPPORTED_RISK_TYPES = frozenset({"atr", "risk_reward"})
-
 _EXECUTION_MODES = ("replay", "dry_run", "testnet", "live")
 
 
 class ValidateStrategyUseCase(StrategyValidator):
     """Validate a strategy definition and report compatibility.
 
-    Indicator/operator/schema support is delegated to the package parser
-    (the authority) and an injected, package-derived ``supported_indicators``
-    set used for diagnostics — there is no hand-maintained indicator list
-    to drift. Finbot owns live-mode policy (e.g. "missing stop loss in live
-    mode = reject") on top of the package's schema validation.
+    Indicator/operator/schema/risk support is delegated to the package
+    parser (the authority) with injected, package-derived capability sets
+    for diagnostics — there are no hand-maintained lists to drift. Finbot
+    owns live-mode policy (e.g. "missing stop loss in live mode = reject")
+    on top of the package's schema validation.
 
     Depends on StrategyDefinitionLoader (domain interface), not on the
     concrete YAML parser.
@@ -39,12 +36,14 @@ class ValidateStrategyUseCase(StrategyValidator):
         loader: StrategyDefinitionLoader,
         *,
         supported_indicators: frozenset[str] | None = None,
+        supported_risk_types: frozenset[str] | None = None,
         supported_schema_versions: frozenset[str] | None = None,
         runtime_package_name: str = "finbar-strategy-runtime",
         runtime_package_version: str = "",
     ):
         self._loader = loader
         self._supported_indicators = supported_indicators
+        self._supported_risk_types = supported_risk_types
         self._supported_schema_versions = supported_schema_versions or frozenset(
             {"2.0"}
         )
@@ -133,9 +132,12 @@ class ValidateStrategyUseCase(StrategyValidator):
             features["unknown_indicators"] = ", ".join(sorted(set(unknown)))
 
     def _check_risk(self, definition, features) -> None:
-        if definition.risk is None:
+        if definition.risk is None or definition.risk.stop_loss_type == "none":
             features["stop_loss"] = "missing"
-        elif definition.risk.stop_loss_type not in _SUPPORTED_RISK_TYPES:
+        elif (
+            self._supported_risk_types is not None
+            and definition.risk.stop_loss_type not in self._supported_risk_types
+        ):
             features["stop_loss"] = "unsupported"
         else:
             features["stop_loss"] = "supported"
@@ -145,6 +147,4 @@ class ValidateStrategyUseCase(StrategyValidator):
         if "long" in sides:
             features["long_entry"] = "supported"
         if "short" in sides:
-            features["short_entry"] = (
-                "planned" if mode in ("testnet", "live") else "supported"
-            )
+            features["short_entry"] = "supported"

@@ -1,30 +1,47 @@
 # Strategy Compatibility Matrix
 
-This matrix tracks Finbot support for Finbar strategy features.
+This matrix tracks Finbot support for Finbar strategy features. Statuses are
+derived from the installed `finbar-strategy-runtime` package at runtime — there
+are no hand-maintained lists to drift.
 
 | Feature | Parsed | Validated | Replay | Live Dry-run | Testnet | Live | Notes |
 |---|---:|---:|---:|---:|---:|---:|---|
-| schema_version | planned | planned | n/a | n/a | n/a | n/a | Required for validation |
-| name/description | planned | planned | planned | planned | planned | planned | Used for audit/signals |
-| parameters/defaults | planned | planned | planned | planned | planned | planned | Needed for risk refs |
-| primary timeframe | planned | planned | planned | planned | planned | planned | First target: 1h |
-| informative timeframes | planned | planned | later | later | later | later | Not needed by first two strategies |
-| atr | planned | planned | planned | planned | planned | planned | Required by both target strategies |
-| vp_vah | planned | planned | planned | planned | planned | planned | Required by both target strategies |
-| vp_val | planned | planned | planned | planned | planned | planned | Required by both target strategies |
-| above_value | planned | planned | planned | planned | planned | planned | Required by both target strategies |
-| acceptance_into_value | planned | planned | planned | planned | planned | planned | Required by both target strategies |
-| value_area_width_pct | planned | planned | planned | planned | planned | planned | Required by v2 strategy |
-| all/any condition groups | planned | planned | planned | planned | planned | planned | Required by target strategies |
-| is_true operator | planned | planned | planned | planned | planned | planned | Required by target strategies |
-| comparison operators | planned | planned | planned | planned | planned | planned | `<` required by v2 |
-| crosses_above/below | planned | planned | later | later | later | later | Stateful support required before enabling live |
-| long entry/exit | planned | planned | planned | planned | planned | planned | Required by target strategies |
-| short entry/exit | planned | planned | later | later | later | later | Schema should parse early |
-| ATR stop | planned | planned | planned | planned | planned | planned | Required by target strategies |
-| risk/reward target | planned | planned | planned | planned | planned | planned | Required by target strategies |
-| fixed percent stop | planned | planned | later | later | later | later | Enable if copied from Finbar |
-| formula features | planned | planned | later | later | later | later | Not needed by target strategies |
-| portfolio/multi-asset | no | no | no | no | no | no | Out of MVP scope |
+| schema_version | done | done | n/a | n/a | n/a | n/a | Package-enforced at parse time |
+| name/description | done | done | done | done | done | done | Used for audit/signals |
+| parameters/defaults | done | done | done | done | done | done | Resolved by package parser |
+| primary timeframe | done | done | done | done | done | done | Required by all strategies |
+| informative timeframes | done | done | done | done | done | done | Package supports multi-TF bar merging |
+| all/any condition groups | done | done | done | done | done | done | Required by all strategies |
+| not condition group | done | done | done | done | done | done | Supported by package evaluator |
+| all comparison operators | done | done | done | done | done | done | `<`, `>`, `<=`, `>=`, `==`, `!=` |
+| is_true operator | done | done | done | done | done | done | Required by target strategies |
+| is_false operator | done | done | done | done | done | done | Supported by package evaluator |
+| crosses_above/below | done | done | done | done | done | done | Package evaluator handles stateful crossovers |
+| between/not_between | done | done | done | done | done | done | Supported by package evaluator |
+| exists/missing | done | done | done | done | done | done | Supported by package evaluator |
+| long entry/exit | done | done | done | done | done | done | Required by target strategies |
+| short entry/exit | done | done | done | done | done | done | Package evaluator supports both sides |
+| ATR stop | done | done | done | done | done | done | Required by target strategies |
+| fixed_pct stop | done | done | done | done | done | done | Package `JsonRiskPriceCalculator` supports it |
+| risk_reward target | done | done | done | done | done | done | Required by target strategies |
+| ATR target | done | done | done | done | done | done | Package supports ATR-based take profit |
+| fixed_pct target | done | done | done | done | done | done | Package supports fixed-pct take profit |
+| formula features | done | done | done | done | done | done | Package `PandasFormulaFeatureCalculator` handles rolling/shift/body_pct/etc. |
+| profile shape classifiers | done | done | done | done | done | done | B/D/P/neutral shape detection |
+| composite volume profile | done | done | done | done | done | done | Multi-day CVP (5d/10d/20d) |
+| VSA signals | done | done | done | done | done | done | Stopping volume, no demand/supply, climax, etc. |
+| SMC / smart money concepts | done | done | done | done | done | done | Order blocks, FVG, BOS, CHoCH, liquidity sweeps |
+| Wyckoff phases | done | done | done | done | done | done | Accumulation, markup, distribution, markdown |
+| Hurst / regime detection | done | done | done | done | done | done | Hurst exponent, fractal regime, market regime |
+| supply/demand zones | done | done | done | done | done | done | Zone detection, scoring, failure signals |
+| Fibonacci levels | done | done | done | done | done | done | 0.382, 0.5, 0.618 retracements, 1.618 extension |
+| Bill Williams indicators | done | done | done | done | done | done | Alligator, Awesome Oscillator, Accelerator, Fractals |
+| VWAP bands | done | done | done | done | done | done | Session VWAP ± bands |
+| liquidity / microstructure proxies | done | done | done | done | done | done | Spread, illiquidity, resiliency, VPIN, OFI |
+| volatility estimators | done | done | done | done | done | done | Parkinson, Garman-Klass, Rogers-Satchell, Yang-Zhang, realized |
+| intraday seasonality | done | done | done | done | done | done | Volume curves, IB range, day type classification |
+| funding / OI / liquidations | done | done | done | done | done | done | Funding rate, open interest delta, liquidation data |
+| standard TA (sma/ema/rsi/adx/macd/kama) | done | done | done | done | done | done | All standard pandas-ta indicators via package |
+| portfolio/multi-asset | no | no | no | no | no | no | Out of MVP scope — one ticker per instance |
 
-Statuses: `planned`, `later`, `no`, or `done`.
+Statuses: `done`, `no`, or `error`.

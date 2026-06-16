@@ -3,7 +3,7 @@
 Keeps the ``finbar_strategy_runtime.parser`` import (infrastructure-tier)
 out of the application/domain layers. The composition root calls this to
 inject data-driven capability sets into use cases, so there is no
-hand-maintained indicator list to drift.
+hand-maintained list to drift.
 """
 
 from __future__ import annotations
@@ -24,3 +24,15 @@ def supported_indicator_types() -> frozenset[str]:
     return frozenset(indicators["fixed_indicators"]) | frozenset(
         indicators["period_ranges"]
     )
+
+
+def supported_stop_loss_types() -> frozenset[str]:
+    """Return the stop-loss type names the installed package supports.
+
+    Reads from the package's risk capabilities so Finbot never needs a
+    hand-maintained list.  Excludes ``"none"`` (which means no stop
+    configured) so the compatibility check can distinguish "missing"
+    from "unsupported".
+    """
+    risk = StrategyCapabilityService().get_capabilities()["risk"]
+    return frozenset(t for t in risk["stop_loss_types"] if t != "none")

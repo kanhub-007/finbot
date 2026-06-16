@@ -155,11 +155,13 @@ def create_validate_strategy_use_case() -> ValidateStrategyUseCase:
 
     from finbot.infrastructure.adapters.package_capability_provider import (
         supported_indicator_types,
+        supported_stop_loss_types,
     )
 
     return ValidateStrategyUseCase(
         loader=YamlStrategyDefinitionLoader(),
         supported_indicators=supported_indicator_types(),
+        supported_risk_types=supported_stop_loss_types(),
         runtime_package_version=_runtime.__version__,
     )
 
