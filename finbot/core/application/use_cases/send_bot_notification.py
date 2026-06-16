@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import timezone
 from decimal import Decimal
 
 from finbot.core.domain.entities.send_result import SendResult
@@ -13,6 +12,50 @@ from finbot.core.domain.interfaces.telegram_bot_port import TelegramBotPort
 from finbot.core.domain.interfaces.telegram_chat_repository import (
     TelegramChatRepository,
 )
+
+
+def format_trade_text(event: TradeExecuted) -> str:
+    """Format a TradeExecuted event as a MarkdownV2 message string."""
+    pnl_line = ""
+    if event.pnl is not None:
+        try:
+            pnl_val = Decimal(event.pnl)
+            if pnl_val > Decimal("0"):
+                pnl_line = f"\\nPnL: \\+${event.pnl}"
+            elif pnl_val < Decimal("0"):
+                pnl_line = f"\\nPnL: \\-${abs(pnl_val)}"
+            else:
+                pnl_line = f"\\nPnL: ${event.pnl}"
+        except Exception:
+            pnl_line = f"\\nPnL: ${event.pnl}"
+
+    return (
+        f"\U0001f514 *Trade Executed*\n"
+        f"{event.side.upper()} {event.size} {event.symbol} @ ${event.price}"
+        f"{pnl_line}\n"
+        f"Order: \\#{event.order_id} | Run: {event.run_id}"
+    )
+
+
+def format_risk_text(event: RiskEventTriggered) -> str:
+    """Format a RiskEventTriggered event as a MarkdownV2 message string."""
+    text = (
+        f"\u26a0\ufe0f *Risk Event*\n"
+        f"{event.reason}\n"
+        f"Run: {event.run_id}"
+    )
+    if event.bot_stopped:
+        text += "\n*Bot stopped\\.* No further orders will be placed\\."
+    return text
+
+
+def format_error_text(event: BotErrorEvent) -> str:
+    """Format a BotErrorEvent as a MarkdownV2 message string."""
+    return (
+        f"\u274c *Error*\n"
+        f"{event.message}\n"
+        f"Run: {event.run_id}"
+    )
 
 
 class SendBotNotification:
@@ -32,46 +75,15 @@ class SendBotNotification:
 
     async def notify_trade(self, event: TradeExecuted) -> list[SendResult]:
         """Broadcast a trade execution notification to all registered chats."""
-        pnl_line = ""
-        if event.pnl is not None:
-            try:
-                pnl_val = Decimal(event.pnl)
-                if pnl_val > Decimal("0"):
-                    pnl_line = f"\\nPnL: \\+${event.pnl}"
-                elif pnl_val < Decimal("0"):
-                    pnl_line = f"\\nPnL: \\-${abs(pnl_val)}"
-                else:
-                    pnl_line = f"\\nPnL: ${event.pnl}"
-            except Exception:
-                pnl_line = f"\\nPnL: ${event.pnl}"
-
-        text = (
-            "🔔 *Trade Executed*\n"
-            f"{event.side.upper()} {event.size} {event.symbol} @ ${event.price}"
-            f"{pnl_line}\n"
-            f"Order: \\#{event.order_id} | Run: {event.run_id}"
-        )
-        return await self._broadcast(text)
+        return await self._broadcast(format_trade_text(event))
 
     async def notify_risk(self, event: RiskEventTriggered) -> list[SendResult]:
         """Broadcast a risk event notification to all registered chats."""
-        text = (
-            f"⚠️ *Risk Event*\n"
-            f"{event.reason}\n"
-            f"Run: {event.run_id}"
-        )
-        if event.bot_stopped:
-            text += "\n*Bot stopped\\.* No further orders will be placed\\."
-        return await self._broadcast(text)
+        return await self._broadcast(format_risk_text(event))
 
     async def notify_error(self, event: BotErrorEvent) -> list[SendResult]:
         """Broadcast a bot error notification to all registered chats."""
-        text = (
-            "❌ *Error*\n"
-            f"{event.message}\n"
-            f"Run: {event.run_id}"
-        )
-        return await self._broadcast(text)
+        return await self._broadcast(format_error_text(event))
 
     async def _broadcast(self, text: str) -> list[SendResult]:
         """Send a message to all registered chats with notifications enabled."""

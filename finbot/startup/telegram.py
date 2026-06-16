@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from typing import Any
 
 from finbot.config.settings import Settings
 from finbot.core.application.use_cases.handle_telegram_command import (
     HandleTelegramCommand,
 )
+from finbot.core.domain.interfaces.bot_manager_port import BotManagerPort
 from finbot.core.domain.interfaces.telegram_chat_repository import (
     TelegramChatRepository,
 )
@@ -40,6 +40,9 @@ class TelegramControlPlane:
     Does not depend on an existing event loop. Creates its own loop on
     a daemon thread, and provides the thread-safe notification dispatcher
     for the trading runtime thread to schedule async sends.
+
+    Call ``attach_bot_manager()`` before ``start_in_background()`` so
+    the command use case has a real BotManager reference.
     """
 
     def __init__(
@@ -49,7 +52,7 @@ class TelegramControlPlane:
     ) -> None:
         self._settings = settings
         self._chat_repo = chat_repo
-        self._bot_manager: Any | None = None
+        self._bot_manager: BotManagerPort | None = None
         self._handler: TelegramBotHandler | None = None
         self._adapter: PythonTelegramBotAdapter | None = None
         self._notification_sender: TelegramNotificationSender | None = None
@@ -58,16 +61,26 @@ class TelegramControlPlane:
         self._thread: threading.Thread | None = None
 
     @property
-    def notification_dispatcher(self) -> ThreadSafeTelegramNotificationDispatcher | None:
+    def notification_dispatcher(
+        self,
+    ) -> ThreadSafeTelegramNotificationDispatcher | None:
         """Return the thread-safe dispatcher for runtime notification scheduling."""
         return self._dispatcher
 
-    def attach_bot_manager(self, bot_manager: object) -> None:
-        """Attach the BotManager after it has been created by MCP startup."""
+    def attach_bot_manager(self, bot_manager: BotManagerPort) -> None:
+        """Attach the BotManager after it has been created by MCP startup.
+
+        Must be called before ``start_in_background()``.
+        """
         self._bot_manager = bot_manager
 
     def start_in_background(self) -> None:
         """Start the Telegram event loop on a daemon thread."""
+        if self._bot_manager is None:
+            raise RuntimeError(
+                "BotManager must be attached before starting Telegram"
+            )
+
         token = self._settings.telegram_bot_token.get_secret_value()
         if not token:
             raise ValueError("FINBOT_TELEGRAM_BOT_TOKEN is required")
@@ -87,7 +100,7 @@ class TelegramControlPlane:
         )
 
         command_use_case = HandleTelegramCommand(
-            bot_manager=self._bot_manager or _MissingBotManager(),
+            bot_manager=self._bot_manager,
             chat_repo=self._chat_repo,
             strategy_dir=strategy_dir,
             session_store=InMemoryTelegramSessionStore(),
@@ -126,35 +139,16 @@ class TelegramControlPlane:
             )
 
         try:
-            self._loop.run_until_complete(self._handler.start_polling())  # type: ignore[union-attr]
+            self._loop.run_until_complete(self._handler.start_polling())
             self._loop.run_forever()
         except Exception:
             logger.exception("Telegram event loop crashed")
         finally:
             try:
-                self._loop.run_until_complete(self._handler.stop())  # type: ignore[union-attr]
+                self._loop.run_until_complete(self._handler.stop())
             except Exception:
                 pass
             self._loop.close()
-
-
-class _MissingBotManager:
-    """Placeholder used before BotManager is attached."""
-
-    def is_running(self) -> bool:
-        return False
-
-    def get_status(self) -> dict[str, object]:
-        return {"is_running": False}
-
-    def list_bot_runs(self, limit: int = 20, mode_filter: str | None = None) -> list:
-        return []
-
-    def stop(self) -> dict[str, str]:
-        return {"status": "no_bot_running", "bot_run_id": ""}
-
-    def start(self, **kwargs: Any) -> dict[str, str]:
-        return {"status": "rejected", "message": "BotManager not attached yet"}
 
 
 def create_telegram_control_plane(
