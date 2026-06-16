@@ -22,6 +22,7 @@ from finbot.core.domain.interfaces.bot_state_repository import (
 from finbot.core.domain.services.order_state_machine import (
     OrderStateMachine,
 )
+from finbot.core.domain.services.trade_ledger import TradeLedger
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,13 @@ class AccountEventHandler:
         deduplication.
     """
 
-    def __init__(self, repo: BotStateRepository) -> None:
+    def __init__(
+        self,
+        repo: BotStateRepository,
+        trade_ledger: TradeLedger | None = None,
+    ) -> None:
         self._repo = repo
+        self._trade_ledger = trade_ledger or TradeLedger(repo)
 
     def handle(
         self,
@@ -121,25 +127,25 @@ class AccountEventHandler:
             return {"status": "duplicate", "reason": f"fill {fill_id} already recorded"}
 
         size = Decimal(str(event.get("size", "0")))
-        # Apply the lifecycle transition and record the fill atomically so a
-        # failure between them cannot double-count the fill size on retry.
+        # Apply the lifecycle transition, record the fill, and update the
+        # Trade ledger atomically so a failure cannot double-count the fill
+        # size on retry (ADR-6).
+        fill = self._build_fill_record(
+            order_id, event, bot_run_id, symbol, fill_id, size
+        )
         tx = getattr(self._repo, "transaction", None)
         if tx is not None:
             with tx():
                 if not self._apply_fill_transition(order_id, size):
                     return {"status": "transition_rejected"}
-                self._repo.record_fill(
-                    self._build_fill_record(
-                        order_id, event, bot_run_id, symbol, fill_id, size
-                    )
-                )
+                self._repo.record_fill(fill)
+                self._trade_ledger.apply_fill(fill)
             return {"status": "processed"}
         # In-memory repos have no fsync cost; apply directly.
         if not self._apply_fill_transition(order_id, size):
             return {"status": "transition_rejected"}
-        self._repo.record_fill(
-            self._build_fill_record(order_id, event, bot_run_id, symbol, fill_id, size)
-        )
+        self._repo.record_fill(fill)
+        self._trade_ledger.apply_fill(fill)
         return {"status": "processed"}
 
     def _apply_fill_transition(self, order_id: str, size: Decimal) -> bool:

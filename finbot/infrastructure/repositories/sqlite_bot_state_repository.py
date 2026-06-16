@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import date as _date, UTC, datetime
 from decimal import Decimal
 
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
@@ -22,6 +22,7 @@ from finbot.core.domain.entities.reconciliation_record import (
 )
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
 from finbot.core.domain.entities.strategy_snapshot import StrategySnapshot
+from finbot.core.domain.entities.trade import Trade
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
@@ -485,6 +486,28 @@ class SqliteBotStateRepository(BotStateRepository):
         # Mark the inserted transitions as persisted so the next save only
         # appends new ones — avoids O(k²) re-insertion over an order's life.
         lifecycle.persisted_transition_count = len(lifecycle.transition_history)
+
+    # -- trades ---------------------------------------------------------------
+
+    def open_trade(self, trade: Trade) -> None:
+        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
+
+    def update_trade(self, trade: Trade) -> None:
+        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
+
+    def get_open_trade(self, symbol: str) -> Trade | None:
+        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
+
+    def list_open_trades(self) -> list[Trade]:
+        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
+
+    def list_closed_trades(
+        self, *, bot_run_id: str | None = None
+    ) -> list[Trade]:
+        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
+
+    def realized_loss_on(self, day: _date) -> Decimal:
+        raise NotImplementedError("SQLite trades table not yet implemented — Step 7")
 
     @property
     def _connection(self) -> sqlite3.Connection:

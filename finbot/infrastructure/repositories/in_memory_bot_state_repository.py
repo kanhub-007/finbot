@@ -1,5 +1,7 @@
 """In-memory bot state repository for early dry-run development."""
 
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
@@ -17,6 +19,7 @@ from finbot.core.domain.entities.reconciliation_record import (
 )
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
 from finbot.core.domain.entities.strategy_snapshot import StrategySnapshot
+from finbot.core.domain.entities.trade import Trade
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
@@ -37,6 +40,7 @@ class InMemoryBotStateRepository(BotStateRepository):
         self._risk_events: list[RiskEventRecord] = []
         self._audit_log: list[AuditLogEntry] = []
         self._lifecycles: dict[str, object] = {}
+        self._trades: dict[str, Trade] = {}  # position_id -> Trade
 
     # -- bot run lifecycle --------------------------------------------------
 
@@ -179,3 +183,43 @@ class InMemoryBotStateRepository(BotStateRepository):
             entries = [e for e in entries if e.event_type == event_type]
         entries.sort(key=lambda e: e.created_at, reverse=True)
         return entries[:limit]
+
+    # -- trades ---------------------------------------------------------------
+
+    def open_trade(self, trade: Trade) -> None:
+        self._trades[trade.position_id] = trade
+
+    def update_trade(self, trade: Trade) -> None:
+        self._trades[trade.position_id] = trade
+
+    def get_open_trade(self, symbol: str) -> Trade | None:
+        for t in self._trades.values():
+            if t.symbol == symbol and t.status == "open":
+                return t
+        return None
+
+    def list_open_trades(self) -> list[Trade]:
+        return [t for t in self._trades.values() if t.status == "open"]
+
+    def list_closed_trades(
+        self, *, bot_run_id: str | None = None
+    ) -> list[Trade]:
+        result = [t for t in self._trades.values() if t.status == "closed"]
+        if bot_run_id is not None:
+            result = [t for t in result if t.bot_run_id == bot_run_id]
+        result.sort(
+            key=lambda t: t.closed_at or datetime.min, reverse=True
+        )
+        return result
+
+    def realized_loss_on(self, day: date) -> Decimal:
+        """Sum of absolute realized losses for trades closed on *day*.
+
+        Returns a non-negative Decimal (0 if no losses).
+        """
+        total = Decimal("0")
+        for t in self._trades.values():
+            if t.status == "closed" and t.realized_pnl < Decimal("0"):
+                if t.closed_at is not None and t.closed_at.date() == day:
+                    total += t.realized_pnl
+        return abs(total)

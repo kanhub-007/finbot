@@ -35,8 +35,13 @@ from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.enrichment_validation_result import (
     EnrichmentValidationResult,
 )
+from finbot.core.domain.entities.fill_record import FillRecord
+from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
+from finbot.core.domain.entities.reconciliation_record import (
+    ReconciliationRecord,
+)
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
@@ -68,6 +73,7 @@ from finbot.core.domain.interfaces.strategy_validator import (
     StrategyValidator,
 )
 from finbot.core.domain.services.live_mode_guard import check_live_mode
+from finbot.core.domain.services.trade_ledger import TradeLedger
 from finbot.core.domain.services.warmup_window import WarmupWindow
 
 logger = logging.getLogger(__name__)
@@ -105,6 +111,7 @@ class LiveTradingRuntimeUseCase:
         bot_loop: BotLoop | None = None,
         strategy_validator: StrategyValidator | None = None,
         account_event_handler: AccountEventHandler | None = None,
+        trade_ledger: TradeLedger | None = None,
         live_state: Any | None = None,
     ) -> None:
         self._exchange = exchange_gateway
@@ -121,6 +128,7 @@ class LiveTradingRuntimeUseCase:
         self._bot_loop = bot_loop
         self._strategy_validator = strategy_validator
         self._account_handler = account_event_handler
+        self._trade_ledger = trade_ledger or TradeLedger(self._repo)
         self._live_state = live_state
         self._submitter = OrderSubmitter(
             exchange_gateway, order_normalizer, state_repository
@@ -266,6 +274,36 @@ class LiveTradingRuntimeUseCase:
             self._repo.end_bot_run(self._bot_run_id)
             self._started = False
 
+    def reconcile_on_startup(self) -> ReconciliationRecord:
+        """Fetch the exchange position; reconstruct an open Trade if needed.
+
+        Called once at the start of ``run_forever()``.  If the exchange
+        reports an open position but the DB has no Trade for it (e.g. crash
+        mid-session), an open Trade is reconstructed with unknown entry
+        price and a :class:`ReconciliationRecord` is persisted.
+        """
+        position = self._exchange.get_position(self._symbol)
+        existing = self._repo.get_open_trade(self._symbol)
+        if position.direction != PositionDirection.FLAT and existing is None:
+            trade = self._trade_ledger.reconstruct_open(
+                position,
+                bot_run_id=self._bot_run_id,
+                strategy_hash=self._strategy_hash,
+            )
+            self._repo.open_trade(trade)
+        record = ReconciliationRecord(
+            bot_run_id=self._bot_run_id,
+            position_matches=(
+                existing is not None
+                or position.direction == PositionDirection.FLAT
+            ),
+            open_orders_match=True,  # placeholder; full order reconcile later
+            details=f"startup: exchange={position.direction.value} "
+            f"db_open={'yes' if existing else 'no'}",
+        )
+        self._repo.record_reconciliation(record)
+        return record
+
     def run_forever(self) -> None:
         """Start the event loop and block until stopped.
 
@@ -278,6 +316,7 @@ class LiveTradingRuntimeUseCase:
             raise RuntimeError(
                 "Session not started — call start() or start_live() first"
             )
+        self.reconcile_on_startup()
         self._bot_loop.start(
             symbol=self._symbol,
             interval=self._interval,
@@ -356,7 +395,9 @@ class LiveTradingRuntimeUseCase:
         pay no setup cost.
         """
         if self._account_handler is None:
-            self._account_handler = AccountEventHandler(self._repo)
+            self._account_handler = AccountEventHandler(
+                self._repo, self._trade_ledger
+            )
         return self._account_handler.handle(
             event,
             bot_run_id=self._bot_run_id,
@@ -535,9 +576,8 @@ class LiveTradingRuntimeUseCase:
         self, bar: dict[str, Any], position: PositionSnapshot
     ) -> dict[str, Any]:
         """Assemble the context dict consumed by the risk gates."""
-        # open_order_count comes from the exchange so MaxOpenOrdersGate can
-        # enforce.  daily_loss_usd is 0 until realized-PnL tracking lands;
-        # DailyLossGate still enforces the cap once a real value is supplied.
+        from datetime import UTC, datetime
+
         return {
             "bar": bar,
             "symbol": self._symbol,
@@ -547,7 +587,9 @@ class LiveTradingRuntimeUseCase:
             "open_order_count": len(
                 self._exchange.list_open_orders(self._symbol or "")
             ),
-            "daily_loss_usd": Decimal("0"),
+            "daily_loss_usd": self._trade_ledger.realized_loss_on(
+                datetime.now(UTC).date()
+            ),
         }
 
     def _mark_signal_processed(self, plan, action: str, candle_ts: int) -> None:
@@ -596,6 +638,12 @@ class LiveTradingRuntimeUseCase:
 
         if self._mode == TradingMode.DRY_RUN:
             self._exchange.submit_order(intent)
+            # Synthesize a fill so the TradeLedger tracks the position
+            # in dry-run mode, keeping parity with live/testnet where
+            # real fills arrive via the account stream (ADR-8).
+            fill = self._synthesize_fill(intent, intent_id)
+            if fill is not None:
+                self._trade_ledger.apply_fill(fill)
             return intent_id, False
 
         if self._mode in (TradingMode.TESTNET, TradingMode.LIVE):
@@ -607,6 +655,36 @@ class LiveTradingRuntimeUseCase:
             return intent_id, submitted
 
         return intent_id, False
+
+    def _synthesize_fill(
+        self, intent, intent_id: str
+    ) -> FillRecord | None:
+        """Build a synthetic FillRecord from an OrderIntent for dry-run.
+
+        Uses the latest bar's close as the fill price.  The fill_id is
+        derived from the intent_id for idempotency.
+
+        Returns None when the warmup window has no latest bar.
+        """
+        from datetime import UTC, datetime
+
+        bar = self._warmup.latest_bar
+        if bar is None:
+            return None
+        ref_price = Decimal(str(bar.get("close", "0")))
+        if ref_price <= 0:
+            return None
+        return FillRecord(
+            bot_run_id=self._bot_run_id,
+            order_id=intent_id,
+            symbol=intent.symbol,
+            side=intent.side.value,
+            size=intent.size,
+            price=ref_price,
+            fee=Decimal("0"),
+            fill_id=f"dry:{intent_id}",
+            filled_at=datetime.now(UTC),
+        )
 
 
 # -- module-level helpers -----------------------------------------------------

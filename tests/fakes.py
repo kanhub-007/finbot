@@ -4,6 +4,7 @@ Classical-school fakes: in-memory implementations with no mocks,
 suitable for outcome-based assertions.
 """
 
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -11,6 +12,7 @@ from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
+from finbot.core.domain.entities.trade import Trade
 from finbot.core.domain.interfaces.bar_frame_converter import (
     BarFrameConverter,
 )
@@ -246,6 +248,7 @@ class StubBotStateRepository(BotStateRepository):
         self._fill_ids: set[str] = set()
         self._lifecycles: dict[str, object] = {}
         self._cloid_map: dict[str, str] = {}
+        self._trades: dict[str, Trade] = {}
 
     def create_bot_run(self, bot_run) -> None:
         self._bot_runs.append(bot_run)
@@ -350,6 +353,42 @@ class StubBotStateRepository(BotStateRepository):
             entries = [e for e in entries if e.event_type == event_type]
         entries.sort(key=lambda e: e.created_at, reverse=True)
         return entries[:limit]
+
+    # -- trades ---------------------------------------------------------------
+
+    def open_trade(self, trade: Trade) -> None:
+        self._trades[trade.position_id] = trade
+
+    def update_trade(self, trade: Trade) -> None:
+        self._trades[trade.position_id] = trade
+
+    def get_open_trade(self, symbol: str) -> Trade | None:
+        for t in self._trades.values():
+            if t.symbol == symbol and t.status == "open":
+                return t
+        return None
+
+    def list_open_trades(self) -> list[Trade]:
+        return [t for t in self._trades.values() if t.status == "open"]
+
+    def list_closed_trades(
+        self, *, bot_run_id: str | None = None
+    ) -> list[Trade]:
+        result = [t for t in self._trades.values() if t.status == "closed"]
+        if bot_run_id is not None:
+            result = [t for t in result if t.bot_run_id == bot_run_id]
+        result.sort(
+            key=lambda t: t.closed_at or datetime.min, reverse=True
+        )
+        return result
+
+    def realized_loss_on(self, day: date) -> Decimal:
+        total = Decimal("0")
+        for t in self._trades.values():
+            if t.status == "closed" and t.realized_pnl < Decimal("0"):
+                if t.closed_at is not None and t.closed_at.date() == day:
+                    total += t.realized_pnl
+        return abs(total)
 
     @property
     def signal_count(self) -> int:

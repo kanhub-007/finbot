@@ -1,6 +1,8 @@
 """Bot state repository interface."""
 
 from abc import ABC, abstractmethod
+from datetime import date
+from decimal import Decimal
 
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
 from finbot.core.domain.entities.bot_run import BotRun
@@ -16,6 +18,7 @@ from finbot.core.domain.entities.reconciliation_record import (
 )
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
 from finbot.core.domain.entities.strategy_snapshot import StrategySnapshot
+from finbot.core.domain.entities.trade import Trade
 
 
 class BotStateRepository(ABC):
@@ -158,3 +161,31 @@ class BotStateRepository(ABC):
     @abstractmethod
     def save_order_lifecycle(self, lifecycle: OrderLifecycle) -> None:
         """Persist an order lifecycle state update."""
+
+    # -- trades ---------------------------------------------------------------
+
+    @abstractmethod
+    def open_trade(self, trade: Trade) -> None:
+        """Persist a new open trade record."""
+
+    @abstractmethod
+    def update_trade(self, trade: Trade) -> None:
+        """Replace an existing trade row with the updated frozen entity."""
+
+    @abstractmethod
+    def get_open_trade(self, symbol: str) -> Trade | None:
+        """Return the currently open Trade for *symbol*, or None."""
+
+    @abstractmethod
+    def list_open_trades(self) -> list[Trade]:
+        """Return all open trades."""
+
+    @abstractmethod
+    def list_closed_trades(
+        self, *, bot_run_id: str | None = None
+    ) -> list[Trade]:
+        """Return closed trades, optionally filtered by bot run."""
+
+    @abstractmethod
+    def realized_loss_on(self, day: date) -> Decimal:
+        """Sum of absolute realized losses for trades closed on *day*."""
