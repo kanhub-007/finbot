@@ -62,6 +62,21 @@ def create_server() -> FastMCP:
     repo = create_bot_state_repository(migrate=True)
     exchange = create_exchange_gateway(settings)
 
+    # Telegram integration (optional, background thread)
+    telegram = None
+    notification_sender = None
+    if settings.telegram_enabled:
+        from finbot.core.application.use_cases.live_trading_runtime import (
+            LiveTradingRuntimeUseCase,
+        )
+        from finbot.infrastructure.repositories.sqlite_telegram_chat_repository import (
+            SqliteTelegramChatRepository,
+        )
+        from finbot.startup.telegram import create_telegram_control_plane
+
+        chat_repo = SqliteTelegramChatRepository(settings.database_path)
+        telegram = create_telegram_control_plane(settings, chat_repo=chat_repo)
+
     bot_manager = BotManager(
         runtime_factory=_make_runtime_factory(settings),
         repository=repo,
@@ -102,6 +117,17 @@ def create_server() -> FastMCP:
 
     # Store bot_manager on the server instance so tools can access it
     server._finbot_bot_manager = bot_manager  # type: ignore[attr-defined]
+
+    # Wire Telegram if enabled
+    if telegram is not None:
+        telegram.attach_bot_manager(bot_manager)
+        telegram.start_in_background()
+        server._finbot_telegram = telegram  # type: ignore[attr-defined]
+        notification_sender = telegram.notification_dispatcher
+        logger.info(
+            "Telegram bot started (allowed users: %d)",
+            len(settings.telegram_allowed_user_ids),
+        )
 
     # Register all MCP tools
     from finbot.presentation.mcp.tools import register_tools

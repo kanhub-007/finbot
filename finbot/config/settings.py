@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     max_daily_loss_usd: Decimal = Field(default=Decimal("25"))
     max_open_orders: int = Field(default=3)
     stale_data_seconds: int = Field(default=120)
+    telegram_bot_token: SecretStr = Field(default=SecretStr(""))
+    telegram_allowed_users: str = Field(default="")
+    telegram_enabled: bool = Field(default=False)
+    telegram_strategies_dir: str = Field(default="strategies")
 
     @property
     def database_path(self) -> str:
@@ -43,3 +47,19 @@ class Settings(BaseSettings):
         if url.startswith("sqlite:///"):
             return url[len("sqlite:///") :]
         return url
+
+    @property
+    def telegram_allowed_user_ids(self) -> frozenset[int]:
+        """Parse the comma-separated allowed user IDs."""
+        if not self.telegram_allowed_users.strip():
+            return frozenset()
+        return frozenset(
+            int(uid.strip())
+            for uid in self.telegram_allowed_users.split(",")
+            if uid.strip()
+        )
+
+    @property
+    def telegram_control_configured(self) -> bool:
+        """Check if Telegram control is configured with allowed users."""
+        return bool(self.telegram_allowed_user_ids)

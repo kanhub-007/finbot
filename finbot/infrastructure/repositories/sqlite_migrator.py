@@ -154,6 +154,17 @@ MIGRATIONS: list[tuple[int, str]] = [
             ON trades(closed_at) WHERE status = 'closed';
         """,
     ),
+    (
+        4,
+        """
+        CREATE TABLE IF NOT EXISTS telegram_chats (
+            chat_id               INTEGER PRIMARY KEY,
+            user_id               INTEGER NOT NULL,
+            registered_at         TEXT NOT NULL,
+            notifications_enabled INTEGER NOT NULL DEFAULT 1
+        );
+        """,
+    ),
 ]
 
 LATEST_VERSION = max(v for v, _ in MIGRATIONS) if MIGRATIONS else 0
