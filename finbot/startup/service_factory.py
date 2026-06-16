@@ -399,36 +399,74 @@ def create_live_trading_runtime_use_case(
     if warmup_bars is None and live_data:
         warmup_bars = _load_warmup_bars(symbol, interval, min_bars=100)
 
-    return LiveTradingRuntimeUseCase(
-        exchange_gateway=gateway,
-        strategy_evaluator=evaluator,
-        state_repository=repo,
-        indicator_calculator=SharedRuntimeIndicatorCalculator(),
-        enrichment_validator=EnrichmentValidator(),
-        bar_frame_converter=PandasBarFrameConverter(),
-        mode=trading_mode,
-        warmup_bars=warmup_bars,
-        required_columns=required_columns,
-        required_indicators=required_indicators,
-        order_planner=OrderPlanner(
-            gates=[
-                ModeGate(
-                    mode=trading_mode.value,
-                    live_trading_ack=settings.live_trading_ack,
-                ),
-                StaleDataGate(max_age_seconds=settings.stale_data_seconds),
-                MaxPositionGate(max_notional_usd=settings.max_position_usd),
-                MaxLeverageGate(),
-                MaxOpenOrdersGate(max_orders=settings.max_open_orders),
-                DailyLossGate(max_loss_usd=settings.max_daily_loss_usd),
-                ReduceOnlyGate(),
-                DuplicateSignalGate(repo),
-            ]
-        ),
-        bot_loop=bot_loop,
-        strategy_validator=create_validate_strategy_use_case(),
-        trade_ledger=trade_ledger,
-        notification_sender=notification_sender,
+    # Wire the mode-specific submission strategy
+    from finbot.infrastructure.adapters.dry_run_submission_strategy import (
+        DryRunSubmissionStrategy,
+    )
+    from finbot.infrastructure.adapters.live_submission_strategy import (
+        LiveSubmissionStrategy,
+    )
+    from finbot.infrastructure.adapters.simple_runtime_event_emitter import (
+        SimpleRuntimeEventEmitter,
+    )
+    from finbot.startup.live_trading_runtime_builder import (
+        LiveTradingRuntimeBuilder,
+    )
+
+    if trading_mode == TradingMode.DRY_RUN:
+        submission_strategy = DryRunSubmissionStrategy(repo, trade_ledger)
+    else:
+        submission_strategy = LiveSubmissionStrategy(
+            gateway, order_normalizer=None, repo=repo
+        )
+
+    # Wire the event emitter + Telegram observer (if available)
+    event_emitter = SimpleRuntimeEventEmitter()
+    if notification_sender is not None:
+        from finbot.infrastructure.adapters.telegram_runtime_observer import (
+            TelegramRuntimeObserver,
+        )
+        from finbot.core.domain.events.runtime_events import (
+            RiskTriggeredEvent,
+        )
+
+        observer = TelegramRuntimeObserver(notification_sender)
+        event_emitter.subscribe(RiskTriggeredEvent, observer.on_risk_triggered)
+
+    order_planner = OrderPlanner(
+        gates=[
+            ModeGate(
+                mode=trading_mode.value,
+                live_trading_ack=settings.live_trading_ack,
+            ),
+            StaleDataGate(max_age_seconds=settings.stale_data_seconds),
+            MaxPositionGate(max_notional_usd=settings.max_position_usd),
+            MaxLeverageGate(),
+            MaxOpenOrdersGate(max_orders=settings.max_open_orders),
+            DailyLossGate(max_loss_usd=settings.max_daily_loss_usd),
+            ReduceOnlyGate(),
+            DuplicateSignalGate(repo),
+        ]
+    )
+
+    return (
+        LiveTradingRuntimeBuilder()
+        .with_exchange(gateway)
+        .with_evaluator(evaluator)
+        .with_repository(repo)
+        .with_indicator_calculator(SharedRuntimeIndicatorCalculator())
+        .with_enrichment_validator(EnrichmentValidator())
+        .with_bar_converter(PandasBarFrameConverter())
+        .with_mode(trading_mode)
+        .with_submission_strategy(submission_strategy)
+        .with_event_emitter(event_emitter)
+        .with_warmup_bars(warmup_bars)
+        .with_required_columns(required_columns)
+        .with_required_indicators(required_indicators)
+        .with_order_planner(order_planner)
+        .with_bot_loop(bot_loop)
+        .with_strategy_validator(create_validate_strategy_use_case())
+        .build()
     )
 
 

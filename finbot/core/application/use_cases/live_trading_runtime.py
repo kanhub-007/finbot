@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime as _dt
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +25,6 @@ from finbot.core.application.dto.run_bot_result import RunBotResult
 from finbot.core.application.use_cases.account_event_handler import (
     AccountEventHandler,
 )
-from finbot.core.application.use_cases.order_submitter import OrderSubmitter
 from finbot.core.domain.dto.validate_strategy_request import (
     ValidateStrategyRequest,
 )
@@ -36,7 +34,6 @@ from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.enrichment_validation_result import (
     EnrichmentValidationResult,
 )
-from finbot.core.domain.entities.fill_record import FillRecord
 from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
@@ -102,6 +99,8 @@ class LiveTradingRuntimeUseCase:
         enrichment_validator: EnrichmentValidator,
         bar_frame_converter: BarFrameConverter,
         mode: TradingMode,
+        submission_strategy: Any,
+        event_emitter: Any,
         warmup_bars: list[dict[str, Any]] | None = None,
         required_columns: set[str] | None = None,
         required_indicators: list[str] | None = None,
@@ -113,7 +112,6 @@ class LiveTradingRuntimeUseCase:
         strategy_validator: StrategyValidator | None = None,
         account_event_handler: AccountEventHandler | None = None,
         trade_ledger: TradeLedger | None = None,
-        notification_sender: object | None = None,
         live_state: Any | None = None,
     ) -> None:
         self._exchange = exchange_gateway
@@ -123,6 +121,8 @@ class LiveTradingRuntimeUseCase:
         self._enrichment_validator = enrichment_validator
         self._bar_converter = bar_frame_converter
         self._mode = mode
+        self._submission_strategy = submission_strategy
+        self._event_emitter = event_emitter
         self._order_planner = order_planner
         self._metadata_provider = market_metadata_provider
         self._order_normalizer = order_normalizer
@@ -131,15 +131,8 @@ class LiveTradingRuntimeUseCase:
         self._strategy_validator = strategy_validator
         self._account_handler = account_event_handler
         self._trade_ledger = trade_ledger or TradeLedger(self._repo)
-        self._notification_sender = notification_sender
         self._live_state = live_state
-        self._submitter = OrderSubmitter(
-            exchange_gateway, order_normalizer, state_repository
-        )
         self._required_columns: set[str] = required_columns or set()
-        # Ordered: the package calculator computes indicators in the given
-        # order, so composites (above_value) must follow their intermediates
-        # (vp_vah/vp_val). A set would scramble order and yield NaN composites.
         self._required_indicators: list[str] = (
             list(required_indicators) if required_indicators else []
         )
@@ -399,8 +392,7 @@ class LiveTradingRuntimeUseCase:
         """
         if self._account_handler is None:
             self._account_handler = AccountEventHandler(
-                self._repo, self._trade_ledger,
-                notification_sender=self._notification_sender,
+                self._repo, self._trade_ledger
             )
         return self._account_handler.handle(
             event,
@@ -482,7 +474,7 @@ class LiveTradingRuntimeUseCase:
                 reason=validation.reason,
             )
         )
-        self._notify_risk("enrichment_validation", validation.reason, bot_stopped=False)
+        self._emit_risk("enrichment_validation", validation.reason, bot_stopped=False)
         self._repo.append_audit_log(
             AuditLogEntry(
                 bot_run_id=self._bot_run_id,
@@ -630,91 +622,45 @@ class LiveTradingRuntimeUseCase:
         )
         # Notify for actionable risk events (skip noise like duplicate signals)
         if gate_name not in ("duplicate_signal",):
-            self._notify_risk(
+            self._emit_risk(
                 gate_name, plan.reason or f"Order blocked by {gate_name}",
                 bot_stopped=(gate_name in ("daily_loss", "mode")),
             )
 
     def _dispatch_submission(self, plan) -> tuple[str, bool]:
-        """Persist the order intent and submit it according to the run mode."""
+        """Delegate order submission to the mode-specific strategy."""
         intent = plan.intent
         if intent is None:
             return "", False
 
         if self._cloid_gen is not None:
             intent = intent.with_cloid(self._cloid_gen.generate(plan.signal_key))
-        intent_id = self._repo.record_order_intent(intent)
 
-        if self._mode == TradingMode.DRY_RUN:
-            self._exchange.submit_order(intent)
-            # Synthesize a fill so the TradeLedger tracks the position
-            # in dry-run mode, keeping parity with live/testnet where
-            # real fills arrive via the account stream (ADR-8).
-            fill = self._synthesize_fill(intent, intent_id)
-            if fill is not None:
-                self._trade_ledger.apply_fill(fill)
-            return intent_id, False
-
-        if self._mode in (TradingMode.TESTNET, TradingMode.LIVE):
-            bar = self._warmup.latest_bar
-            ref_price = Decimal(str(bar.get("close", 0)))
-            submitted = self._submitter.submit(
-                intent, intent_id, self._bot_run_id, ref_price
-            )
-            return intent_id, submitted
-
-        return intent_id, False
-
-    def _synthesize_fill(
-        self, intent, intent_id: str
-    ) -> FillRecord | None:
-        """Build a synthetic FillRecord from an OrderIntent for dry-run.
-
-        Uses the latest bar's close as the fill price.  The fill_id is
-        derived from the intent_id for idempotency.
-
-        Returns None when the warmup window has no latest bar.
-        """
-        bar = self._warmup.latest_bar
-        if bar is None:
-            return None
-        ref_price = Decimal(str(bar.get("close", "0")))
-        if ref_price <= 0:
-            return None
-        return FillRecord(
-            bot_run_id=self._bot_run_id,
-            order_id=intent_id,
-            symbol=intent.symbol,
-            side=intent.side.value,
-            size=intent.size,
-            price=ref_price,
-            fee=Decimal("0"),
-            fill_id=f"dry:{intent_id}",
-            filled_at=_dt.now(UTC),
+        return self._submission_strategy.submit(
+            intent, self._bot_run_id, self._warmup.latest_bar
         )
 
-    # -- notification helpers -------------------------------------------
+    # -- event emission -----------------------------------------------------
 
-    def _notify_risk(
+    def _emit_risk(
         self, event_type: str, reason: str, *, bot_stopped: bool
     ) -> None:
-        """Send a risk event notification if a sender is configured."""
-        if self._notification_sender is None:
-            return
+        """Emit a risk-triggered event to all registered observers."""
         try:
-            from finbot.core.domain.events.risk_event_triggered import (
-                RiskEventTriggered,
+            from finbot.core.domain.events.runtime_events import (
+                RiskTriggeredEvent,
             )
 
-            event = RiskEventTriggered(
-                run_id=self._bot_run_id,
-                event_type=event_type,
-                reason=reason,
-                bot_stopped=bot_stopped,
+            self._event_emitter.emit(
+                RiskTriggeredEvent(
+                    run_id=self._bot_run_id,
+                    event_type=event_type,
+                    reason=reason,
+                    bot_stopped=bot_stopped,
+                )
             )
-            self._notification_sender.notify_risk(event)  # type: ignore[attr-defined]
         except Exception:
-            logger.debug("Failed to send risk notification", exc_info=True)
+            logger.debug("Failed to emit risk event", exc_info=True)
 
 
 # -- module-level helpers -----------------------------------------------------
