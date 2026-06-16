@@ -482,6 +482,7 @@ class LiveTradingRuntimeUseCase:
                 reason=validation.reason,
             )
         )
+        self._notify_risk("enrichment_validation", validation.reason, bot_stopped=False)
         self._repo.append_audit_log(
             AuditLogEntry(
                 bot_run_id=self._bot_run_id,
@@ -627,6 +628,12 @@ class LiveTradingRuntimeUseCase:
                 reason=plan.reason,
             )
         )
+        # Notify for actionable risk events (skip noise like duplicate signals)
+        if gate_name not in ("duplicate_signal",):
+            self._notify_risk(
+                gate_name, plan.reason or f"Order blocked by {gate_name}",
+                bot_stopped=(gate_name in ("daily_loss", "mode")),
+            )
 
     def _dispatch_submission(self, plan) -> tuple[str, bool]:
         """Persist the order intent and submit it according to the run mode."""
@@ -685,6 +692,29 @@ class LiveTradingRuntimeUseCase:
             fill_id=f"dry:{intent_id}",
             filled_at=_dt.now(UTC),
         )
+
+    # -- notification helpers -------------------------------------------
+
+    def _notify_risk(
+        self, event_type: str, reason: str, *, bot_stopped: bool
+    ) -> None:
+        """Send a risk event notification if a sender is configured."""
+        if self._notification_sender is None:
+            return
+        try:
+            from finbot.core.domain.events.risk_event_triggered import (
+                RiskEventTriggered,
+            )
+
+            event = RiskEventTriggered(
+                run_id=self._bot_run_id,
+                event_type=event_type,
+                reason=reason,
+                bot_stopped=bot_stopped,
+            )
+            self._notification_sender.notify_risk(event)  # type: ignore[attr-defined]
+        except Exception:
+            logger.debug("Failed to send risk notification", exc_info=True)
 
 
 # -- module-level helpers -----------------------------------------------------
