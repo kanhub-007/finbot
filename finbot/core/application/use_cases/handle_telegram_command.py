@@ -11,6 +11,13 @@ from finbot.core.application.dto.telegram_command_request import (
 from finbot.core.application.dto.telegram_command_result import (
     TelegramCommandResult,
 )
+from finbot.core.application.use_cases.telegram_helpers import (
+    _DEFAULT_INTERVALS,
+    _DEFAULT_SYMBOLS,
+    _escape_mdv2,
+    _get_symbols,
+    _parse_brackets,
+)
 from finbot.core.domain.entities.callback_data import CallbackData
 from finbot.core.domain.entities.telegram_chat import TelegramChat
 from finbot.core.domain.interfaces.bot_manager_port import BotManagerPort
@@ -1493,71 +1500,9 @@ class HandleTelegramCommand:
         )
 
 
-# ------------------------------------------------------------------
-# Module constants
-# ------------------------------------------------------------------
-
-_DEFAULT_SYMBOLS = ("BTC", "ETH", "SOL", "ARB", "DOGE")
-_DEFAULT_INTERVALS = ("1m", "5m", "15m", "1h", "4h", "1d")
-
-
-def _get_symbols(metadata_provider: object | None) -> tuple[str, ...]:
-    """Return available symbols from Hyperliquid, or defaults on failure."""
-    if metadata_provider is not None and hasattr(
-        metadata_provider, "list_symbols"
-    ):
-        try:
-            symbols = metadata_provider.list_symbols()
-            if symbols:
-                return tuple(symbols)
-        except Exception:
-            pass
-    return _DEFAULT_SYMBOLS
-
-# Characters that MUST be escaped in Telegram MarkdownV2.
-# See: https://core.telegram.org/bots/api#markdownv2-style
-_MDV2_ESCAPE_CHARS = str.maketrans({
-    '_': '\\_', '*': '\\*', '[': '\\[', ']': '\\]',
-    '(': '\\(', ')': '\\)', '~': '\\~', '`': '\\`',
-    '>': '\\>', '#': '\\#', '+': '\\+', '-': '\\-',
-    '=': '\\=', '|': '\\|', '{': '\\{', '}': '\\}',
-    '.': '\\.', '!': '\\!',
-})
-
-
-def _escape_mdv2(text: str) -> str:
-    """Escape special characters for Telegram MarkdownV2."""
-    return str(text).translate(_MDV2_ESCAPE_CHARS)
-
-
-def _parse_brackets(tokens: list[str]):
-    """Parse optional ``sl <price>`` and ``tp <price>`` from arg tokens.
-
-    Returns ``(sl_price, tp_price, error)``. Prices are Decimal or None.
-    ``error`` is a human-readable string when parsing fails, else None.
-    """
-    from decimal import Decimal, InvalidOperation
-
-    sl_price = None
-    tp_price = None
-    i = 0
-    while i < len(tokens):
-        tok = tokens[i].lower()
-        if tok in ("sl", "tp"):
-            if i + 1 >= len(tokens):
-                return None, None, f"{tok.upper()} requires a price"
-            try:
-                val = Decimal(tokens[i + 1])
-            except (InvalidOperation, ValueError):
-                return None, None, f"Invalid {tok.upper()} price"
-            if tok == "sl":
-                sl_price = val
-            else:
-                tp_price = val
-            i += 2
-            continue
-        return None, None, f"Unexpected token: {tokens[i]}"
-    return sl_price, tp_price, None
+# Command routing table (references handler methods defined above).
+# Helpers (_escape_mdv2, _get_symbols, _parse_brackets, _DEFAULT_*) live in
+# finbot.core.application.use_cases.telegram_helpers.
 
 _COMMAND_HANDLERS: dict[str, object] = {
     "/start": HandleTelegramCommand._handle_start,
