@@ -310,3 +310,55 @@ def test_cancel_all_bypasses_cache_to_cancel_real_orders() -> None:
         # bulk_cancel must have received the real oid from a fresh fetch.
         mock_exchange.bulk_cancel.assert_called_once_with([{"coin": "BTC", "oid": 42}])
         assert result["cancelled"] == 1
+
+
+# ---------------------------------------------------------------------------
+# S2 — get_balance() returns a WalletBalance (C2)
+# ---------------------------------------------------------------------------
+
+
+class TestGetBalance:
+    """C2: get_balance must return a WalletBalance, not raise NameError.
+
+    On ``main`` the file references ``WalletBalance`` in the return type
+    and body but never imports it — ``from __future__ import annotations``
+    masks the annotation, so the failure is deferred to call time.
+    """
+
+    def test_get_balance_returns_wallet_balance(self) -> None:
+        from finbot.core.domain.entities.wallet_balance import WalletBalance
+
+        mock_info = MagicMock()
+        mock_info.user_state.return_value = {
+            "marginSummary": {
+                "accountValue": "1250.00",
+                "initialMargin": "300.00",
+                "availableMargin": "950.00",
+            }
+        }
+        with patch.object(
+            HyperliquidExchangeGateway,
+            "_ensure_info",
+            return_value=mock_info,
+        ):
+            gw = HyperliquidExchangeGateway(private_key="0x" + "a" * 64)
+            bal = gw.get_balance()
+        assert isinstance(bal, WalletBalance)
+        assert bal.wallet_value == Decimal("1250.00")
+        assert bal.margin_used == Decimal("300.00")
+        assert bal.available == Decimal("950.00")
+
+    def test_get_balance_handles_missing_margin_summary(self) -> None:
+        """A malformed user_state with no marginSummary returns zeros, not a crash."""
+        mock_info = MagicMock()
+        mock_info.user_state.return_value = {}
+        with patch.object(
+            HyperliquidExchangeGateway,
+            "_ensure_info",
+            return_value=mock_info,
+        ):
+            gw = HyperliquidExchangeGateway(private_key="0x" + "a" * 64)
+            bal = gw.get_balance()
+        assert bal.wallet_value == Decimal("0")
+        assert bal.margin_used == Decimal("0")
+        assert bal.available == Decimal("0")

@@ -16,6 +16,7 @@ from finbot.core.domain.entities.position_direction import (
     PositionDirection,
 )
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+from finbot.core.domain.entities.wallet_balance import WalletBalance
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
