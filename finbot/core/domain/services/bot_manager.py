@@ -511,6 +511,46 @@ class BotManager:
             return {"status": "error", "message": str(exc)}
         return {"status": "ok", "response": response, "symbol": symbol}
 
+    def submit_manual_order_with_brackets(
+        self,
+        side,
+        size,
+        sl_price: Decimal | None = None,
+        tp_price: Decimal | None = None,
+    ) -> dict[str, Any]:
+        """Submit a manual entry then attach SL/TP triggers in one call.
+
+        Atomic intent: if the entry is rejected, no SL/TP are placed. If the
+        entry succeeds but SL/TP attachment fails, the entry is kept and the
+        failures are reported as warnings (do not roll back a filled entry).
+        """
+        entry_result = self.submit_manual_order(side, size)
+        if entry_result.get("status") != "ok":
+            return entry_result
+
+        symbol = entry_result.get("symbol", "")
+        warnings: list[str] = []
+        if sl_price is not None:
+            sl_result = self.attach_stop_loss(sl_price)
+            if sl_result.get("status") != "ok":
+                warnings.append(
+                    f"SL not attached: {sl_result.get('message', 'unknown')}"
+                )
+        if tp_price is not None:
+            tp_result = self.attach_take_profit(tp_price)
+            if tp_result.get("status") != "ok":
+                warnings.append(
+                    f"TP not attached: {tp_result.get('message', 'unknown')}"
+                )
+        result: dict[str, Any] = {
+            "status": "ok",
+            "symbol": symbol,
+            "response": entry_result.get("response"),
+        }
+        if warnings:
+            result["warnings"] = warnings
+        return result
+
     def _safe_price(self, symbol: str) -> Decimal | None:
         """Best-effort current price; None if unavailable."""
         try:

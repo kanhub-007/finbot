@@ -241,6 +241,11 @@ class FakeBotManager:
     def submit_manual_order(self, side, size) -> dict:
         return {"status": "ok", "response": {"order_id": "fake"}}
 
+    def submit_manual_order_with_brackets(
+        self, side, size, sl_price=None, tp_price=None
+    ) -> dict:
+        return {"status": "ok", "response": {"order_id": "fake"}}
+
     def close_active_position(self) -> dict[str, str]:
         return {"status": "ok"}
 

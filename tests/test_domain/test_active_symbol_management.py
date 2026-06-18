@@ -968,3 +968,87 @@ class TestConfigSaveProfiles:
         assert result["status"] == "ok"
         assert "scalping" in result["profiles"]
         assert "swing" in result["profiles"]
+
+
+class TestBracketOrders:
+    """Scenario: /long 0.01 sl 94000 tp 97000 — position + SL + TP in one call."""
+
+    def _long_manager_after(self):
+        """After a bracket order: position should be open, SL and TP placed."""
+        from finbot.core.domain.entities.position_direction import PositionDirection
+        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+
+        # The exchange will report an open long AFTER the entry fills.
+        exchange = FakeExchangeGateway()
+        exchange.price_to_report = Decimal("95000")
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+        manager.update_bot_config("max_position", "100000")
+        return manager, exchange
+
+    def test_bracket_long_places_entry_sl_and_tp(self):
+        """/long 0.01 sl 94000 tp 97000 places 3 orders."""
+        from finbot.core.domain.entities.order_side import OrderSide
+        from finbot.core.domain.entities.position_direction import PositionDirection
+        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+
+        manager, exchange = self._long_manager_after()
+        # After entry, the exchange reports a long position so SL/TP attach.
+        # Stub the position to appear after the first submit.
+        original_submit = exchange.submit_order
+
+        def submit(intent):
+            result = original_submit(intent)
+            if not intent.reduce_only:
+                exchange._position = PositionSnapshot(
+                    symbol="BTC",
+                    direction=PositionDirection.LONG,
+                    size=Decimal("0.01"),
+                    entry_price=Decimal("95000"),
+                )
+            return result
+
+        exchange.submit_order = submit
+
+        result = manager.submit_manual_order_with_brackets(
+            OrderSide.BUY,
+            Decimal("0.01"),
+            sl_price=Decimal("94000"),
+            tp_price=Decimal("97000"),
+        )
+
+        assert result["status"] == "ok"
+        # Entry + SL + TP = 3 intents
+        assert len(exchange.submitted_intents) == 3
+        cloids = [i.cloid for i in exchange.submitted_intents]
+        assert "SL:BTC" in cloids
+        assert "TP:BTC" in cloids
+
+    def test_bracket_without_sl_tp_falls_back_to_plain_entry(self):
+        """No sl/tp kwargs → behaves like submit_manual_order (1 order)."""
+        from finbot.core.domain.entities.order_side import OrderSide
+
+        manager, exchange = self._long_manager_after()
+        result = manager.submit_manual_order_with_brackets(
+            OrderSide.BUY, Decimal("0.01")
+        )
+        assert result["status"] == "ok"
+        assert len(exchange.submitted_intents) == 1
+
+    def test_bracket_rejected_if_entry_blocked(self):
+        """If the entry itself is blocked, no SL/TP placed."""
+        from finbot.core.domain.entities.order_side import OrderSide
+
+        manager, exchange = self._long_manager_after()
+        # max_position too small for 0.01 * 95000 = 950
+        manager.update_bot_config("max_position", "10")
+
+        result = manager.submit_manual_order_with_brackets(
+            OrderSide.BUY,
+            Decimal("0.01"),
+            sl_price=Decimal("94000"),
+            tp_price=Decimal("97000"),
+        )
+
+        assert result["status"] == "rejected"
+        assert exchange.submitted_intents == []

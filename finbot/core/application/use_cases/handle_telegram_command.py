@@ -1181,7 +1181,7 @@ class HandleTelegramCommand:
         return await self._manual_entry(request, "sell")
 
     async def _manual_entry(self, request, side):
-        """Shared /long + /short flow: validate size, submit, reply."""
+        """Shared /long + /short flow: parse size + optional sl/tp brackets."""
         from decimal import Decimal
 
         from finbot.core.domain.entities.order_side import OrderSide
@@ -1196,7 +1196,8 @@ class HandleTelegramCommand:
         if not args:
             cmd = "long" if side == "buy" else "short"
             return TelegramCommandResult(
-                text=f"Usage: /{cmd} SIZE", parse_mode="MarkdownV2"
+                text=f"Usage: /{cmd} SIZE \\[sl PRICE\\] \\[tp PRICE\\]",
+                parse_mode="MarkdownV2",
             )
         try:
             size = Decimal(args[0])
@@ -1204,17 +1205,40 @@ class HandleTelegramCommand:
             return TelegramCommandResult(
                 text="Invalid size\\.", parse_mode="MarkdownV2"
             )
+        # Optional bracket orders: "sl <price>" and "tp <price>"
+        sl_price, tp_price, parse_err = _parse_brackets(args[1:])
+        if parse_err is not None:
+            return TelegramCommandResult(
+                text=f"\u274c {_escape_mdv2(parse_err)}", parse_mode="MarkdownV2"
+            )
         order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
-        result = self._bot_manager.submit_manual_order(order_side, size)
+        if sl_price is not None or tp_price is not None:
+            result = self._bot_manager.submit_manual_order_with_brackets(
+                order_side, size, sl_price=sl_price, tp_price=tp_price
+            )
+        else:
+            result = self._bot_manager.submit_manual_order(order_side, size)
         if result.get("status") != "ok":
             return TelegramCommandResult(
                 text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
                 parse_mode="MarkdownV2",
             )
+        extras = []
+        if sl_price is not None:
+            extras.append(f"SL={_escape_mdv2(str(sl_price))}")
+        if tp_price is not None:
+            extras.append(f"TP={_escape_mdv2(str(tp_price))}")
+        extra_str = f" \\[{_escape_mdv2(' '.join(extras))}\\]" if extras else ""
+        warnings = result.get("warnings") or []
+        warn_text = ""
+        if warnings:
+            warn_text = "\n" + "\n".join(
+                f"\u26a0\ufe0f {_escape_mdv2(w)}" for w in warnings
+            )
         return TelegramCommandResult(
             text=(
                 f"\u2705 {_escape_mdv2(active.symbol)} "
-                f"{_escape_mdv2(str(size))} @ market"
+                f"{_escape_mdv2(str(size))} @ market{extra_str}{warn_text}"
             ),
             parse_mode="MarkdownV2",
         )
@@ -1504,6 +1528,36 @@ _MDV2_ESCAPE_CHARS = str.maketrans({
 def _escape_mdv2(text: str) -> str:
     """Escape special characters for Telegram MarkdownV2."""
     return str(text).translate(_MDV2_ESCAPE_CHARS)
+
+
+def _parse_brackets(tokens: list[str]):
+    """Parse optional ``sl <price>`` and ``tp <price>`` from arg tokens.
+
+    Returns ``(sl_price, tp_price, error)``. Prices are Decimal or None.
+    ``error`` is a human-readable string when parsing fails, else None.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    sl_price = None
+    tp_price = None
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i].lower()
+        if tok in ("sl", "tp"):
+            if i + 1 >= len(tokens):
+                return None, None, f"{tok.upper()} requires a price"
+            try:
+                val = Decimal(tokens[i + 1])
+            except (InvalidOperation, ValueError):
+                return None, None, f"Invalid {tok.upper()} price"
+            if tok == "sl":
+                sl_price = val
+            else:
+                tp_price = val
+            i += 2
+            continue
+        return None, None, f"Unexpected token: {tokens[i]}"
+    return sl_price, tp_price, None
 
 _COMMAND_HANDLERS: dict[str, object] = {
     "/start": HandleTelegramCommand._handle_start,

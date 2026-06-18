@@ -54,6 +54,14 @@ class BotManagerPort(Protocol):
 
     def submit_manual_order(self, side: Any, size: Decimal) -> dict[str, Any]: ...
 
+    def submit_manual_order_with_brackets(
+        self,
+        side: Any,
+        size: Decimal,
+        sl_price: Decimal | None = None,
+        tp_price: Decimal | None = None,
+    ) -> dict[str, Any]: ...
+
     def close_active_position(self) -> dict[str, str]: ...
 
     def clear_all(self) -> dict[str, Any]: ...
