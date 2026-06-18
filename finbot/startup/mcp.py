@@ -7,6 +7,7 @@ Follows the same pattern as finbar and kapsula.
 import logging
 import os
 import time
+from collections.abc import Callable
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
@@ -24,12 +25,21 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-def _make_runtime_factory(settings: Settings, notification_sender=None):
+def _make_runtime_factory(
+    settings: Settings,
+    telegram_ref: Callable[[], object | None] | None = None,
+):
     """Return a callable that creates a LiveTradingRuntimeUseCase.
 
     The callable accepts the same kwargs that BotManager.start() passes
     and delegates to ``create_live_trading_runtime_use_case`` in the
     composition root.
+
+    ``telegram_ref`` is a *callable* (not a captured value) so the
+    dispatcher is resolved **lazily**, at factory-call time. Telegram
+    starts *after* the BotManager is constructed; a snapshot of
+    ``notification_sender`` at construction time would always be ``None``
+    and silently drop every runtime-emitted risk event (C3).
     """
 
     def factory(
@@ -40,6 +50,11 @@ def _make_runtime_factory(settings: Settings, notification_sender=None):
         live_data: bool = True,
         warmup_bars: int = 100,
     ):
+        notification_sender = None
+        if telegram_ref is not None:
+            telegram = telegram_ref()
+            if telegram is not None:
+                notification_sender = telegram.notification_dispatcher
         return create_live_trading_runtime_use_case(
             strategy_path=strategy_path,
             symbol=symbol,
@@ -62,13 +77,12 @@ def create_server() -> FastMCP:
     repo = create_bot_state_repository(migrate=True)
     exchange = create_exchange_gateway(settings)
 
-    # Telegram integration (optional, background thread)
+    # Telegram integration (optional, background thread).
+    # ``telegram_holder`` lets the runtime factory resolve the dispatcher
+    # lazily — Telegram starts after the BotManager below is built.
+    telegram_holder: list[object | None] = [None]
     telegram = None
-    notification_sender = None
     if settings.telegram_enabled:
-        from finbot.core.application.use_cases.live_trading_runtime import (
-            LiveTradingRuntimeUseCase,
-        )
         from finbot.infrastructure.repositories.sqlite_telegram_chat_repository import (
             SqliteTelegramChatRepository,
         )
@@ -76,16 +90,19 @@ def create_server() -> FastMCP:
 
         chat_repo = SqliteTelegramChatRepository(settings.database_path)
         telegram = create_telegram_control_plane(settings, chat_repo=chat_repo)
+        telegram_holder[0] = telegram
 
-    from finbot.infrastructure.adapters.hyperliquid_metadata_provider import (
-        HyperliquidMetadataProvider,
-    )
     from finbot.infrastructure.adapters.dotenv_config_writer import (
         DotEnvConfigWriter,
     )
+    from finbot.infrastructure.adapters.hyperliquid_metadata_provider import (
+        HyperliquidMetadataProvider,
+    )
 
     bot_manager = BotManager(
-        runtime_factory=_make_runtime_factory(settings, notification_sender),
+        runtime_factory=_make_runtime_factory(
+            settings, telegram_ref=lambda: telegram_holder[0]
+        ),
         repository=repo,
         exchange=exchange,
         settings=settings,
@@ -132,7 +149,6 @@ def create_server() -> FastMCP:
         telegram.attach_bot_manager(bot_manager)
         telegram.start_in_background()
         server._finbot_telegram = telegram  # type: ignore[attr-defined]
-        notification_sender = telegram.notification_dispatcher
         logger.info(
             "Telegram bot started (allowed users: %d)",
             len(settings.telegram_allowed_user_ids),
