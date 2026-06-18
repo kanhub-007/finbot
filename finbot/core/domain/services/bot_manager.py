@@ -26,6 +26,9 @@ from finbot.core.domain.entities.order_response_record import (
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
 from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
+from finbot.core.domain.entities.strategy_execution_config import (
+    StrategyExecutionConfig,
+)
 from finbot.core.domain.entities.wallet_balance import WalletBalance
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
@@ -141,12 +144,27 @@ class BotManager:
         mode: str,
         warmup_bars: int = 100,
         live_trading_ack: bool = False,
+        execution_config: StrategyExecutionConfig | None = None,
     ) -> dict[str, str]:
         """Start a bot in a background thread.
+
+        When ``execution_config`` is supplied (parsed from the strategy's
+        optional ``execution`` block), leverage is synced to the exchange
+        before the runtime starts.
 
         Returns a dict with ``status`` ("running" or "rejected") and
         ``bot_run_id`` (set on success) or ``message`` (on rejection).
         """
+        # Sync leverage from strategy execution block (Slice 2). Done OUTSIDE
+        # the lock because set_leverage acquires it and Lock is non-reentrant.
+        if execution_config is not None:
+            lev_result = self.set_leverage(
+                execution_config.leverage,
+                execution_config.margin_mode,
+            )
+            if lev_result.get("status") == "rejected":
+                return lev_result
+
         with self._lock:
             error = self._guard_no_conflict()
             if error:

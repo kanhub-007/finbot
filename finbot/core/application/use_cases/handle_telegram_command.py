@@ -803,16 +803,39 @@ class HandleTelegramCommand:
         else:
             return self._run_cb_int(session, session.interval or "1h")
 
+    def _read_execution_config(self, strategy_path: str):
+        """Parse the optional execution block from a strategy file.
+
+        Returns a StrategyExecutionConfig or None. Best-effort: file read or
+        parse errors return None so a malformed block never blocks startup.
+        """
+        from pathlib import Path
+
+        from finbot.core.domain.services.strategy_execution_parser import (
+            parse_strategy_execution,
+        )
+
+        try:
+            content = Path(strategy_path).read_text(encoding="utf-8")
+        except Exception:
+            return None
+        try:
+            return parse_strategy_execution(content)
+        except Exception:
+            return None
+
     def _start_bot_from_session(
         self, session, mode: str
     ) -> TelegramCommandResult:
         """Call bot_manager.start() with the accumulated session state."""
+        exec_config = self._read_execution_config(session.strategy_path or "")
         result = self._bot_manager.start(
             strategy_path=session.strategy_path or "",
             symbol=session.symbol or "",
             interval=session.interval or "1h",
             mode=mode,
             live_trading_ack=self._live_trading_ack,
+            execution_config=exec_config,
         )
 
         if result.get("status") != "running":
