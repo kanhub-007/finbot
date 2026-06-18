@@ -211,6 +211,57 @@ class FakeBotManager:
     def get_bot_run(self, run_id: str) -> object | None:
         return None
 
+    # -- trading-control spec methods (recording fakes) --------------------
+
+    def activate_symbol(self, symbol: str) -> dict[str, str]:
+        from finbot.core.domain.entities.active_symbol_state import ActiveSymbolState
+
+        self._active_symbol = ActiveSymbolState(symbol=symbol)
+        return {"status": "active", "symbol": symbol, "leverage": "1", "margin_mode": "isolated"}
+
+    def get_active_symbol(self):
+        return getattr(self, "_active_symbol", None)
+
+    def get_active_price(self):
+        from decimal import Decimal
+
+        return Decimal("50000") if getattr(self, "_active_symbol", None) else None
+
+    def get_active_position(self):
+        return None
+
+    def get_balance(self):
+        return None
+
+    def set_leverage(self, leverage: int, margin_mode: str = "isolated") -> dict[str, str]:
+        return {"status": "ok", "leverage": str(leverage), "margin_mode": margin_mode}
+
+    def submit_manual_order(self, side, size) -> dict:
+        return {"status": "ok", "response": {"order_id": "fake"}}
+
+    def close_active_position(self) -> dict[str, str]:
+        return {"status": "ok"}
+
+    def clear_all(self) -> dict:
+        return {"status": "ok", "cancelled_orders": 0, "closed_positions": 0}
+
+    def attach_stop_loss(self, price) -> dict:
+        return {"status": "ok", "kind": "sl", "price": str(price)}
+
+    def attach_take_profit(self, price) -> dict:
+        return {"status": "ok", "kind": "tp", "price": str(price)}
+
+    def clear_risk_order(self, kind: str) -> dict:
+        return {"status": "ok", "kind": kind}
+
+    def get_bot_config(self):
+        from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
+
+        return RuntimeBotConfig()
+
+    def update_bot_config(self, key: str, value: str) -> dict[str, str]:
+        return {"status": "ok", "key": key, "value": value}
+
 
 # ---------------------------------------------------------------------------
 # FakeTelegramOutbox — fake Telegram bot that stores sent messages

@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 _HANDLED_COMMANDS = [
     "start", "whoami", "stop", "status", "run", "history",
     "panic", "help", "list", "mute", "unmute",
+    # trading-control spec
+    "symbol", "price", "balance", "leverage", "position",
+    "long", "short", "close", "clear", "sl", "tp", "config",
 ]
 
 

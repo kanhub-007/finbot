@@ -986,6 +986,332 @@ class HandleTelegramCommand:
             parse_mode="MarkdownV2",
         )
 
+    # ------------------------------------------------------------------
+    # trading-control spec handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_symbol(self, request: TelegramCommandRequest):
+        """Activate a symbol (reads exchange leverage, no overwrite)."""
+        args = request.args.strip()
+        if not args:
+            symbols = _get_symbols(getattr(self, "_metadata_provider", None))
+            if not symbols:
+                return TelegramCommandResult(text="No symbols available\\.")
+            return self._render_symbol_picker(symbols, page=0)
+        result = self._bot_manager.activate_symbol(args.split()[0].upper())
+        if result.get("status") != "active":
+            return TelegramCommandResult(
+                text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
+                parse_mode="MarkdownV2",
+            )
+        sym = result.get("symbol", args.upper())
+        lev = result.get("leverage", "1")
+        mm = result.get("margin_mode", "isolated")
+        return TelegramCommandResult(
+            text=(
+                f"\u2705 Active symbol: {_escape_mdv2(sym)}\n"
+                f"Leverage: {_escape_mdv2(lev)}x {_escape_mdv2(mm)}"
+            ),
+            parse_mode="MarkdownV2",
+        )
+
+    def _render_symbol_picker(self, symbols, page=0):
+        """Render a paginated symbol picker for /symbol with no args."""
+        per_page = 6
+        total = max(1, (len(symbols) + per_page - 1) // per_page)
+        page = max(0, min(page, total - 1))
+        start = page * per_page
+        page_syms = symbols[start : start + per_page]
+        rows = []
+        row = []
+        for sym in page_syms:
+            row.append({"text": sym, "callback_data": f"sympick:{sym}"})
+            if len(row) == 3:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+        nav = []
+        if page > 0:
+            nav.append({"text": "\u25c0 Prev", "callback_data": f"sympage:{page - 1}"})
+        nav.append({"text": f"{page + 1}/{total}", "callback_data": "none"})
+        if page < total - 1:
+            nav.append({"text": "Next \u25b6", "callback_data": f"sympage:{page + 1}"})
+        rows.append(nav)
+        return TelegramCommandResult(
+            text=f"Select symbol \\({len(symbols)} available\\):",
+            parse_mode="MarkdownV2",
+            reply_markup={"inline_keyboard": rows},
+        )
+
+    async def _handle_price(self, request: TelegramCommandRequest):
+        """Show the current price for the active symbol."""
+        active = self._bot_manager.get_active_symbol()
+        if active is None:
+            return TelegramCommandResult(
+                text="No symbol selected\\. Use /symbol first\\.",
+                parse_mode="MarkdownV2",
+            )
+        try:
+            price = self._bot_manager.get_active_price()
+        except Exception as exc:
+            return TelegramCommandResult(
+                text=f"Could not fetch price: {_escape_mdv2(str(exc))}",
+                parse_mode="MarkdownV2",
+            )
+        price_str = "?" if price is None else str(price)
+        return TelegramCommandResult(
+            text=f"{_escape_mdv2(active.symbol)}: {_escape_mdv2(price_str)} USD",
+            parse_mode="MarkdownV2",
+        )
+
+    async def _handle_balance(self, request: TelegramCommandRequest):
+        """Show wallet balance."""
+        bal = self._bot_manager.get_balance()
+        if bal is None:
+            return TelegramCommandResult(
+                text="Requires wallet connection\\.", parse_mode="MarkdownV2"
+            )
+        return TelegramCommandResult(
+            text=(
+                "\U0001f4b0 Account Balance\n"
+                f"Wallet: {_escape_mdv2(str(bal.wallet_value))} USD\n"
+                f"Margin used: {_escape_mdv2(str(bal.margin_used))} USD\n"
+                f"Available: {_escape_mdv2(str(bal.available))} USD"
+            ),
+            parse_mode="MarkdownV2",
+        )
+
+    async def _handle_leverage(self, request: TelegramCommandRequest):
+        """View or set leverage on the active symbol."""
+        active = self._bot_manager.get_active_symbol()
+        if active is None:
+            return TelegramCommandResult(
+                text="No symbol selected\\. Use /symbol first\\.",
+                parse_mode="MarkdownV2",
+            )
+        args = request.args.strip().split()
+        if not args:
+            return TelegramCommandResult(
+                text=(
+                    f"{_escape_mdv2(active.symbol)} "
+                    f"{_escape_mdv2(str(active.leverage))}x "
+                    f"{_escape_mdv2(active.margin_mode)}"
+                ),
+                parse_mode="MarkdownV2",
+            )
+        try:
+            lev = int(args[0])
+        except ValueError:
+            return TelegramCommandResult(
+                text="Leverage must be a number\\.", parse_mode="MarkdownV2"
+            )
+        mm = args[1].lower() if len(args) > 1 else "isolated"
+        result = self._bot_manager.set_leverage(lev, mm)
+        if result.get("status") != "ok":
+            return TelegramCommandResult(
+                text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
+                parse_mode="MarkdownV2",
+            )
+        return TelegramCommandResult(
+            text=(
+                f"Leverage set: {_escape_mdv2(active.symbol)} "
+                f"{_escape_mdv2(str(lev))}x {_escape_mdv2(mm)}"
+            ),
+            parse_mode="MarkdownV2",
+        )
+
+    async def _handle_position(self, request: TelegramCommandRequest):
+        """Show the current position + PnL for the active symbol."""
+        active = self._bot_manager.get_active_symbol()
+        if active is None:
+            return TelegramCommandResult(
+                text="No symbol selected\\. Use /symbol first\\.",
+                parse_mode="MarkdownV2",
+            )
+        pos = self._bot_manager.get_active_position()
+        if pos is None or pos.direction.value == "flat":
+            return TelegramCommandResult(
+                text=f"No open position on {_escape_mdv2(active.symbol)}\\.",
+                parse_mode="MarkdownV2",
+            )
+        entry = pos.entry_price if pos.entry_price is not None else "?"
+        return TelegramCommandResult(
+            text=(
+                f"\U0001f4ca Position: {_escape_mdv2(active.symbol)}\n"
+                f"Side: {_escape_mdv2(pos.direction.value.upper())}\n"
+                f"Size: {_escape_mdv2(str(pos.size))}\n"
+                f"Entry: {_escape_mdv2(str(entry))}\n"
+                f"PnL: {_escape_mdv2(str(pos.unrealized_pnl))} USD\n"
+                f"Leverage: {_escape_mdv2(str(active.leverage))}x "
+                f"{_escape_mdv2(active.margin_mode)}"
+            ),
+            parse_mode="MarkdownV2",
+        )
+
+    async def _handle_long(self, request: TelegramCommandRequest):
+        """Open a long position on the active symbol."""
+        return await self._manual_entry(request, "buy")
+
+    async def _handle_short(self, request: TelegramCommandRequest):
+        """Open a short position on the active symbol."""
+        return await self._manual_entry(request, "sell")
+
+    async def _manual_entry(self, request, side):
+        """Shared /long + /short flow: validate size, submit, reply."""
+        from decimal import Decimal
+
+        from finbot.core.domain.entities.order_side import OrderSide
+
+        active = self._bot_manager.get_active_symbol()
+        if active is None:
+            return TelegramCommandResult(
+                text="No symbol selected\\. Use /symbol first\\.",
+                parse_mode="MarkdownV2",
+            )
+        args = request.args.strip().split()
+        if not args:
+            cmd = "long" if side == "buy" else "short"
+            return TelegramCommandResult(
+                text=f"Usage: /{cmd} SIZE", parse_mode="MarkdownV2"
+            )
+        try:
+            size = Decimal(args[0])
+        except Exception:
+            return TelegramCommandResult(
+                text="Invalid size\\.", parse_mode="MarkdownV2"
+            )
+        order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
+        result = self._bot_manager.submit_manual_order(order_side, size)
+        if result.get("status") != "ok":
+            return TelegramCommandResult(
+                text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
+                parse_mode="MarkdownV2",
+            )
+        return TelegramCommandResult(
+            text=(
+                f"\u2705 {_escape_mdv2(active.symbol)} "
+                f"{_escape_mdv2(str(size))} @ market"
+            ),
+            parse_mode="MarkdownV2",
+        )
+
+    async def _handle_close(self, request: TelegramCommandRequest):
+        """Close the active position (reduce-only, clears SL/TP)."""
+        result = self._bot_manager.close_active_position()
+        if result.get("status") != "ok":
+            return TelegramCommandResult(
+                text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
+                parse_mode="MarkdownV2",
+            )
+        return TelegramCommandResult(
+            text="\u2705 Position closed\\.", parse_mode="MarkdownV2"
+        )
+
+    async def _handle_clear(self, request: TelegramCommandRequest):
+        """Cancel all orders + close all positions (idle only)."""
+        result = self._bot_manager.clear_all()
+        if result.get("status") != "ok":
+            return TelegramCommandResult(
+                text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
+                parse_mode="MarkdownV2",
+            )
+        return TelegramCommandResult(
+            text=(
+                "\U0001f9f9 Clear All\n"
+                f"Cancelled orders: {result.get('cancelled_orders', 0)}\n"
+                f"Closed positions: {result.get('closed_positions', 0)}"
+            ),
+            parse_mode="MarkdownV2",
+        )
+
+    async def _handle_sl(self, request: TelegramCommandRequest):
+        """Attach or clear a stop-loss trigger order."""
+        return await self._risk_order(request, "sl")
+
+    async def _handle_tp(self, request: TelegramCommandRequest):
+        """Attach or clear a take-profit trigger order."""
+        return await self._risk_order(request, "tp")
+
+    async def _risk_order(self, request, kind):
+        """Shared /sl + /tp flow."""
+        from decimal import Decimal
+
+        active = self._bot_manager.get_active_symbol()
+        if active is None:
+            return TelegramCommandResult(
+                text="No symbol selected\\. Use /symbol first\\.",
+                parse_mode="MarkdownV2",
+            )
+        arg = request.args.strip()
+        if arg.lower() == "clear":
+            result = self._bot_manager.clear_risk_order(kind)
+            if result.get("status") != "ok":
+                return TelegramCommandResult(
+                    text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
+                    parse_mode="MarkdownV2",
+                )
+            return TelegramCommandResult(
+                text=f"\u2705 {kind.upper()} cleared\\.", parse_mode="MarkdownV2"
+            )
+        if not arg:
+            return TelegramCommandResult(
+                text=f"Usage: /{kind} PRICE  \\(or /{kind} clear\\)",
+                parse_mode="MarkdownV2",
+            )
+        try:
+            price = Decimal(arg)
+        except Exception:
+            return TelegramCommandResult(
+                text="Invalid price\\.", parse_mode="MarkdownV2"
+            )
+        method = (
+            self._bot_manager.attach_stop_loss
+            if kind == "sl"
+            else self._bot_manager.attach_take_profit
+        )
+        result = method(price)
+        if result.get("status") != "ok":
+            return TelegramCommandResult(
+                text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
+                parse_mode="MarkdownV2",
+            )
+        return TelegramCommandResult(
+            text=f"\u2705 {kind.upper()} set @ {_escape_mdv2(str(price))}\\.",
+            parse_mode="MarkdownV2",
+        )
+
+    async def _handle_config(self, request: TelegramCommandRequest):
+        """View or adjust runtime config."""
+        cfg = self._bot_manager.get_bot_config()
+        args = request.args.strip().split(maxsplit=1)
+        if not args:
+            return TelegramCommandResult(
+                text=(
+                    "\u2699\ufe0f Configuration\n"
+                    f"max_position: {_escape_mdv2(str(cfg.max_position_usd))} USD\n"
+                    f"daily_loss: {_escape_mdv2(str(cfg.max_daily_loss_usd))} USD\n"
+                    f"max_orders: {_escape_mdv2(str(cfg.max_open_orders))}\n"
+                    f"stale_data: {_escape_mdv2(str(cfg.stale_data_seconds))}s\n"
+                ),
+                parse_mode="MarkdownV2",
+            )
+        key = args[0]
+        if len(args) < 2:
+            return TelegramCommandResult(
+                text=f"Usage: /config {key} VALUE", parse_mode="MarkdownV2"
+            )
+        result = self._bot_manager.update_bot_config(key, args[1])
+        if result.get("status") != "ok":
+            return TelegramCommandResult(
+                text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
+                parse_mode="MarkdownV2",
+            )
+        return TelegramCommandResult(
+            text=f"\u2705 {_escape_mdv2(key)} = {_escape_mdv2(args[1])}",
+            parse_mode="MarkdownV2",
+        )
+
 
 # ------------------------------------------------------------------
 # Module constants
@@ -1034,4 +1360,17 @@ _COMMAND_HANDLERS: dict[str, object] = {
     "/panic": HandleTelegramCommand._handle_panic,
     "/mute": HandleTelegramCommand._handle_mute,
     "/unmute": HandleTelegramCommand._handle_unmute,
+    # -- trading-control spec --
+    "/symbol": HandleTelegramCommand._handle_symbol,
+    "/price": HandleTelegramCommand._handle_price,
+    "/balance": HandleTelegramCommand._handle_balance,
+    "/leverage": HandleTelegramCommand._handle_leverage,
+    "/position": HandleTelegramCommand._handle_position,
+    "/long": HandleTelegramCommand._handle_long,
+    "/short": HandleTelegramCommand._handle_short,
+    "/close": HandleTelegramCommand._handle_close,
+    "/clear": HandleTelegramCommand._handle_clear,
+    "/sl": HandleTelegramCommand._handle_sl,
+    "/tp": HandleTelegramCommand._handle_tp,
+    "/config": HandleTelegramCommand._handle_config,
 }

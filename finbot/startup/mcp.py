@@ -77,6 +77,10 @@ def create_server() -> FastMCP:
         chat_repo = SqliteTelegramChatRepository(settings.database_path)
         telegram = create_telegram_control_plane(settings, chat_repo=chat_repo)
 
+    from finbot.infrastructure.adapters.hyperliquid_metadata_provider import (
+        HyperliquidMetadataProvider,
+    )
+
     bot_manager = BotManager(
         runtime_factory=_make_runtime_factory(settings, notification_sender),
         repository=repo,
@@ -84,6 +88,7 @@ def create_server() -> FastMCP:
         settings=settings,
         create_bot_config=lambda s: create_bot_config(s),
         startup_time=time.time(),
+        metadata_provider=HyperliquidMetadataProvider(),
     )
 
     server = FastMCP(

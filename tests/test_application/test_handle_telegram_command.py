@@ -773,3 +773,110 @@ class TestMuteUnmute:
         assert chat is not None
         assert chat.notifications_enabled is True
         assert "unmuted" in result.text.lower()
+
+
+class TestSymbolCommand:
+    """/symbol activates a symbol (trading-control spec)."""
+
+    @pytest.mark.asyncio
+    async def test_symbol_activates_and_replies(self):
+        from tests.fakes_telegram import FakeBotManager
+
+        fake_manager = FakeBotManager()
+        use_case = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({1}),
+        )
+
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1,
+            )
+        )
+
+        assert "BTC" in result.text
+        assert fake_manager.get_active_symbol() is not None
+        assert fake_manager.get_active_symbol().symbol == "BTC"
+
+    @pytest.mark.asyncio
+    async def test_symbol_no_args_shows_picker(self):
+        from tests.fakes_telegram import FakeBotManager
+
+        fake_manager = FakeBotManager()
+        use_case = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({1}),
+        )
+
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/symbol", args="", chat_id=1, user_id=1, message_id=1,
+            )
+        )
+
+        # No crash; returns some guidance text
+        assert result.text
+
+
+class TestTradingControlHandlers:
+    """Smoke tests for the trading-control command handlers (wiring)."""
+
+    def _use_case(self):
+        from tests.fakes_telegram import FakeBotManager
+
+        return HandleTelegramCommand(
+            bot_manager=FakeBotManager(),
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({1}),
+        )
+
+    @pytest.mark.asyncio
+    async def test_config_view_returns_keys(self):
+        uc = self._use_case()
+        result = await uc.execute(
+            TelegramCommandRequest(command="/config", args="", chat_id=1, user_id=1, message_id=1)
+        )
+        assert "max_position" in result.text
+
+    @pytest.mark.asyncio
+    async def test_config_update_returns_ok(self):
+        uc = self._use_case()
+        result = await uc.execute(
+            TelegramCommandRequest(command="/config", args="max_position 500", chat_id=1, user_id=1, message_id=1)
+        )
+        assert "500" in result.text
+
+    @pytest.mark.asyncio
+    async def test_leverage_requires_symbol(self):
+        uc = self._use_case()
+        result = await uc.execute(
+            TelegramCommandRequest(command="/leverage", args="5", chat_id=1, user_id=1, message_id=1)
+        )
+        assert "symbol" in result.text.lower()
+
+    @pytest.mark.asyncio
+    async def test_long_requires_symbol(self):
+        uc = self._use_case()
+        result = await uc.execute(
+            TelegramCommandRequest(command="/long", args="0.01", chat_id=1, user_id=1, message_id=1)
+        )
+        assert "symbol" in result.text.lower()
+
+    @pytest.mark.asyncio
+    async def test_symbol_then_price(self):
+        uc = self._use_case()
+        await uc.execute(
+            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+        )
+        result = await uc.execute(
+            TelegramCommandRequest(command="/price", args="", chat_id=1, user_id=1, message_id=1)
+        )
+        assert "BTC" in result.text
