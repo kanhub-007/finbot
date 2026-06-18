@@ -269,6 +269,63 @@ class TestGetPosition:
         assert position.direction == PositionDirection.FLAT
 
 
+class TestRuntimeConfig:
+    """Scenario 13: /config views and adjusts runtime settings."""
+
+    def test_default_config_has_safe_defaults(self):
+        """Fresh manager exposes safe default risk limits."""
+        manager = _make_manager()
+        cfg = manager.get_bot_config()
+
+        assert cfg.max_position_usd == Decimal("100")
+        assert cfg.max_daily_loss_usd == Decimal("25")
+        assert cfg.max_open_orders == 3
+        assert cfg.stale_data_seconds == 120
+
+    def test_update_max_position_takes_effect_immediately(self):
+        """update_bot_config('max_position', '500') updates the live config."""
+        manager = _make_manager()
+
+        result = manager.update_bot_config("max_position", "500")
+
+        assert result["status"] == "ok"
+        assert manager.get_bot_config().max_position_usd == Decimal("500")
+
+    def test_update_unknown_key_rejected(self):
+        """Unknown key → rejected with available keys listed."""
+        manager = _make_manager()
+
+        result = manager.update_bot_config("nonsense", "1")
+
+        assert result["status"] == "rejected"
+        assert "max_position" in result["message"]
+
+    def test_update_non_numeric_rejected(self):
+        """Non-numeric value for numeric key → rejected."""
+        manager = _make_manager()
+
+        result = manager.update_bot_config("max_position", "abc")
+
+        assert result["status"] == "rejected"
+        assert "number" in result["message"].lower()
+
+    def test_update_negative_rejected(self):
+        """Negative value → rejected."""
+        manager = _make_manager()
+
+        result = manager.update_bot_config("max_position", "-100")
+
+        assert result["status"] == "rejected"
+
+    def test_update_daily_loss_key(self):
+        """'daily_loss' is the short key for max_daily_loss_usd."""
+        manager = _make_manager()
+
+        manager.update_bot_config("daily_loss", "50")
+
+        assert manager.get_bot_config().max_daily_loss_usd == Decimal("50")
+
+
 class TestBotStartsIdle:
     """Scenario 1: Bot starts fully idle — no symbol, no strategy, no position."""
 

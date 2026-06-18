@@ -25,6 +25,7 @@ from finbot.core.domain.entities.order_response_record import (
 )
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
+from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
 from finbot.core.domain.entities.wallet_balance import WalletBalance
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
@@ -116,6 +117,8 @@ class BotManager:
         self._lock = threading.Lock()
         # Active symbol state (None = fully idle). See trading-control spec.
         self._active_symbol: ActiveSymbolState | None = None
+        # Mutable runtime config shared by strategy + manual gates.
+        self._runtime_config = RuntimeBotConfig()
 
     # -- public lifecycle ----------------------------------------------------
 
@@ -299,6 +302,24 @@ class BotManager:
         if self._exchange is None:
             return None
         return self._exchange.get_balance()
+
+    def get_bot_config(self) -> RuntimeBotConfig:
+        """Return the mutable runtime config (shared with risk gates)."""
+        return self._runtime_config
+
+    def update_bot_config(self, key: str, value: str) -> dict[str, str]:
+        """Update a runtime config key by short name (max_position, etc.)."""
+        try:
+            self._runtime_config.set(key, value)
+        except KeyError:
+            available = ", ".join(RuntimeBotConfig.AVAILABLE_KEYS)
+            return {
+                "status": "rejected",
+                "message": f"Unknown setting. Available: {available}",
+            }
+        except ValueError as exc:
+            return {"status": "rejected", "message": str(exc)}
+        return {"status": "ok", "key": key, "value": value}
 
     def set_leverage(
         self, leverage: int, margin_mode: str = "isolated"
