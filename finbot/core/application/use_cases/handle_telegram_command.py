@@ -144,18 +144,18 @@ class HandleTelegramCommand:
         if not self._allowed_users:
             return TelegramCommandResult(
                 text="\u26d4 *Telegram control not configured\\.*\n\n"
-                     "No authorized users are set in "
-                     "FINBOT_TELEGRAM_ALLOWED_USERS\\.\n"
-                     "Send /whoami to discover your Telegram user ID, "
-                     "then add it to your environment configuration\\.",
+                "No authorized users are set in "
+                "FINBOT_TELEGRAM_ALLOWED_USERS\\.\n"
+                "Send /whoami to discover your Telegram user ID, "
+                "then add it to your environment configuration\\.",
                 parse_mode="MarkdownV2",
             )
 
         if request.user_id not in self._allowed_users:
             return TelegramCommandResult(
                 text="\u26d4 *Unauthorized\\.*\n"
-                     "You are not authorized to control this trading bot\\.\n"
-                     "Contact the bot administrator to be added\\.",
+                "You are not authorized to control this trading bot\\.\n"
+                "Contact the bot administrator to be added\\.",
                 parse_mode="MarkdownV2",
             )
 
@@ -165,9 +165,7 @@ class HandleTelegramCommand:
     # Handlers — Commands
     # ------------------------------------------------------------------
 
-    def _handle_whoami(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
+    def _handle_whoami(self, request: TelegramCommandRequest) -> TelegramCommandResult:
         """Return the user's Telegram user_id and chat_id.
 
         Always allowed — no authorization check. This is how operators
@@ -316,13 +314,9 @@ class HandleTelegramCommand:
 
         if last_run is not None:
             lines.append("")
+            lines.append("*Last Run:* " + _escape_mdv2(str(last_run.get("run_id", ""))))
             lines.append(
-                "*Last Run:* "
-                + _escape_mdv2(str(last_run.get("run_id", "")))
-            )
-            lines.append(
-                "Strategy: "
-                + _escape_mdv2(str(last_run.get("strategy_name", "")))
+                "Strategy: " + _escape_mdv2(str(last_run.get("strategy_name", "")))
             )
             symbol = _escape_mdv2(str(last_run.get("symbol", "")))
             interval = _escape_mdv2(str(last_run.get("interval", "")))
@@ -401,7 +395,7 @@ class HandleTelegramCommand:
         if not strategies:
             return TelegramCommandResult(
                 text="No strategies found\\. Place \\\\.yaml files "
-                     "in the strategies directory\\.",
+                "in the strategies directory\\.",
                 parse_mode="MarkdownV2",
             )
 
@@ -418,9 +412,7 @@ class HandleTelegramCommand:
         displayed = strategies[:10]
         buttons = []
         for i, s in enumerate(displayed):
-            buttons.append(
-                {"text": s, "callback_data": f"run:{sid}:strat:{i}"}
-            )
+            buttons.append({"text": s, "callback_data": f"run:{sid}:strat:{i}"})
         keyboard_rows = []
         for i in range(0, len(buttons), 2):
             keyboard_rows.append(buttons[i : i + 2])
@@ -502,9 +494,7 @@ class HandleTelegramCommand:
             sym = _escape_mdv2(str(getattr(run, "symbol", "")))
             iv = _escape_mdv2(str(getattr(run, "interval", "")))
             md = _escape_mdv2(str(getattr(run, "mode", "")))
-            lines.append(
-                f"{i}\\. {r_id} \u2014 {name} / {sym} / {iv}\n{md}"
-            )
+            lines.append(f"{i}\\. {r_id} \u2014 {name} / {sym} / {iv}\n{md}")
 
         return TelegramCommandResult(
             text="\n".join(lines),
@@ -559,9 +549,7 @@ class HandleTelegramCommand:
             # Idle — show symbol picker
             buttons = []
             for sym in _get_symbols(self._metadata_provider)[:30]:
-                buttons.append(
-                    {"text": sym, "callback_data": f"panic:sym:{sym}"}
-                )
+                buttons.append({"text": sym, "callback_data": f"panic:sym:{sym}"})
             keyboard_rows = []
             for i in range(0, len(buttons), 3):
                 keyboard_rows.append(buttons[i : i + 3])
@@ -589,8 +577,8 @@ class HandleTelegramCommand:
         data.action = session_id, data.value = action, data.subvalue = value
         """
         session_id = data.action  # parts[1]
-        action = data.value       # parts[2]
-        value = data.subvalue     # parts[3]
+        action = data.value  # parts[2]
+        value = data.subvalue  # parts[3]
 
         session = self._session_store.get(session_id)
         if session is None:
@@ -621,9 +609,7 @@ class HandleTelegramCommand:
                 text="Invalid selection, please start again with /run\\."
             )
 
-    def _render_symbol_page(
-        self, session, page: int = 0
-    ) -> TelegramCommandResult:
+    def _render_symbol_page(self, session, page: int = 0) -> TelegramCommandResult:
         """Render a paginated symbol picker."""
         _SYMBOLS_PER_PAGE = 6
         symbols = _get_symbols(self._metadata_provider)
@@ -638,9 +624,7 @@ class HandleTelegramCommand:
         keyboard_rows = []
         row = []
         for sym in page_symbols:
-            row.append(
-                {"text": sym, "callback_data": f"run:{sid}:sym:{sym}"}
-            )
+            row.append({"text": sym, "callback_data": f"run:{sid}:sym:{sym}"})
             if len(row) == 3:
                 keyboard_rows.append(row)
                 row = []
@@ -653,9 +637,7 @@ class HandleTelegramCommand:
             nav_row.append(
                 {"text": "\u25c0 Prev", "callback_data": f"run:{sid}:page:{page - 1}"}
             )
-        nav_row.append(
-            {"text": f"{page + 1}/{total_pages}", "callback_data": "none"}
-        )
+        nav_row.append({"text": f"{page + 1}/{total_pages}", "callback_data": "none"})
         if page < total_pages - 1:
             nav_row.append(
                 {"text": "Next \u25b6", "callback_data": f"run:{sid}:page:{page + 1}"}
@@ -663,9 +645,9 @@ class HandleTelegramCommand:
         keyboard_rows.append(nav_row)
 
         # Search hint row
-        keyboard_rows.append([
-            {"text": "\u2315 Tip: /run BTC skips this step", "callback_data": "none"}
-        ])
+        keyboard_rows.append(
+            [{"text": "\u2315 Tip: /run BTC skips this step", "callback_data": "none"}]
+        )
 
         return TelegramCommandResult(
             text=(
@@ -676,9 +658,7 @@ class HandleTelegramCommand:
             reply_markup={"inline_keyboard": keyboard_rows},
         )
 
-    def _run_cb_strat(
-        self, session, idx_str: str
-    ) -> TelegramCommandResult:
+    def _run_cb_strat(self, session, idx_str: str) -> TelegramCommandResult:
         """User selected a strategy — show symbol picker."""
         strategies = self._strategy_dir.list_strategies()
         try:
@@ -686,13 +666,10 @@ class HandleTelegramCommand:
             strategy_name = strategies[idx]
         except (ValueError, IndexError):
             return TelegramCommandResult(
-                text="Invalid strategy selection. "
-                     "Please start again with /run\\."
+                text="Invalid strategy selection. " "Please start again with /run\\."
             )
 
-        session.strategy_path = self._strategy_dir.get_strategy_path(
-            strategy_name
-        )
+        session.strategy_path = self._strategy_dir.get_strategy_path(strategy_name)
         self._session_store.save(session)
 
         # If symbol was pre-filled via "/run BTC", skip the picker
@@ -701,9 +678,7 @@ class HandleTelegramCommand:
 
         return self._render_symbol_page(session, page=0)
 
-    def _run_cb_sym(
-        self, session, symbol: str
-    ) -> TelegramCommandResult:
+    def _run_cb_sym(self, session, symbol: str) -> TelegramCommandResult:
         """User selected a symbol — show interval picker."""
         session.symbol = symbol
         self._session_store.save(session)
@@ -728,9 +703,7 @@ class HandleTelegramCommand:
             reply_markup={"inline_keyboard": keyboard_rows},
         )
 
-    def _run_cb_int(
-        self, session, interval: str
-    ) -> TelegramCommandResult:
+    def _run_cb_int(self, session, interval: str) -> TelegramCommandResult:
         """User selected an interval — show mode picker."""
         session.interval = interval
         self._session_store.save(session)
@@ -766,9 +739,7 @@ class HandleTelegramCommand:
             },
         )
 
-    def _run_cb_mode(
-        self, session, mode: str
-    ) -> TelegramCommandResult:
+    def _run_cb_mode(self, session, mode: str) -> TelegramCommandResult:
         """User selected a mode — start bot or show live confirmation."""
         if mode == "live":
             return self._run_cb_mode_live(session)
@@ -805,9 +776,7 @@ class HandleTelegramCommand:
             },
         )
 
-    def _run_cb_confirm(
-        self, session, value: str
-    ) -> TelegramCommandResult:
+    def _run_cb_confirm(self, session, value: str) -> TelegramCommandResult:
         """Handle live trading confirmation."""
         if value == "yes":
             return self._start_bot_from_session(session, "live")
@@ -835,9 +804,7 @@ class HandleTelegramCommand:
         except Exception:
             return None
 
-    def _start_bot_from_session(
-        self, session, mode: str
-    ) -> TelegramCommandResult:
+    def _start_bot_from_session(self, session, mode: str) -> TelegramCommandResult:
         """Call bot_manager.start() with the accumulated session state."""
         exec_config = self._read_execution_config(session.strategy_path or "")
         result = self._bot_manager.start(
@@ -906,9 +873,7 @@ class HandleTelegramCommand:
                 },
             )
 
-    def _handle_confirm_callback(
-        self, request, data
-    ) -> TelegramCommandResult:
+    def _handle_confirm_callback(self, request, data) -> TelegramCommandResult:
         """Handle Confirm/Cancel for manual orders and /clear.
 
         Re-validates state on Confirm (prompt may be stale): re-checks the
@@ -958,8 +923,16 @@ class HandleTelegramCommand:
                 return TelegramCommandResult(
                     text="Invalid size in session\\.", parse_mode="MarkdownV2"
                 )
-            sl_price = Decimal(parts[2]) if len(parts) > 2 and parts[2] not in ("None", "") else None
-            tp_price = Decimal(parts[3]) if len(parts) > 3 and parts[3] not in ("None", "") else None
+            sl_price = (
+                Decimal(parts[2])
+                if len(parts) > 2 and parts[2] not in ("None", "")
+                else None
+            )
+            tp_price = (
+                Decimal(parts[3])
+                if len(parts) > 3 and parts[3] not in ("None", "")
+                else None
+            )
             active = self._bot_manager.get_active_symbol()
             if active is None:
                 return TelegramCommandResult(
@@ -1055,20 +1028,30 @@ class HandleTelegramCommand:
         )
 
     def _panic_execute(self, action: str, symbol: str) -> TelegramCommandResult:
-        """Execute the panic action: cancel orders, close position, or both."""
+        """Execute the panic action: cancel orders, close position, or both.
+
+        Counts come from the exchange result's ``cancelled`` field (H1) —
+        never ``len(result)`` (which would report the dict's key count).
+        """
         mgr = self._bot_manager
         cancelled = 0
+        cancel_error: str | None = None
         position_closed = False
+        close_error: str | None = None
 
         if action in ("cancel", "both"):
             cancel_result = mgr.cancel_all_orders(symbol)
-            if "error" not in cancel_result:
-                cancelled = len(cancel_result) if isinstance(cancel_result, dict) else 0
+            if isinstance(cancel_result, dict) and "error" not in cancel_result:
+                cancelled = int(cancel_result.get("cancelled", 0))
+            elif isinstance(cancel_result, dict):
+                cancel_error = str(cancel_result.get("error", "unknown"))
 
         if action in ("close", "both"):
             close_result = mgr.close_position(symbol)
-            if "error" not in close_result:
+            if isinstance(close_result, dict) and "error" not in close_result:
                 position_closed = True
+            elif isinstance(close_result, dict):
+                close_error = str(close_result.get("error", "unknown"))
 
         # Stop the bot after panic
         self._bot_manager.stop()
@@ -1078,9 +1061,13 @@ class HandleTelegramCommand:
         ]
         if action in ("cancel", "both"):
             text_lines.append(f"\u2022 Orders cancelled: {cancelled}")
+            if cancel_error is not None:
+                text_lines.append(f"\u2022 Cancel failed: {_escape_mdv2(cancel_error)}")
         if action in ("close", "both"):
             status = "closed" if position_closed else "failed to close"
             text_lines.append(f"\u2022 Position {status}")
+            if close_error is not None:
+                text_lines.append(f"\u2022 Close failed: {_escape_mdv2(close_error)}")
         text_lines.append("Bot has been stopped\\.")
 
         return TelegramCommandResult(
@@ -1299,9 +1286,7 @@ class HandleTelegramCommand:
                 request, side, active, size, sl_price, tp_price
             )
 
-        return self._execute_manual_order(
-            order_side, active, size, sl_price, tp_price
-        )
+        return self._execute_manual_order(order_side, active, size, sl_price, tp_price)
 
     def _needs_confirmation(self) -> bool:
         """True when the bot mode requires confirmation before real orders."""
@@ -1383,9 +1368,7 @@ class HandleTelegramCommand:
             extras.append(f"SL={_escape_mdv2(str(sl_price))}")
         if tp_price is not None:
             extras.append(f"TP={_escape_mdv2(str(tp_price))}")
-        extra_str = (
-            f" \\[{_escape_mdv2(' '.join(extras))}\\]" if extras else ""
-        )
+        extra_str = f" \\[{_escape_mdv2(' '.join(extras))}\\]" if extras else ""
         warnings = result.get("warnings") or []
         warn_text = ""
         if warnings:
@@ -1617,6 +1600,7 @@ class HandleTelegramCommand:
             text=f"\u2705 Profile {_escape_mdv2(name)} {sub}d\\.",
             parse_mode="MarkdownV2",
         )
+
     async def _handle_size(self, request: TelegramCommandRequest):
         """Set, view, or clear the default order size."""
         from decimal import Decimal
@@ -1626,8 +1610,7 @@ class HandleTelegramCommand:
             current = self._bot_manager.get_default_size()
             val = "not set" if current is None else str(current)
             return TelegramCommandResult(
-                text=f"Default size: {val}\n"
-                f"Set: /size 0\\.1  \\(or /size clear\\)",
+                text=f"Default size: {val}\n" f"Set: /size 0\\.1  \\(or /size clear\\)",
                 parse_mode="MarkdownV2",
             )
         if arg.lower() == "clear":
@@ -1673,9 +1656,7 @@ class HandleTelegramCommand:
             sz = _escape_mdv2(str(o.get("sz", "")))
             px = _escape_mdv2(str(o.get("limit_px", "")))
             lines.append(f"\\#{oid} {side} {sz} @ {px}")
-        return TelegramCommandResult(
-            text="\n".join(lines), parse_mode="MarkdownV2"
-        )
+        return TelegramCommandResult(text="\n".join(lines), parse_mode="MarkdownV2")
 
     async def _handle_cancel(self, request: TelegramCommandRequest):
         """Cancel a single order by oid on the active symbol."""

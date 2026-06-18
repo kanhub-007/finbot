@@ -21,7 +21,6 @@ from finbot.core.domain.interfaces.telegram_session_store import (
     TelegramSessionStore,
 )
 
-
 # ---------------------------------------------------------------------------
 # InMemoryTelegramChatRepository
 # ---------------------------------------------------------------------------
@@ -89,11 +88,7 @@ class InMemoryTelegramSessionStore(TelegramSessionStore):
 
     def expire_old(self, now: object) -> int:
         assert isinstance(now, datetime)
-        to_delete = [
-            sid
-            for sid, s in self._sessions.items()
-            if s.is_expired(now)
-        ]
+        to_delete = [sid for sid, s in self._sessions.items() if s.is_expired(now)]
         for sid in to_delete:
             del self._sessions[sid]
         return len(to_delete)
@@ -219,7 +214,12 @@ class FakeBotManager:
         from finbot.core.domain.entities.active_symbol_state import ActiveSymbolState
 
         self._active_symbol = ActiveSymbolState(symbol=symbol)
-        return {"status": "active", "symbol": symbol, "leverage": "1", "margin_mode": "isolated"}
+        return {
+            "status": "active",
+            "symbol": symbol,
+            "leverage": "1",
+            "margin_mode": "isolated",
+        }
 
     def get_active_symbol(self):
         return getattr(self, "_active_symbol", None)
@@ -235,7 +235,9 @@ class FakeBotManager:
     def get_balance(self):
         return None
 
-    def set_leverage(self, leverage: int, margin_mode: str = "isolated") -> dict[str, str]:
+    def set_leverage(
+        self, leverage: int, margin_mode: str = "isolated"
+    ) -> dict[str, str]:
         return {"status": "ok", "leverage": str(leverage), "margin_mode": margin_mode}
 
     def submit_manual_order(self, side, size) -> dict:
@@ -266,6 +268,19 @@ class FakeBotManager:
 
     def cancel_order(self, order_id: str) -> dict:
         return {"status": "ok", "order_id": order_id}
+
+    # -- panic support (S6) ----------------------------------------------
+
+    def cancel_all_orders(self, symbol: str) -> dict:
+        """Return the configured cancel result for outcome-based assertions.
+
+        Tests override ``cancel_all_orders_result`` to drive the panic
+        report-count assertions (H1).
+        """
+        return getattr(self, "cancel_all_orders_result", {"status": "ok"})
+
+    def close_position(self, symbol: str) -> dict:
+        return getattr(self, "close_position_result", {"status": "ok"})
 
     def save_config_profile(self, name: str) -> dict:
         return {"status": "ok", "profile": name}
@@ -325,13 +340,15 @@ class FakeTelegramOutbox:
     ) -> object:
         msg_id = self._next_message_id
         self._next_message_id += 1
-        self.sent_messages.append({
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": parse_mode,
-            "reply_markup": reply_markup,
-            "message_id": msg_id,
-        })
+        self.sent_messages.append(
+            {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": parse_mode,
+                "reply_markup": reply_markup,
+                "message_id": msg_id,
+            }
+        )
         from finbot.core.domain.entities.send_result import SendResult
 
         return SendResult(success=True, message_id=msg_id)
@@ -344,13 +361,15 @@ class FakeTelegramOutbox:
         parse_mode: str | None = None,
         reply_markup: dict | None = None,
     ) -> object:
-        self.edited_messages.append({
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": text,
-            "parse_mode": parse_mode,
-            "reply_markup": reply_markup,
-        })
+        self.edited_messages.append(
+            {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text,
+                "parse_mode": parse_mode,
+                "reply_markup": reply_markup,
+            }
+        )
         from finbot.core.domain.entities.send_result import SendResult
 
         return SendResult(success=True, message_id=message_id)
@@ -360,10 +379,12 @@ class FakeTelegramOutbox:
         callback_query_id: str,
         text: str | None = None,
     ) -> bool:
-        self.answered_callbacks.append({
-            "callback_query_id": callback_query_id,
-            "text": text,
-        })
+        self.answered_callbacks.append(
+            {
+                "callback_query_id": callback_query_id,
+                "text": text,
+            }
+        )
         return True
 
     async def edit_message_reply_markup(

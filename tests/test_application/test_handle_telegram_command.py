@@ -37,8 +37,11 @@ class TestUnauthorizedUser:
         # Unauthorized user (999) tries /status
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/status", args="", chat_id=999999,
-                user_id=999, message_id=1,
+                command="/status",
+                args="",
+                chat_id=999999,
+                user_id=999,
+                message_id=1,
             )
         )
 
@@ -63,7 +66,11 @@ class TestUnauthorizedUser:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/run", args="", chat_id=123, user_id=456, message_id=1,
+                command="/run",
+                args="",
+                chat_id=123,
+                user_id=456,
+                message_id=1,
             )
         )
 
@@ -86,7 +93,11 @@ class TestUnknownCommand:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/asdf", args="", chat_id=1, user_id=123, message_id=1,
+                command="/asdf",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -109,8 +120,11 @@ class TestStart:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/start", args="", chat_id=123456789,
-                user_id=987654321, message_id=1,
+                command="/start",
+                args="",
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=1,
             )
         )
 
@@ -140,14 +154,20 @@ class TestStart:
 
         result1 = await use_case.execute(
             TelegramCommandRequest(
-                command="/start", args="", chat_id=123456789,
-                user_id=987654321, message_id=1,
+                command="/start",
+                args="",
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=1,
             )
         )
         result2 = await use_case.execute(
             TelegramCommandRequest(
-                command="/start", args="", chat_id=123456789,
-                user_id=987654321, message_id=2,
+                command="/start",
+                args="",
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=2,
             )
         )
 
@@ -169,8 +189,11 @@ class TestStart:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/start", args="", chat_id=999,
-                user_id=999, message_id=1,
+                command="/start",
+                args="",
+                chat_id=999,
+                user_id=999,
+                message_id=1,
             )
         )
 
@@ -221,8 +244,11 @@ class TestHelp:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/help", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/help",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -238,15 +264,17 @@ class TestStatus:
     async def test_status_idle_returns_last_run_summary(self):
         """/status when idle returns last run summary."""
         fake_manager = FakeBotManager(is_running=False)
-        fake_manager.set_last_run({
-            "run_id": "r_abc122",
-            "strategy_name": "trend_follow.yaml",
-            "symbol": "ETH",
-            "interval": "4h",
-            "mode": "dry_run",
-            "started_at": "2026-06-15T10:00:00+00:00",
-            "ended_at": "2026-06-15T14:30:00+00:00",
-        })
+        fake_manager.set_last_run(
+            {
+                "run_id": "r_abc122",
+                "strategy_name": "trend_follow.yaml",
+                "symbol": "ETH",
+                "interval": "4h",
+                "mode": "dry_run",
+                "started_at": "2026-06-15T10:00:00+00:00",
+                "ended_at": "2026-06-15T14:30:00+00:00",
+            }
+        )
 
         use_case = HandleTelegramCommand(
             bot_manager=fake_manager,
@@ -258,8 +286,11 @@ class TestStatus:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/status", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/status",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -283,8 +314,11 @@ class TestStatus:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/status", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/status",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -321,8 +355,11 @@ class TestStatus:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/status", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/status",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -350,8 +387,11 @@ class TestStop:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/stop", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/stop",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -373,8 +413,11 @@ class TestStop:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/stop", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/stop",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -397,8 +440,11 @@ class TestRunRejection:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/run", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/run",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -412,9 +458,9 @@ class TestRunFlow:
     async def test_run_flow_starts_dry_run_after_keyboard_selection(self):
         """Full /run guided flow: strategies → symbol → interval → mode=DRY_RUN."""
         fake_manager = FakeBotManager(is_running=False)
-        fake_strategy_dir = FakeStrategyDirectory([
-            "macd_cross.yaml", "trend_follow.yaml"
-        ])
+        fake_strategy_dir = FakeStrategyDirectory(
+            ["macd_cross.yaml", "trend_follow.yaml"]
+        )
         fake_sessions = InMemoryTelegramSessionStore()
 
         use_case = HandleTelegramCommand(
@@ -426,34 +472,54 @@ class TestRunFlow:
         )
 
         # Step 1: /run → show strategies
-        result = await use_case.execute(TelegramCommandRequest(
-            command="/run", args="", chat_id=123456789,
-            user_id=987654321, message_id=100,
-        ))
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/run",
+                args="",
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+            )
+        )
         assert len(result.reply_markup["inline_keyboard"]) >= 1
 
         # Step 2: select strategy via callback
         cb_data = result.reply_markup["inline_keyboard"][0][0]["callback_data"]
-        result = await use_case.handle_callback(CallbackQueryRequest(
-            callback_data=cb_data, chat_id=123456789,
-            user_id=987654321, message_id=100, callback_query_id="cq1",
-        ))
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=cb_data,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq1",
+            )
+        )
         assert "Symbol" in result.text or "symbol" in result.text.lower()
 
         # Step 3: select symbol via callback
         cb_data = result.reply_markup["inline_keyboard"][0][0]["callback_data"]
-        result = await use_case.handle_callback(CallbackQueryRequest(
-            callback_data=cb_data, chat_id=123456789,
-            user_id=987654321, message_id=100, callback_query_id="cq2",
-        ))
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=cb_data,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq2",
+            )
+        )
         assert "interval" in result.text.lower()
 
         # Step 4: select interval via callback
         cb_data = result.reply_markup["inline_keyboard"][0][0]["callback_data"]
-        result = await use_case.handle_callback(CallbackQueryRequest(
-            callback_data=cb_data, chat_id=123456789,
-            user_id=987654321, message_id=100, callback_query_id="cq3",
-        ))
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=cb_data,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq3",
+            )
+        )
         assert "mode" in result.text.lower() or "dry" in result.text.lower()
 
         # Step 5: select dry_run mode via callback
@@ -466,10 +532,15 @@ class TestRunFlow:
                     dry_cb = btn["callback_data"]
         assert dry_cb is not None, "Dry Run button not found in mode keyboard"
 
-        result = await use_case.handle_callback(CallbackQueryRequest(
-            callback_data=dry_cb, chat_id=123456789,
-            user_id=987654321, message_id=100, callback_query_id="cq4",
-        ))
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=dry_cb,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq4",
+            )
+        )
 
         assert fake_manager.start_called is True
         assert fake_manager.start_called_with is not None
@@ -499,19 +570,28 @@ class TestRunFlow:
         fake_sessions.save(session)
 
         # Tap Live mode → should show confirmation prompt
-        result = await use_case.handle_callback(CallbackQueryRequest(
-            callback_data=f"run:{session.session_id}:mode:live",
-            chat_id=123456789, user_id=987654321,
-            message_id=100, callback_query_id="cq1",
-        ))
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=f"run:{session.session_id}:mode:live",
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq1",
+            )
+        )
 
         assert "Are you sure" in result.text or "confirm" in result.text.lower()
         # Confirm YES
         cb_data = result.reply_markup["inline_keyboard"][0][0]["callback_data"]
-        result = await use_case.handle_callback(CallbackQueryRequest(
-            callback_data=cb_data, chat_id=123456789,
-            user_id=987654321, message_id=100, callback_query_id="cq2",
-        ))
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=cb_data,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq2",
+            )
+        )
 
         assert fake_manager.start_called is True
         assert fake_manager.start_called_with["mode"] == "live"
@@ -537,18 +617,27 @@ class TestRunFlow:
         fake_sessions.save(session)
 
         # Tap Live mode
-        result = await use_case.handle_callback(CallbackQueryRequest(
-            callback_data=f"run:{session.session_id}:mode:live",
-            chat_id=123456789, user_id=987654321,
-            message_id=100, callback_query_id="cq1",
-        ))
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=f"run:{session.session_id}:mode:live",
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq1",
+            )
+        )
 
         # Tap Cancel (second button)
         cb_data = result.reply_markup["inline_keyboard"][0][1]["callback_data"]
-        result = await use_case.handle_callback(CallbackQueryRequest(
-            callback_data=cb_data, chat_id=123456789,
-            user_id=987654321, message_id=100, callback_query_id="cq2",
-        ))
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=cb_data,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq2",
+            )
+        )
 
         assert fake_manager.start_called is False
 
@@ -593,8 +682,11 @@ class TestHistory:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/history", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/history",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -618,8 +710,11 @@ class TestHistory:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/history", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/history",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -634,17 +729,20 @@ class TestList:
         use_case = HandleTelegramCommand(
             bot_manager=FakeBotManager(),
             chat_repo=InMemoryTelegramChatRepository(),
-            strategy_dir=FakeStrategyDirectory([
-                "macd_cross.yaml", "trend_follow.yaml"
-            ]),
+            strategy_dir=FakeStrategyDirectory(
+                ["macd_cross.yaml", "trend_follow.yaml"]
+            ),
             session_store=InMemoryTelegramSessionStore(),
             allowed_users=frozenset({123}),
         )
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/list", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/list",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -681,8 +779,11 @@ class TestPanic:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/panic", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/panic",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -704,8 +805,11 @@ class TestPanic:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/panic", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/panic",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -720,9 +824,9 @@ class TestMuteUnmute:
         from finbot.core.domain.entities.telegram_chat import TelegramChat
 
         fake_repo = InMemoryTelegramChatRepository()
-        await fake_repo.add_chat(TelegramChat(
-            chat_id=1, user_id=123, notifications_enabled=True
-        ))
+        await fake_repo.add_chat(
+            TelegramChat(chat_id=1, user_id=123, notifications_enabled=True)
+        )
 
         use_case = HandleTelegramCommand(
             bot_manager=FakeBotManager(),
@@ -734,8 +838,11 @@ class TestMuteUnmute:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/mute", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/mute",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -750,9 +857,9 @@ class TestMuteUnmute:
         from finbot.core.domain.entities.telegram_chat import TelegramChat
 
         fake_repo = InMemoryTelegramChatRepository()
-        await fake_repo.add_chat(TelegramChat(
-            chat_id=1, user_id=123, notifications_enabled=False
-        ))
+        await fake_repo.add_chat(
+            TelegramChat(chat_id=1, user_id=123, notifications_enabled=False)
+        )
 
         use_case = HandleTelegramCommand(
             bot_manager=FakeBotManager(),
@@ -764,8 +871,11 @@ class TestMuteUnmute:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/unmute", args="", chat_id=1,
-                user_id=123, message_id=1,
+                command="/unmute",
+                args="",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
             )
         )
 
@@ -793,7 +903,11 @@ class TestSymbolCommand:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1,
+                command="/symbol",
+                args="BTC",
+                chat_id=1,
+                user_id=1,
+                message_id=1,
             )
         )
 
@@ -816,7 +930,11 @@ class TestSymbolCommand:
 
         result = await use_case.execute(
             TelegramCommandRequest(
-                command="/symbol", args="", chat_id=1, user_id=1, message_id=1,
+                command="/symbol",
+                args="",
+                chat_id=1,
+                user_id=1,
+                message_id=1,
             )
         )
 
@@ -842,7 +960,9 @@ class TestTradingControlHandlers:
     async def test_config_view_returns_keys(self):
         uc = self._use_case()
         result = await uc.execute(
-            TelegramCommandRequest(command="/config", args="", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/config", args="", chat_id=1, user_id=1, message_id=1
+            )
         )
         assert "max_position" in result.text
 
@@ -850,7 +970,13 @@ class TestTradingControlHandlers:
     async def test_config_update_returns_ok(self):
         uc = self._use_case()
         result = await uc.execute(
-            TelegramCommandRequest(command="/config", args="max_position 500", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/config",
+                args="max_position 500",
+                chat_id=1,
+                user_id=1,
+                message_id=1,
+            )
         )
         assert "500" in result.text
 
@@ -858,7 +984,9 @@ class TestTradingControlHandlers:
     async def test_leverage_requires_symbol(self):
         uc = self._use_case()
         result = await uc.execute(
-            TelegramCommandRequest(command="/leverage", args="5", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/leverage", args="5", chat_id=1, user_id=1, message_id=1
+            )
         )
         assert "symbol" in result.text.lower()
 
@@ -866,7 +994,9 @@ class TestTradingControlHandlers:
     async def test_long_requires_symbol(self):
         uc = self._use_case()
         result = await uc.execute(
-            TelegramCommandRequest(command="/long", args="0.01", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/long", args="0.01", chat_id=1, user_id=1, message_id=1
+            )
         )
         assert "symbol" in result.text.lower()
 
@@ -874,10 +1004,14 @@ class TestTradingControlHandlers:
     async def test_symbol_then_price(self):
         uc = self._use_case()
         await uc.execute(
-            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1
+            )
         )
         result = await uc.execute(
-            TelegramCommandRequest(command="/price", args="", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/price", args="", chat_id=1, user_id=1, message_id=1
+            )
         )
         assert "BTC" in result.text
 
@@ -900,7 +1034,9 @@ class TestOrdersAndCancelHandlers:
     async def test_orders_requires_symbol(self):
         uc = self._use_case()
         result = await uc.execute(
-            TelegramCommandRequest(command="/orders", args="", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/orders", args="", chat_id=1, user_id=1, message_id=1
+            )
         )
         assert "symbol" in result.text.lower()
 
@@ -908,7 +1044,9 @@ class TestOrdersAndCancelHandlers:
     async def test_cancel_requires_symbol(self):
         uc = self._use_case()
         result = await uc.execute(
-            TelegramCommandRequest(command="/cancel", args="123", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/cancel", args="123", chat_id=1, user_id=1, message_id=1
+            )
         )
         assert "symbol" in result.text.lower()
 
@@ -916,12 +1054,20 @@ class TestOrdersAndCancelHandlers:
     async def test_cancel_no_args(self):
         uc = self._use_case()
         await uc.execute(
-            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1
+            )
         )
         result = await uc.execute(
-            TelegramCommandRequest(command="/cancel", args="", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/cancel", args="", chat_id=1, user_id=1, message_id=1
+            )
         )
-        assert "ORDER" in result.text or "Usage" in result.text or "usage" in result.text.lower()
+        assert (
+            "ORDER" in result.text
+            or "Usage" in result.text
+            or "usage" in result.text.lower()
+        )
 
 
 class TestConfirmationFlow:
@@ -956,14 +1102,20 @@ class TestConfirmationFlow:
 
         uc = self._use_case(mode="live")
         await uc.execute(
-            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1
+            )
         )
         result = await uc.execute(
-            TelegramCommandRequest(command="/long", args="0.01", chat_id=1, user_id=1, message_id=2)
+            TelegramCommandRequest(
+                command="/long", args="0.01", chat_id=1, user_id=1, message_id=2
+            )
         )
         # Confirmation prompt shown (button text has emoji prefix)
         assert result.reply_markup is not None
-        buttons = [b["text"] for row in result.reply_markup["inline_keyboard"] for b in row]
+        buttons = [
+            b["text"] for row in result.reply_markup["inline_keyboard"] for b in row
+        ]
         assert any("Confirm" in b for b in buttons)
 
     @pytest.mark.asyncio
@@ -971,10 +1123,14 @@ class TestConfirmationFlow:
         """/long in dry-run submits directly (no confirmation)."""
         uc = self._use_case(mode="dry_run")
         await uc.execute(
-            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1
+            )
         )
         result = await uc.execute(
-            TelegramCommandRequest(command="/long", args="0.01", chat_id=1, user_id=1, message_id=2)
+            TelegramCommandRequest(
+                command="/long", args="0.01", chat_id=1, user_id=1, message_id=2
+            )
         )
         # No confirmation prompt — direct order (FakeBotManager returns ok)
         assert "Confirm" not in result.text
@@ -984,10 +1140,14 @@ class TestConfirmationFlow:
         """/clear in live shows confirmation prompt."""
         uc = self._use_case(mode="live")
         result = await uc.execute(
-            TelegramCommandRequest(command="/clear", args="", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/clear", args="", chat_id=1, user_id=1, message_id=1
+            )
         )
         assert result.reply_markup is not None
-        buttons = [b["text"] for row in result.reply_markup["inline_keyboard"] for b in row]
+        buttons = [
+            b["text"] for row in result.reply_markup["inline_keyboard"] for b in row
+        ]
         assert any("Confirm" in b for b in buttons)
 
     @pytest.mark.asyncio
@@ -999,10 +1159,14 @@ class TestConfirmationFlow:
 
         uc = self._use_case(mode="live")
         await uc.execute(
-            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1
+            )
         )
         prompt = await uc.execute(
-            TelegramCommandRequest(command="/long", args="0.01", chat_id=1, user_id=1, message_id=2)
+            TelegramCommandRequest(
+                command="/long", args="0.01", chat_id=1, user_id=1, message_id=2
+            )
         )
         # Extract session id from the confirm callback data
         confirm_cb = prompt.reply_markup["inline_keyboard"][0][0]["callback_data"]
@@ -1011,11 +1175,19 @@ class TestConfirmationFlow:
 
         result = await uc.handle_callback(
             CallbackQueryRequest(
-                callback_data=confirm_cb, chat_id=1, user_id=1,
-                message_id=2, callback_query_id="x",
+                callback_data=confirm_cb,
+                chat_id=1,
+                user_id=1,
+                message_id=2,
+                callback_query_id="x",
             )
         )
-        assert "market" in result.text.lower() or "✅" in result.text or "ok" in result.text.lower() or "\u2705" in result.text
+        assert (
+            "market" in result.text.lower()
+            or "✅" in result.text
+            or "ok" in result.text.lower()
+            or "\u2705" in result.text
+        )
 
     @pytest.mark.asyncio
     async def test_cancel_callback_cancels_order(self):
@@ -1026,17 +1198,24 @@ class TestConfirmationFlow:
 
         uc = self._use_case(mode="live")
         await uc.execute(
-            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1
+            )
         )
         prompt = await uc.execute(
-            TelegramCommandRequest(command="/long", args="0.01", chat_id=1, user_id=1, message_id=2)
+            TelegramCommandRequest(
+                command="/long", args="0.01", chat_id=1, user_id=1, message_id=2
+            )
         )
         cancel_cb = prompt.reply_markup["inline_keyboard"][0][1]["callback_data"]
 
         result = await uc.handle_callback(
             CallbackQueryRequest(
-                callback_data=cancel_cb, chat_id=1, user_id=1,
-                message_id=2, callback_query_id="x",
+                callback_data=cancel_cb,
+                chat_id=1,
+                user_id=1,
+                message_id=2,
+                callback_query_id="x",
             )
         )
         assert "cancel" in result.text.lower() or "\u23f9" in result.text
@@ -1046,6 +1225,134 @@ class TestConfirmationFlow:
         """/config save persists to env (via config writer)."""
         uc = self._use_case()
         result = await uc.execute(
-            TelegramCommandRequest(command="/config", args="save", chat_id=1, user_id=1, message_id=1)
+            TelegramCommandRequest(
+                command="/config", args="save", chat_id=1, user_id=1, message_id=1
+            )
         )
         assert "saved" in result.text.lower() or "\u2705" in result.text
+
+
+# ---------------------------------------------------------------------------
+# S6 — Panic reports the correct cancelled-order count (H1)
+# ---------------------------------------------------------------------------
+
+
+class TestPanicCancelledCount:
+    """H1: _panic_execute must report the actual cancelled count, not the
+    dict key count. On ``main`` it did ``len(cancel_result)`` which always
+    returned 2-3 regardless of how many orders were cancelled."""
+
+    @pytest.mark.asyncio
+    async def test_panic_cancel_reports_actual_count_not_dict_length(self):
+        fake_manager = FakeBotManager(is_running=True, bot_run_id="r1")
+        fake_manager.cancel_all_orders_result = {
+            "status": "ok",
+            "cancelled": 5,
+        }
+        fake_manager.close_position_result = {"status": "ok"}
+        uc = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+        )
+
+        result = await uc.handle_callback(
+            CallbackQueryRequest(
+                callback_data="panic:exec:BTC:cancel",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
+                callback_query_id="cq1",
+            )
+        )
+
+        # The reported count must be 5 (from the dict's "cancelled" value),
+        # NOT 2 (the dict's key count) — the bug on main.
+        assert "Orders cancelled: 5" in result.text
+        assert "Orders cancelled: 2" not in result.text
+
+    @pytest.mark.asyncio
+    async def test_panic_cancel_handles_missing_cancelled_key(self):
+        """When the exchange returns no 'cancelled' field, report 0 not the
+        dict key count."""
+        fake_manager = FakeBotManager(is_running=True, bot_run_id="r1")
+        fake_manager.cancel_all_orders_result = {"status": "ok"}
+        fake_manager.close_position_result = {"status": "ok"}
+        uc = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+        )
+
+        result = await uc.handle_callback(
+            CallbackQueryRequest(
+                callback_data="panic:exec:BTC:cancel",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
+                callback_query_id="cq1",
+            )
+        )
+
+        assert "Orders cancelled: 0" in result.text
+
+    @pytest.mark.asyncio
+    async def test_panic_cancel_surfaces_exchange_error(self):
+        """When cancel_all_orders returns an 'error' key, report 0 cancelled
+        and surface the failure honestly (not silently)."""
+        fake_manager = FakeBotManager(is_running=True, bot_run_id="r1")
+        fake_manager.cancel_all_orders_result = {"error": "No exchange gateway wired"}
+        fake_manager.close_position_result = {"status": "ok"}
+        uc = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+        )
+
+        result = await uc.handle_callback(
+            CallbackQueryRequest(
+                callback_data="panic:exec:BTC:cancel",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
+                callback_query_id="cq1",
+            )
+        )
+
+        assert "Orders cancelled: 0" in result.text
+
+    @pytest.mark.asyncio
+    async def test_panic_both_reports_both_counts_honestly(self):
+        """action='both' with cancel=3 + close success reports both numbers."""
+        fake_manager = FakeBotManager(is_running=True, bot_run_id="r1")
+        fake_manager.cancel_all_orders_result = {
+            "status": "ok",
+            "cancelled": 3,
+        }
+        fake_manager.close_position_result = {"status": "ok"}
+        uc = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+        )
+
+        result = await uc.handle_callback(
+            CallbackQueryRequest(
+                callback_data="panic:exec:BTC:both",
+                chat_id=1,
+                user_id=123,
+                message_id=1,
+                callback_query_id="cq1",
+            )
+        )
+
+        assert "Orders cancelled: 3" in result.text
+        assert "Position closed" in result.text
