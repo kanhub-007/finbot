@@ -640,7 +640,9 @@ class SqliteBotStateRepository(BotStateRepository):
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:
             _ensure_directory(self._db_path)
-            self._conn = sqlite3.connect(self._db_path)
+            self._conn = sqlite3.connect(
+                self._db_path, check_same_thread=False
+            )
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn

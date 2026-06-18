@@ -275,8 +275,8 @@ class HandleTelegramCommand:
             f"Mode: {_escape_mdv2(mode)}\n"
             f"Uptime: {hours}h {minutes}m\n\n"
             f"*Totals:*\n"
-            f"Signals: {total_signals} | Orders: {total_orders} "
-            f"| Fills: {total_fills}"
+            f"Signals: {total_signals} \\| Orders: {total_orders} "
+            f"\\| Fills: {total_fills}"
         )
         return TelegramCommandResult(
             text=text,
