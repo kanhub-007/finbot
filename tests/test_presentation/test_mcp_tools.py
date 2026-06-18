@@ -1,8 +1,9 @@
 """Integration tests for MCP tools.
 
 Tests the MCP presentation layer with a fake BotManager wired in.
-Tool functions are registered on a FastMCP server with a fake BotManager
-set on ``_finbot_bot_manager`` so the ``_get_bot_manager()`` helper works.
+Tool functions are registered on a FastMCP server via
+``register_tools(server, manager)`` (S8) — each tool closes over the
+manager instead of reading a private attribute off the server.
 
 Each tool function is called directly (the functions are captured during
 registration). This avoids coupling to FastMCP 3.x internal call_tool API.
@@ -50,7 +51,6 @@ def _build_tools():
     )
 
     server = FastMCP(name="finbot-test")
-    server._finbot_bot_manager = manager  # type: ignore[attr-defined]
 
     # Capture tool functions during registration by intercepting @mcp.tool()
     tools: dict[str, object] = {}
@@ -71,7 +71,7 @@ def _build_tools():
 
     from finbot.presentation.mcp.tools import register_tools
 
-    register_tools(server)
+    register_tools(server, manager)
     server.tool = _original_tool  # type: ignore[assignment]
 
     return tools

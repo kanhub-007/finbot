@@ -1,14 +1,16 @@
 """MCP tools — bot run history queries."""
 
 import json
+from typing import Any
 
 from fastmcp import FastMCP
 
-from ._shared import _get_bot_manager
 
+def register_bot_history_tools(mcp: FastMCP, bot_manager: Any) -> None:
+    """Register list_bot_runs and get_bot_run_results MCP tools.
 
-def register_bot_history_tools(mcp: FastMCP) -> None:
-    """Register list_bot_runs and get_bot_run_results MCP tools."""
+    ``bot_manager`` is captured in each tool closure (S8 / H4).
+    """
 
     @mcp.tool(
         name="list_bot_runs",
@@ -25,9 +27,8 @@ def register_bot_history_tools(mcp: FastMCP) -> None:
         mode: str | None = None,
     ) -> str:
         """Return recent bot runs ordered by most recent first."""
-        manager = _get_bot_manager(mcp)
-        runs = manager.list_bot_runs(limit=limit, mode_filter=mode)
-        counts = manager.get_run_counts([r.run_id for r in runs])
+        runs = bot_manager.list_bot_runs(limit=limit, mode_filter=mode)
+        counts = bot_manager.get_run_counts([r.run_id for r in runs])
         result = {
             "count": len(runs),
             "runs": [
@@ -58,16 +59,14 @@ def register_bot_history_tools(mcp: FastMCP) -> None:
     )
     def get_bot_run_results(run_id: str) -> str:
         """Return full results for a bot run."""
-        manager = _get_bot_manager(mcp)
-
-        run = manager.get_bot_run(run_id)
+        run = bot_manager.get_bot_run(run_id)
         if run is None:
             return json.dumps({"error": f"Run not found: {run_id}"})
 
-        signals = manager.get_signals_for_run(run_id)
-        orders = manager.get_orders_for_run(run_id)
-        fills = manager.get_fills_for_run(run_id)
-        risk_events = manager.get_risk_events_for_run(run_id)
+        signals = bot_manager.get_signals_for_run(run_id)
+        orders = bot_manager.get_orders_for_run(run_id)
+        fills = bot_manager.get_fills_for_run(run_id)
+        risk_events = bot_manager.get_risk_events_for_run(run_id)
 
         return json.dumps(
             {

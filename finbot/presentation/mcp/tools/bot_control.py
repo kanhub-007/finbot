@@ -1,6 +1,7 @@
 """MCP tools — bot control (start/stop/status)."""
 
 import json
+from typing import Any
 
 from fastmcp import FastMCP
 
@@ -9,11 +10,13 @@ from finbot.core.domain.services.mode_url_guard import (
     check_mode_url_consistency,
 )
 
-from ._shared import _get_bot_manager
 
+def register_bot_control_tools(mcp: FastMCP, bot_manager: Any) -> None:
+    """Register start_bot, stop_bot, and get_bot_status MCP tools.
 
-def register_bot_control_tools(mcp: FastMCP) -> None:
-    """Register start_bot, stop_bot, and get_bot_status MCP tools."""
+    ``bot_manager`` is captured in each tool closure (S8 / H4) — tools no
+    longer read a private attribute off the FastMCP instance.
+    """
 
     @mcp.tool(
         name="start_bot",
@@ -47,8 +50,7 @@ def register_bot_control_tools(mcp: FastMCP) -> None:
                 indent=2,
             )
 
-        manager = _get_bot_manager(mcp)
-        result = manager.start(
+        result = bot_manager.start(
             strategy_path=strategy_path,
             symbol=symbol,
             interval=interval,
@@ -67,8 +69,7 @@ def register_bot_control_tools(mcp: FastMCP) -> None:
     )
     def stop_bot() -> str:
         """Stop the running bot."""
-        manager = _get_bot_manager(mcp)
-        return json.dumps(manager.stop(), indent=2)
+        return json.dumps(bot_manager.stop(), indent=2)
 
     @mcp.tool(
         name="get_bot_status",
@@ -81,5 +82,4 @@ def register_bot_control_tools(mcp: FastMCP) -> None:
     )
     def get_bot_status() -> str:
         """Return the current bot status snapshot."""
-        manager = _get_bot_manager(mcp)
-        return json.dumps(manager.get_status(), indent=2, default=str)
+        return json.dumps(bot_manager.get_status(), indent=2, default=str)

@@ -1,16 +1,10 @@
 """Shared helpers for MCP tool modules.
 
-Follows the same pattern as finbar's ``_shared.py``: lazy factories and a
-helper to retrieve the BotManager from the FastMCP instance.
+S8 (H4): tool modules receive ``bot_manager`` via the
+``register_*_tools(mcp, bot_manager)`` closure rather than reading a
+private attribute off the FastMCP instance. This module is retained as
+the canonical import target for any future cross-tool helpers; it
+currently exports nothing because no shared helper is needed.
 """
 
-from fastmcp import FastMCP
-
-
-def _get_bot_manager(mcp: FastMCP):
-    """Return the BotManager stored on the FastMCP instance.
-
-    ``_finbot_bot_manager`` is set by the composition root in
-    :mod:`finbot.startup.mcp`.
-    """
-    return mcp._finbot_bot_manager  # type: ignore[attr-defined]
+from __future__ import annotations

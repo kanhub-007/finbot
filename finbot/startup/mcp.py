@@ -141,8 +141,10 @@ def create_server() -> FastMCP:
         ),
     )
 
-    # Store bot_manager on the server instance so tools can access it
-    server._finbot_bot_manager = bot_manager  # type: ignore[attr-defined]
+    # Tools capture bot_manager via closure (S8 / H4). The manager is also
+    # exposed as a public attribute so composition-root tests can drive the
+    # runtime factory without re-deriving it.
+    server.bot_manager = bot_manager  # type: ignore[attr-defined]
 
     # Wire Telegram if enabled
     if telegram is not None:
@@ -154,10 +156,18 @@ def create_server() -> FastMCP:
             len(settings.telegram_allowed_user_ids),
         )
 
-    # Register all MCP tools
+    # Register all MCP tools. Build the validate_strategy use case once
+    # here (M2) — the util tool reuses this instance on every call instead
+    # of rebuilding it (which would re-import finbar_strategy_runtime and
+    # rebuild capability sets per invocation).
     from finbot.presentation.mcp.tools import register_tools
+    from finbot.startup.service_factory import create_validate_strategy_use_case
 
-    register_tools(server)
+    register_tools(
+        server,
+        bot_manager,
+        validate_strategy_use_case=create_validate_strategy_use_case(),
+    )
 
     config = get_transport_config()
     logger.info("MCP server configured: transport=%s", config["transport"])

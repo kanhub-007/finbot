@@ -1,14 +1,16 @@
 """MCP tools — safety (panic / emergency stop)."""
 
 import json
+from typing import Any
 
 from fastmcp import FastMCP
 
-from ._shared import _get_bot_manager
 
+def register_safety_tools(mcp: FastMCP, bot_manager: Any) -> None:
+    """Register the panic MCP tool.
 
-def register_safety_tools(mcp: FastMCP) -> None:
-    """Register the panic MCP tool."""
+    ``bot_manager`` is captured in the tool closure (S8 / H4).
+    """
 
     @mcp.tool(
         name="panic",
@@ -25,23 +27,22 @@ def register_safety_tools(mcp: FastMCP) -> None:
         symbol: str = "",
     ) -> str:
         """Emergency stop with optional order cancellation and position close."""
-        manager = _get_bot_manager(mcp)
         result: dict[str, object] = {}
 
         # Stop the bot first
-        stop_result = manager.stop()
+        stop_result = bot_manager.stop()
         result["bot_stopped"] = stop_result["status"] == "stopped"
 
-        if not manager.has_exchange:
+        if not bot_manager.has_exchange:
             result["message"] = "No exchange gateway wired — orders not cancelled."
             return json.dumps(result, indent=2)
 
         if cancel_orders and symbol:
-            cancel_result = manager.cancel_all_orders(symbol)
+            cancel_result = bot_manager.cancel_all_orders(symbol)
             result["cancel_orders"] = cancel_result
 
         if close_position and symbol:
-            close_result = manager.close_position(symbol)
+            close_result = bot_manager.close_position(symbol)
             result["close_position"] = close_result
 
         return json.dumps(result, indent=2, default=str)

@@ -118,7 +118,7 @@ class TestRuntimeRiskEventReachesTelegram:
         )
 
         server = startup_mcp.create_server()
-        bot_manager = server._finbot_bot_manager  # type: ignore[attr-defined]
+        bot_manager = server.bot_manager
         runtime = _build_runtime_via_factory(bot_manager)
 
         # Sanity: Telegram was attached and started by the composition root.
@@ -155,7 +155,7 @@ class TestRuntimeRiskEventReachesTelegram:
         )
 
         server = startup_mcp.create_server()
-        bot_manager = server._finbot_bot_manager  # type: ignore[attr-defined]
+        bot_manager = server.bot_manager
         # Build the runtime BEFORE checking that the dispatcher is the
         # post-Telegram-start one. A snapshotting closure would capture
         # None here and never recover.
@@ -190,7 +190,7 @@ class TestTelegramDisabledIsSafe:
         )
 
         server = startup_mcp.create_server()
-        bot_manager = server._finbot_bot_manager  # type: ignore[attr-defined]
+        bot_manager = server.bot_manager
         runtime = _build_runtime_via_factory(bot_manager)
 
         # emit must not raise even with no subscriber wired.

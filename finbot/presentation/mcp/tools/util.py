@@ -1,14 +1,42 @@
-"""MCP tools — utilities (ping, validate_strategy, audit log)."""
+"""MCP tools — utilities (ping, validate_strategy, audit log).
+
+S8 (M2): the ``validate_strategy`` use case is built once at server
+startup and passed into ``register_util_tools`` via the
+``validate_strategy_use_case`` parameter. When the caller does not
+supply one (legacy callers), it falls back to constructing one per call
+— but the composition root always supplies the prebuilt instance.
+"""
 
 import json
+from pathlib import Path
+from typing import Any
 
 from fastmcp import FastMCP
 
-from ._shared import _get_bot_manager
+from finbot.core.domain.dto.validate_strategy_request import (
+    ValidateStrategyRequest,
+)
 
 
-def register_util_tools(mcp: FastMCP) -> None:
-    """Register ping, validate_strategy, and get_audit_log MCP tools."""
+def register_util_tools(
+    mcp: FastMCP,
+    bot_manager: Any,
+    validate_strategy_use_case: Any | None = None,
+) -> None:
+    """Register ping, validate_strategy, and get_audit_log MCP tools.
+
+    Parameters
+    ----------
+    mcp:
+        FastMCP server tools are registered on.
+    bot_manager:
+        Captured in each tool closure (S8 / H4).
+    validate_strategy_use_case:
+        Pre-built ``ValidateStrategyUseCase``. When supplied, the
+        ``validate_strategy`` tool reuses it on every call instead of
+        rebuilding (M2). When ``None``, the tool builds one per call
+        (legacy behaviour, retained for ad-hoc callers).
+    """
 
     @mcp.tool(
         name="ping",
@@ -19,13 +47,12 @@ def register_util_tools(mcp: FastMCP) -> None:
     )
     def ping() -> str:
         """Return server health status."""
-        manager = _get_bot_manager(mcp)
-        status = manager.get_status()
+        status = bot_manager.get_status()
         return json.dumps(
             {
                 "status": "ok",
                 "uptime_seconds": status.get("uptime_seconds", 0),
-                "hyperliquid_connected": manager.has_exchange,
+                "hyperliquid_connected": bot_manager.has_exchange,
                 "bot_running": status.get("is_running", False),
             },
             indent=2,
@@ -42,15 +69,6 @@ def register_util_tools(mcp: FastMCP) -> None:
     )
     def validate_strategy(strategy_path: str) -> str:
         """Validate a strategy file."""
-        from pathlib import Path
-
-        from finbot.core.domain.dto.validate_strategy_request import (
-            ValidateStrategyRequest,
-        )
-        from finbot.startup.service_factory import (
-            create_validate_strategy_use_case,
-        )
-
         if not Path(strategy_path).exists():
             return json.dumps(
                 {
@@ -61,7 +79,15 @@ def register_util_tools(mcp: FastMCP) -> None:
             )
 
         content = Path(strategy_path).read_text(encoding="utf-8")
-        use_case = create_validate_strategy_use_case()
+        use_case = validate_strategy_use_case
+        if use_case is None:
+            # Legacy path for ad-hoc callers that don't supply a prebuilt
+            # use case. The composition root always supplies one (M2).
+            from finbot.startup.service_factory import (
+                create_validate_strategy_use_case,
+            )
+
+            use_case = create_validate_strategy_use_case()
         request = ValidateStrategyRequest(
             strategy_path=strategy_path, strategy_content=content
         )
@@ -77,7 +103,6 @@ def register_util_tools(mcp: FastMCP) -> None:
                 "errors": result.errors,
             },
             indent=2,
-            default=str,
         )
 
     @mcp.tool(
@@ -93,8 +118,7 @@ def register_util_tools(mcp: FastMCP) -> None:
         event_type: str | None = None,
     ) -> str:
         """Return recent audit log entries."""
-        manager = _get_bot_manager(mcp)
-        entries = manager.get_audit_log(limit=limit, event_type=event_type)
+        entries = bot_manager.get_audit_log(limit=limit, event_type=event_type)
         return json.dumps(
             {
                 "count": len(entries),
@@ -112,5 +136,4 @@ def register_util_tools(mcp: FastMCP) -> None:
                 ],
             },
             indent=2,
-            default=str,
         )
