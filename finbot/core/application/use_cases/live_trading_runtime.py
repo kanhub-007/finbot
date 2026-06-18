@@ -48,6 +48,7 @@ from finbot.core.domain.entities.risk_event_record import RiskEventRecord
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.entities.trading_mode import TradingMode
+from finbot.core.domain.events.runtime_events import RiskTriggeredEvent
 from finbot.core.domain.interfaces.bar_frame_converter import (
     BarFrameConverter,
 )
@@ -253,12 +254,18 @@ class LiveTradingRuntimeUseCase:
             return None
 
         mode_info = result.modes.get(mode, {})
+        # Build blockers deterministically: parse errors first, then features
+        # in sorted order. Avoids the prior append-then-insert pattern that
+        # could duplicate the parse entry (M6).
         blockers: list[str] = []
-        for feature, status in mode_info.items():
+        if mode_info.get("parse") == "error":
+            blockers.append("strategy parsing failed")
+        for feature in sorted(mode_info):
+            if feature == "parse":
+                continue
+            status = mode_info[feature]
             if status not in ("supported", "parse"):
                 blockers.append(f"{feature}: {status}")
-        if "parse" in mode_info and mode_info["parse"] == "error":
-            blockers.insert(0, "strategy parsing failed")
         if blockers:
             return RunBotResult(
                 status="rejected",
@@ -740,10 +747,6 @@ class LiveTradingRuntimeUseCase:
     def _emit_risk(self, event_type: str, reason: str, *, bot_stopped: bool) -> None:
         """Emit a risk-triggered event to all registered observers."""
         try:
-            from finbot.core.domain.events.runtime_events import (
-                RiskTriggeredEvent,
-            )
-
             self._event_emitter.emit(
                 RiskTriggeredEvent(
                     run_id=self._bot_run_id,

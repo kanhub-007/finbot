@@ -208,7 +208,9 @@ class SqliteMigrator(DatabaseMigrator):
                 return self._version_from_conn(conn)
             finally:
                 conn.close()
-        except Exception:
+        except sqlite3.OperationalError:
+            # Database doesn't exist yet or schema_version table absent.
+            # Other errors (corruption, permissions) should propagate.
             return 0
 
     @staticmethod

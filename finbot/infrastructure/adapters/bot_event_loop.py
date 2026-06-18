@@ -136,8 +136,6 @@ class BotEventLoop(BotLoop):
 
     def _dispatch_with_deadline(self, event: BotEvent) -> None:
         """Dispatch an event, logging a warning if candle work stalls the loop."""
-        import time
-
         started = time.monotonic()
         self._dispatch(event)
         elapsed = time.monotonic() - started

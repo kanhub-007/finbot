@@ -73,9 +73,16 @@ class SqliteBotStateRepository(BotStateRepository):
                 repo.mark_signal_processed(signal)
 
         All writes inside the block are committed atomically when the
-        block exits without exception.  Inner write methods call
+        block exits without exception. Inner write methods call
         :meth:`_execute`, which honours ``self._in_transaction`` and skips
         the per-call commit so nothing is persisted prematurely.
+
+        **Nested re-entry** (L5): when already inside a transaction, the
+        context manager yields as a no-op passthrough — inner writes still
+        hit ``_execute`` (which sees ``_in_transaction=True`` and skips
+        commit), and the outer ``transaction()`` owns the single BEGIN/COMMIT.
+        This means callers can safely wrap a transaction around code that
+        already opened one without double-committing or deadlocking.
         """
         if self._in_transaction:
             # Nested re-entry: behave as a no-op passthrough so callers can
