@@ -565,6 +565,29 @@ class FakeExchangeGateway(InMemoryExchangeGateway):
 # ---------------------------------------------------------------------------
 
 
+def make_dry_run_submission_strategy(repo, exchange=None):
+    """Build a DryRunSubmissionStrategy wired to a repo + fresh TradeLedger.
+
+    Shared by test helpers that construct LiveTradingRuntimeUseCase directly.
+    Pass ``exchange`` so dry-run fakes can track position state.
+    """
+    from finbot.core.domain.services.trade_ledger import TradeLedger
+    from finbot.infrastructure.adapters.dry_run_submission_strategy import (
+        DryRunSubmissionStrategy,
+    )
+
+    return DryRunSubmissionStrategy(repo, TradeLedger(repo), exchange=exchange)
+
+
+def make_event_emitter():
+    """Build a SimpleRuntimeEventEmitter for tests."""
+    from finbot.infrastructure.adapters.simple_runtime_event_emitter import (
+        SimpleRuntimeEventEmitter,
+    )
+
+    return SimpleRuntimeEventEmitter()
+
+
 class FakeRuntime:
     """A fake LiveTradingRuntimeUseCase that records lifecycle calls.
 

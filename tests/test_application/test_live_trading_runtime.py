@@ -14,6 +14,8 @@ from tests.fakes import (
     StubBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
+    make_dry_run_submission_strategy,
+    make_event_emitter,
     new_closed_candle,
 )
 
@@ -37,14 +39,20 @@ def _create_runtime(
         LiveTradingRuntimeUseCase,
     )
 
+    _repo = repo or StubBotStateRepository()
+    _exchange = exchange or InMemoryExchangeGateway()
     return LiveTradingRuntimeUseCase(
-        exchange_gateway=exchange or InMemoryExchangeGateway(),
+        exchange_gateway=_exchange,
         strategy_evaluator=evaluator or FakeStrategyEvaluator(),
-        state_repository=repo or StubBotStateRepository(),
+        state_repository=_repo,
         indicator_calculator=indicator_engine or InMemoryIndicatorEngine(),
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=bar_frame_converter or InMemoryBarFrameConverter(),
         mode=mode,
+        submission_strategy=make_dry_run_submission_strategy(
+            _repo, exchange=_exchange
+        ),
+        event_emitter=make_event_emitter(),
         warmup_bars=warmup_bars or closed_warmup_bars(100),
         required_columns=required_columns or set(),
     )

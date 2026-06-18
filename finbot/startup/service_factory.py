@@ -414,7 +414,9 @@ def create_live_trading_runtime_use_case(
     )
 
     if trading_mode == TradingMode.DRY_RUN:
-        submission_strategy = DryRunSubmissionStrategy(repo, trade_ledger)
+        submission_strategy = DryRunSubmissionStrategy(
+            repo, trade_ledger, exchange=gateway
+        )
     else:
         submission_strategy = LiveSubmissionStrategy(
             gateway, order_normalizer=None, repo=repo

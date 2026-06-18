@@ -27,6 +27,8 @@ from tests.fakes import (
     StubBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
+    make_dry_run_submission_strategy,
+    make_event_emitter,
     new_closed_candle,
 )
 
@@ -107,6 +109,8 @@ def _make_runtime(**overrides):
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=TradingMode.DRY_RUN,
+        submission_strategy=make_dry_run_submission_strategy(repo, exchange=overrides.get("exchange_gateway", TrackingDryRunExchange("BTC"))),
+        event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(100),
         required_columns={"atr"},
         order_planner=OrderPlanner(

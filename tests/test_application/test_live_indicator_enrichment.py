@@ -37,6 +37,8 @@ from tests.fakes import (
     InMemoryExchangeGateway,
     StubBotStateRepository,
     closed_warmup_bars,
+    make_dry_run_submission_strategy,
+    make_event_emitter,
     new_closed_candle,
 )
 
@@ -92,6 +94,10 @@ def test_real_calculator_composes_intermediate_indicators() -> None:
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=PandasBarFrameConverter(),
         mode=TradingMode.DRY_RUN,
+        submission_strategy=make_dry_run_submission_strategy(
+            StubBotStateRepository()
+        ),
+        event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(120),
         required_columns=set(loader.last_required_columns()),
         required_indicators=loader.last_required_indicators(),

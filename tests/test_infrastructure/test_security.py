@@ -19,9 +19,11 @@ class TestSettingsSecrets:
         assert "0xabcd1234" not in rep
         assert "SecretStr" in rep or "**********" in rep
 
-    def test_private_key_is_not_required_for_dry_run(self) -> None:
+    def test_private_key_is_not_required_for_dry_run(self, monkeypatch) -> None:
         """Dry-run mode must work with an empty private key."""
-        settings = Settings(mode="dry_run")
+        # Isolate from the local .env so the test is deterministic.
+        monkeypatch.setenv("FINBOT_HYPERLIQUID_PRIVATE_KEY", "")
+        settings = Settings(_env_file=None, mode="dry_run")
         assert settings.hyperliquid_private_key.get_secret_value() == ""
 
 

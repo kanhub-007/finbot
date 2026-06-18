@@ -29,6 +29,8 @@ from tests.fakes import (
     InMemoryIndicatorEngine,
     closed_warmup_bars,
     indicator_bar,
+    make_dry_run_submission_strategy,
+    make_event_emitter,
 )
 
 
@@ -40,9 +42,10 @@ def _make_runtime(*, repo=None, ledger=None, gates=None):
 
     repo = repo or InMemoryBotStateRepository()
     ledger = ledger or TradeLedger(repo)
+    exchange = InMemoryExchangeGateway()
 
     return LiveTradingRuntimeUseCase(
-        exchange_gateway=InMemoryExchangeGateway(),
+        exchange_gateway=exchange,
         strategy_evaluator=FakeStrategyEvaluator(),
         state_repository=repo,
         indicator_calculator=InMemoryIndicatorEngine(
@@ -51,6 +54,8 @@ def _make_runtime(*, repo=None, ledger=None, gates=None):
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=TradingMode.DRY_RUN,
+        submission_strategy=make_dry_run_submission_strategy(repo, exchange=exchange),
+        event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(100),
         required_columns={"atr"},
         order_planner=OrderPlanner(gates=gates or [ModeGate()]),

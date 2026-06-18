@@ -1,4 +1,10 @@
-"""DryRunSubmissionStrategy — synthesizes fills without exchange calls."""
+"""DryRunSubmissionStrategy — synthesizes fills without real exchange calls.
+
+Records the order intent, optionally delegates to the exchange's
+``submit_order`` (so dry-run exchange fakes can track position state — the
+real :class:`DryRunExchangeGateway` treats it as a no-op), then synthesizes a
+fill from the latest bar and applies it to the :class:`TradeLedger`.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +16,7 @@ from finbot.core.domain.entities.fill_record import FillRecord
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
+from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 from finbot.core.domain.interfaces.order_submission_strategy import (
     OrderSubmissionStrategy,
 )
@@ -17,19 +24,24 @@ from finbot.core.domain.services.trade_ledger import TradeLedger
 
 
 class DryRunSubmissionStrategy(OrderSubmissionStrategy):
-    """Synthesize fills locally instead of submitting to the exchange.
+    """Synthesize fills locally instead of submitting real exchange orders.
 
-    Records the order intent, creates a synthetic FillRecord from the
-    latest bar's close price, and applies it to the TradeLedger.
+    When an ``exchange`` is wired, ``submit_order`` is called on it so that
+    dry-run exchange fakes (e.g. ``TrackingDryRunExchange`` in tests) can
+    update their internal position state. The production
+    :class:`DryRunExchangeGateway` no-ops this call, so live funds are never
+    at risk.
     """
 
     def __init__(
         self,
         repo: BotStateRepository,
         trade_ledger: TradeLedger,
+        exchange: ExchangeGateway | None = None,
     ) -> None:
         self._repo = repo
         self._trade_ledger = trade_ledger
+        self._exchange = exchange
 
     def submit(
         self,
@@ -37,8 +49,15 @@ class DryRunSubmissionStrategy(OrderSubmissionStrategy):
         bot_run_id: str,
         latest_bar: dict[str, Any] | None,
     ) -> tuple[str, bool]:
-        """Record intent and synthesize a fill from the latest bar."""
+        """Record intent, optionally notify exchange, synthesize fill."""
         intent_id = self._repo.record_order_intent(intent)
+
+        # Let the exchange fake track position (no-op on DryRunExchangeGateway).
+        if self._exchange is not None:
+            try:
+                self._exchange.submit_order(intent)
+            except Exception:
+                pass
 
         fill = self._synthesize_fill(intent, intent_id, bot_run_id, latest_bar)
         if fill is not None:

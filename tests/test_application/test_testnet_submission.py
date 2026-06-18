@@ -24,8 +24,18 @@ from tests.fakes import (
     StubBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
+    make_event_emitter,
     new_closed_candle,
 )
+
+
+def _make_live_submission_strategy(exchange, repo, normalizer=None):
+    """Build a LiveSubmissionStrategy wired to the test exchange."""
+    from finbot.infrastructure.adapters.live_submission_strategy import (
+        LiveSubmissionStrategy,
+    )
+
+    return LiveSubmissionStrategy(exchange, normalizer, repo)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -39,6 +49,7 @@ def _make_runtime(**overrides):
     )
 
     repo = overrides.get("state_repository") or StubBotStateRepository()
+    exchange = overrides.get("exchange_gateway") or FakeExchangeGateway()
     metadata_provider = overrides.get(
         "metadata_provider", InMemoryMarketMetadataProvider.for_btc()
     )
@@ -56,7 +67,7 @@ def _make_runtime(**overrides):
         "_cloid_gen": "cloid_generator",
     }
     kwargs = dict(
-        exchange_gateway=FakeExchangeGateway(),
+        exchange_gateway=exchange,
         strategy_evaluator=FakeStrategyEvaluator(
             signal=SignalDecision(
                 action=SignalAction.LONG_ENTRY,
@@ -73,6 +84,9 @@ def _make_runtime(**overrides):
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=TradingMode.TESTNET,
+        submission_strategy=overrides.get("submission_strategy")
+        or _make_live_submission_strategy(exchange, repo, normalizer),
+        event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(100),
         required_columns={"atr"},
         order_planner=OrderPlanner(gates=[ModeGate(), DuplicateSignalGate(repo)]),

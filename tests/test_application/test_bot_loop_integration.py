@@ -15,6 +15,8 @@ from tests.fakes import (
     StubBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
+    make_dry_run_submission_strategy,
+    make_event_emitter,
 )
 
 
@@ -85,6 +87,8 @@ def test_bot_loop_run_forever_processes_candles() -> None:
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=TradingMode.DRY_RUN,
+        submission_strategy=make_dry_run_submission_strategy(repo),
+        event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(100),
         required_columns={"atr"},
         bot_loop=bot_loop,
@@ -128,6 +132,10 @@ def test_run_forever_raises_without_bot_loop() -> None:
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=TradingMode.DRY_RUN,
+        submission_strategy=make_dry_run_submission_strategy(
+            StubBotStateRepository()
+        ),
+        event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(100),
     )
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")

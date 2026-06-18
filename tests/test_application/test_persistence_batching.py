@@ -22,7 +22,12 @@ from tests.fakes import (
     InMemoryIndicatorEngine,
     closed_warmup_bars,
     indicator_bar,
+    make_event_emitter,
     new_closed_candle,
+)
+
+from finbot.infrastructure.adapters.live_submission_strategy import (
+    LiveSubmissionStrategy,
 )
 
 
@@ -90,6 +95,10 @@ def test_accepted_candle_uses_one_transaction() -> None:
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=TradingMode.TESTNET,
+        submission_strategy=LiveSubmissionStrategy(
+            FakeExchangeGateway(), None, repo
+        ),
+        event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(100),
         required_columns={"atr"},
         order_planner=OrderPlanner(gates=[ModeGate()]),

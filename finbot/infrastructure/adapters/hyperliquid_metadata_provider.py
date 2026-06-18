@@ -76,8 +76,16 @@ class HyperliquidMetadataProvider(MarketMetadataProvider):
             self._cache[name.upper()] = md
 
     def _ensure_dex_fetched(self, dex: str) -> None:
-        """Fetch HIP-3 DEX metadata if not already cached."""
+        """Fetch HIP-3 DEX metadata if not already cached.
+
+        Validates the DEX exists via ``perp_dexs()`` before fetching its
+        metadata, so we never call ``metaAndAssetCtxs`` for a non-existent DEX.
+        """
         if self._dex_fetched.get(dex):
+            return
+        # Validate the DEX is known before fetching (also warms the cache).
+        if dex not in self._get_perp_dexs():
+            self._dex_fetched[dex] = True
             return
         from hyperliquid.info import Info
 
