@@ -592,6 +592,8 @@ class HandleTelegramCommand:
             return self._run_cb_strat(session, value)
         elif action == "sym":
             return self._run_cb_sym(session, value)
+        elif action == "page":
+            return self._render_symbol_page(session, page=int(value))
         elif action == "int":
             return self._run_cb_int(session, value)
         elif action == "mode":
@@ -602,6 +604,61 @@ class HandleTelegramCommand:
             return TelegramCommandResult(
                 text="Invalid selection, please start again with /run\\."
             )
+
+    def _render_symbol_page(
+        self, session, page: int = 0
+    ) -> TelegramCommandResult:
+        """Render a paginated symbol picker."""
+        _SYMBOLS_PER_PAGE = 6
+        symbols = _get_symbols(self._metadata_provider)
+        total_pages = (len(symbols) + _SYMBOLS_PER_PAGE - 1) // _SYMBOLS_PER_PAGE
+        page = max(0, min(page, total_pages - 1))
+
+        sid = session.session_id
+        start = page * _SYMBOLS_PER_PAGE
+        page_symbols = symbols[start : start + _SYMBOLS_PER_PAGE]
+
+        # Symbol buttons (2 rows of 3)
+        keyboard_rows = []
+        row = []
+        for sym in page_symbols:
+            row.append(
+                {"text": sym, "callback_data": f"run:{sid}:sym:{sym}"}
+            )
+            if len(row) == 3:
+                keyboard_rows.append(row)
+                row = []
+        if row:
+            keyboard_rows.append(row)
+
+        # Navigation row
+        nav_row = []
+        if page > 0:
+            nav_row.append(
+                {"text": "\u25c0 Prev", "callback_data": f"run:{sid}:page:{page - 1}"}
+            )
+        nav_row.append(
+            {"text": f"{page + 1}/{total_pages}", "callback_data": "none"}
+        )
+        if page < total_pages - 1:
+            nav_row.append(
+                {"text": "Next \u25b6", "callback_data": f"run:{sid}:page:{page + 1}"}
+            )
+        keyboard_rows.append(nav_row)
+
+        # Search hint row
+        keyboard_rows.append([
+            {"text": "\u2315 Type /run SYMBOL to skip picker", "callback_data": "none"}
+        ])
+
+        return TelegramCommandResult(
+            text=(
+                f"Select symbol \\({len(symbols)} available,"
+                f" page {page + 1}/{total_pages}\\):"
+            ),
+            parse_mode="MarkdownV2",
+            reply_markup={"inline_keyboard": keyboard_rows},
+        )
 
     def _run_cb_strat(
         self, session, idx_str: str
@@ -622,25 +679,7 @@ class HandleTelegramCommand:
         )
         self._session_store.save(session)
 
-        sid = session.session_id
-        symbols = _get_symbols(self._metadata_provider)
-        buttons = []
-        for sym in symbols[:30]:  # Telegram limits inline keyboards
-            buttons.append(
-                {"text": sym, "callback_data": f"run:{sid}:sym:{sym}"}
-            )
-        keyboard_rows = []
-        for i in range(0, len(buttons), 3):
-            keyboard_rows.append(buttons[i : i + 3])
-
-        return TelegramCommandResult(
-            text=(
-                f"Strategy: {_escape_mdv2(strategy_name)}\n"
-                f"Select symbol \\({len(symbols)} available\\):"
-            ),
-            parse_mode="MarkdownV2",
-            reply_markup={"inline_keyboard": keyboard_rows},
-        )
+        return self._render_symbol_page(session, page=0)
 
     def _run_cb_sym(
         self, session, symbol: str
