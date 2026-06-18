@@ -264,8 +264,8 @@ class TestStatus:
         )
 
         assert "Idle" in result.text or "idle" in result.text.lower()
-        assert "r\_abc122" in result.text
-        assert "trend\_follow" in result.text
+        assert r"r\_abc122" in result.text
+        assert r"trend\_follow" in result.text
         assert result.reply_markup is not None
 
     @pytest.mark.asyncio
@@ -326,8 +326,8 @@ class TestStatus:
             )
         )
 
-        assert "r\_abc123" in result.text
-        assert "macd\_cross" in result.text
+        assert r"r\_abc123" in result.text
+        assert r"macd\_cross" in result.text
         assert "47" in result.text
         assert "12" in result.text
         assert "11" in result.text
@@ -598,8 +598,8 @@ class TestHistory:
             )
         )
 
-        assert "r\_001" in result.text
-        assert "r\_002" in result.text
+        assert r"r\_001" in result.text
+        assert r"r\_002" in result.text
         assert result.reply_markup is not None
 
     @pytest.mark.asyncio
@@ -648,8 +648,8 @@ class TestList:
             )
         )
 
-        assert "macd\_cross" in result.text
-        assert "trend\_follow" in result.text
+        assert r"macd\_cross" in result.text
+        assert r"trend\_follow" in result.text
 
 
 class TestPanic:
@@ -922,3 +922,130 @@ class TestOrdersAndCancelHandlers:
             TelegramCommandRequest(command="/cancel", args="", chat_id=1, user_id=1, message_id=1)
         )
         assert "ORDER" in result.text or "Usage" in result.text or "usage" in result.text.lower()
+
+
+class TestConfirmationFlow:
+    """Gap #1: /long, /short, /clear require confirmation in testnet/live."""
+
+    def _use_case(self, mode="dry_run"):
+        from tests.fakes_telegram import FakeBotManager
+
+        fake = FakeBotManager()
+        fake._mode = mode
+        # Override get_status to report the mode for confirmation checks
+        orig = fake.get_status
+
+        def status():
+            s = orig()
+            s["mode"] = mode
+            return s
+
+        fake.get_status = status
+        return HandleTelegramCommand(
+            bot_manager=fake,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({1}),
+        )
+
+    @pytest.mark.asyncio
+    async def test_long_in_live_shows_confirmation(self):
+        """/long in live mode shows Confirm/Cancel, no order placed."""
+        from tests.fakes_telegram import FakeBotManager
+
+        uc = self._use_case(mode="live")
+        await uc.execute(
+            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+        )
+        result = await uc.execute(
+            TelegramCommandRequest(command="/long", args="0.01", chat_id=1, user_id=1, message_id=2)
+        )
+        # Confirmation prompt shown (button text has emoji prefix)
+        assert result.reply_markup is not None
+        buttons = [b["text"] for row in result.reply_markup["inline_keyboard"] for b in row]
+        assert any("Confirm" in b for b in buttons)
+
+    @pytest.mark.asyncio
+    async def test_long_in_dry_run_skips_confirmation(self):
+        """/long in dry-run submits directly (no confirmation)."""
+        uc = self._use_case(mode="dry_run")
+        await uc.execute(
+            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+        )
+        result = await uc.execute(
+            TelegramCommandRequest(command="/long", args="0.01", chat_id=1, user_id=1, message_id=2)
+        )
+        # No confirmation prompt — direct order (FakeBotManager returns ok)
+        assert "Confirm" not in result.text
+
+    @pytest.mark.asyncio
+    async def test_clear_in_live_shows_confirmation(self):
+        """/clear in live shows confirmation prompt."""
+        uc = self._use_case(mode="live")
+        result = await uc.execute(
+            TelegramCommandRequest(command="/clear", args="", chat_id=1, user_id=1, message_id=1)
+        )
+        assert result.reply_markup is not None
+        buttons = [b["text"] for row in result.reply_markup["inline_keyboard"] for b in row]
+        assert any("Confirm" in b for b in buttons)
+
+    @pytest.mark.asyncio
+    async def test_confirm_callback_executes_order(self):
+        """Tapping Confirm on a /long prompt submits the order."""
+        from finbot.core.application.dto.callback_query_request import (
+            CallbackQueryRequest,
+        )
+
+        uc = self._use_case(mode="live")
+        await uc.execute(
+            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+        )
+        prompt = await uc.execute(
+            TelegramCommandRequest(command="/long", args="0.01", chat_id=1, user_id=1, message_id=2)
+        )
+        # Extract session id from the confirm callback data
+        confirm_cb = prompt.reply_markup["inline_keyboard"][0][0]["callback_data"]
+        # confirm:<sid>:exec
+        sid = confirm_cb.split(":")[1]
+
+        result = await uc.handle_callback(
+            CallbackQueryRequest(
+                callback_data=confirm_cb, chat_id=1, user_id=1,
+                message_id=2, callback_query_id="x",
+            )
+        )
+        assert "market" in result.text.lower() or "✅" in result.text or "ok" in result.text.lower() or "\u2705" in result.text
+
+    @pytest.mark.asyncio
+    async def test_cancel_callback_cancels_order(self):
+        """Tapping Cancel on a /long prompt does not submit."""
+        from finbot.core.application.dto.callback_query_request import (
+            CallbackQueryRequest,
+        )
+
+        uc = self._use_case(mode="live")
+        await uc.execute(
+            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+        )
+        prompt = await uc.execute(
+            TelegramCommandRequest(command="/long", args="0.01", chat_id=1, user_id=1, message_id=2)
+        )
+        cancel_cb = prompt.reply_markup["inline_keyboard"][0][1]["callback_data"]
+
+        result = await uc.handle_callback(
+            CallbackQueryRequest(
+                callback_data=cancel_cb, chat_id=1, user_id=1,
+                message_id=2, callback_query_id="x",
+            )
+        )
+        assert "cancel" in result.text.lower() or "\u23f9" in result.text
+
+    @pytest.mark.asyncio
+    async def test_config_save_command(self):
+        """/config save persists to env (via config writer)."""
+        uc = self._use_case()
+        result = await uc.execute(
+            TelegramCommandRequest(command="/config", args="save", chat_id=1, user_id=1, message_id=1)
+        )
+        assert "saved" in result.text.lower() or "\u2705" in result.text

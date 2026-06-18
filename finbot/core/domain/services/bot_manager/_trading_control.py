@@ -56,6 +56,10 @@ class TradingControlMixin:
                     "message": "A strategy is running. Stop it first (/stop).",
                 }
 
+            previous_symbol = (
+                self._active_symbol.symbol if self._active_symbol else None
+            )
+
             leverage, margin_mode = self._read_exchange_leverage(symbol)
             self._active_symbol = ActiveSymbolState(
                 symbol=symbol,
@@ -63,12 +67,40 @@ class TradingControlMixin:
                 margin_mode=margin_mode,
             )
             self._persist_active_symbol()
-            return {
-                "status": "active",
-                "symbol": symbol,
-                "leverage": str(leverage),
-                "margin_mode": margin_mode,
-            }
+
+        # Warn if switching away from a symbol with an open position.
+        warning = self._switch_position_warning(previous_symbol, symbol)
+        result = {
+            "status": "active",
+            "symbol": symbol,
+            "leverage": str(leverage),
+            "margin_mode": margin_mode,
+        }
+        if warning:
+            result["warning"] = warning
+        return result
+
+    def _switch_position_warning(
+        self, previous_symbol: str | None, new_symbol: str
+    ) -> str | None:
+        """Return a warning if switching away from a symbol with a position."""
+        if (
+            previous_symbol is None
+            or previous_symbol.upper() == new_symbol.upper()
+            or self._exchange is None
+        ):
+            return None
+        try:
+            pos = self._exchange.get_position(previous_symbol)
+        except Exception:
+            return None
+        if pos is not None and pos.direction.value != "flat":
+            return (
+                f"Open position on {previous_symbol} ({pos.direction.value} "
+                f"{pos.size}). Switching to {new_symbol} \u2014 close it with "
+                f"/close {previous_symbol}."
+            )
+        return None
 
     def _read_exchange_leverage(self, symbol: str) -> tuple[int, str]:
         """Read leverage from the exchange, falling back to 1x isolated."""
@@ -141,6 +173,28 @@ class TradingControlMixin:
         except ValueError as exc:
             return {"status": "rejected", "message": str(exc)}
         return {"status": "ok", "key": key, "value": value}
+
+    def save_config_to_env(self) -> dict[str, str]:
+        """Persist the current RuntimeBotConfig to durable storage (.env).
+
+        Slice 3 scenario: ``/config save``. Returns ``rejected`` when no
+        config writer is wired (no persistence layer available).
+        """
+        if self._config_writer is None:
+            return {
+                "status": "rejected",
+                "message": "Config persistence is not configured.",
+            }
+        snapshot = self._runtime_config.snapshot()
+        entries = {
+            "max_position": str(snapshot.max_position_usd),
+            "daily_loss": str(snapshot.max_daily_loss_usd),
+            "max_orders": str(snapshot.max_open_orders),
+            "stale_data": str(snapshot.stale_data_seconds),
+        }
+        for key, value in entries.items():
+            self._config_writer.write(key, value)
+        return {"status": "ok", "saved": len(entries)}
 
     def set_default_size(self, size) -> dict[str, str]:
         """Set the default order size for /long /short without explicit size."""
@@ -229,6 +283,10 @@ class TradingControlMixin:
                     "status": "rejected",
                     "message": "Size must be positive.",
                 }
+            # Validate size precision and minimum against symbol metadata.
+            size_error = self._validate_size(resolved)
+            if size_error is not None:
+                return {"status": "rejected", "message": size_error}
             symbol = self._active_symbol.symbol
 
         # Position check (exchange is source of truth)
@@ -394,6 +452,41 @@ class TradingControlMixin:
         except Exception:
             return 0
         return int(getattr(meta, "max_leverage", 0)) if meta else 0
+
+    def _validate_size(self, size) -> str | None:
+        """Validate size precision (sz_decimals) and minimum (min_size).
+
+        Returns an error message string if invalid, or None if valid.
+        Skipped when no metadata provider or no metadata for the symbol.
+        """
+        if self._metadata_provider is None or self._active_symbol is None:
+            return None
+        try:
+            meta = self._metadata_provider.get_metadata(self._active_symbol.symbol)
+        except Exception:
+            return None
+        if meta is None:
+            return None
+        size_dec = Decimal(str(size))
+        sz_decimals = getattr(meta, "sz_decimals", 0) or 0
+        min_size = getattr(meta, "min_size", Decimal("0")) or Decimal("0")
+        # Precision: count decimal places in size
+        size_str = format(size_dec.normalize(), "f")
+        if "." in size_str:
+            decimals = len(size_str.split(".")[1])
+        else:
+            decimals = 0
+        if decimals > sz_decimals:
+            return (
+                f"Size too precise for {meta.symbol} "
+                f"(uses {sz_decimals} decimals)."
+            )
+        if min_size > 0 and size_dec < min_size:
+            return (
+                f"Size below minimum for {meta.symbol} "
+                f"(min {min_size})."
+            )
+        return None
 
     @staticmethod
     def _resolve_risk_price(

@@ -109,6 +109,7 @@ class BotManager(TradingControlMixin):
         create_bot_config: BotConfigFactory | None = None,
         startup_time: float | None = None,
         metadata_provider: Any | None = None,
+        config_writer: Any | None = None,
     ) -> None:
         self._runtime_factory = runtime_factory
         self._repo = repository
@@ -117,6 +118,7 @@ class BotManager(TradingControlMixin):
         self._create_bot_config = create_bot_config
         self._startup_time = startup_time or time.time()
         self._metadata_provider = metadata_provider
+        self._config_writer = config_writer
         self._state = BotLiveState()
         self._runtime: Any | None = None
         self._thread: threading.Thread | None = None
@@ -196,6 +198,23 @@ class BotManager(TradingControlMixin):
             )
             if lev_result.get("status") == "rejected":
                 return lev_result
+
+        # Reject if there's an open position on the symbol (design decision #2):
+        # a strategy would adopt the manual position and may immediately exit
+        # it. User must /close first.
+        if self._exchange is not None:
+            try:
+                pos = self._exchange.get_position(symbol)
+                if pos is not None and pos.direction.value != "flat":
+                    return {
+                        "status": "rejected",
+                        "message": (
+                            f"Open position on {symbol}. "
+                            "Close it first (/close)."
+                        ),
+                    }
+            except Exception:
+                pass
 
         with self._lock:
             error = self._guard_no_conflict()

@@ -1052,3 +1052,97 @@ class TestBracketOrders:
 
         assert result["status"] == "rejected"
         assert exchange.submitted_intents == []
+
+
+class TestSpecGapsRound2:
+    """Gaps found in spec review: position checks, size validation, warnings."""
+
+    def test_run_rejected_when_position_open(self):
+        """/run is rejected when a manual position is open (design decision #2)."""
+        from tests.fakes import FakeRuntime
+        from finbot.core.domain.entities.position_direction import PositionDirection
+        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+        from finbot.core.domain.services.bot_manager import BotManager
+
+        repo = InMemoryBotStateRepository()
+        runtime = FakeRuntime(repo=repo)
+        exchange = FakeExchangeGateway()
+        exchange._position = PositionSnapshot(
+            symbol="BTC", direction=PositionDirection.LONG, size=Decimal("0.01")
+        )
+        manager = BotManager(
+            runtime_factory=lambda **kw: runtime,
+            repository=repo,
+            exchange=exchange,
+            startup_time=time.time(),
+        )
+        manager.activate_symbol("BTC")
+
+        result = manager.start(
+            strategy_path="tests/fixtures/strategies/amt_dip_buyer_final.yaml",
+            symbol="BTC", interval="1h", mode="dry_run", warmup_bars=0,
+        )
+
+        assert result["status"] == "rejected"
+        assert "close" in result["message"].lower()
+
+    def test_long_rejects_too_precise_size(self):
+        """/long with too many decimals for symbol → rejected."""
+        from finbot.core.domain.entities.order_side import OrderSide
+        from tests.fakes import InMemoryMarketMetadataProvider
+
+        exchange = FakeExchangeGateway()
+        exchange.price_to_report = Decimal("50000")
+        manager = _make_manager(exchange=exchange)
+        manager._metadata_provider = InMemoryMarketMetadataProvider.for_btc()
+        manager.activate_symbol("BTC")
+        manager.update_bot_config("max_position", "100000")
+
+        # BTC sz_decimals=5, so 0.0000001 (7 decimals) is too precise
+        result = manager.submit_manual_order(OrderSide.BUY, Decimal("0.0000001"))
+
+        assert result["status"] == "rejected"
+        assert "precise" in result["message"].lower() or "decimal" in result["message"].lower()
+
+    def test_long_rejects_below_min_size(self):
+        """/long below minimum order size → rejected."""
+        from finbot.core.domain.entities.market_metadata import MarketMetadata
+        from finbot.core.domain.entities.order_side import OrderSide
+        from tests.fakes import InMemoryMarketMetadataProvider
+
+        # BTC with min_size=0.001
+        meta = InMemoryMarketMetadataProvider({
+            "BTC": MarketMetadata(
+                symbol="BTC", sz_decimals=5, min_size=Decimal("0.001"),
+                price_tick=Decimal("0.1"), max_leverage=50,
+            )
+        })
+        exchange = FakeExchangeGateway()
+        exchange.price_to_report = Decimal("50000")
+        manager = _make_manager(exchange=exchange)
+        manager._metadata_provider = meta
+        manager.activate_symbol("BTC")
+        manager.update_bot_config("max_position", "100000")
+
+        result = manager.submit_manual_order(OrderSide.BUY, Decimal("0.0001"))
+
+        assert result["status"] == "rejected"
+        assert "minimum" in result["message"].lower() or "min" in result["message"].lower()
+
+    def test_symbol_switch_warns_on_open_position(self):
+        """/symbol ETH while BTC has a position → warning in result."""
+        from finbot.core.domain.entities.position_direction import PositionDirection
+        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+
+        exchange = FakeExchangeGateway()
+        exchange._position = PositionSnapshot(
+            symbol="BTC", direction=PositionDirection.LONG, size=Decimal("0.01")
+        )
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.activate_symbol("ETH")
+
+        assert result["status"] == "active"
+        assert "warning" in result
+        assert "BTC" in result["warning"]

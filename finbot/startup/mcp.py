@@ -80,6 +80,9 @@ def create_server() -> FastMCP:
     from finbot.infrastructure.adapters.hyperliquid_metadata_provider import (
         HyperliquidMetadataProvider,
     )
+    from finbot.infrastructure.adapters.dotenv_config_writer import (
+        DotEnvConfigWriter,
+    )
 
     bot_manager = BotManager(
         runtime_factory=_make_runtime_factory(settings, notification_sender),
@@ -89,6 +92,7 @@ def create_server() -> FastMCP:
         create_bot_config=lambda s: create_bot_config(s),
         startup_time=time.time(),
         metadata_provider=HyperliquidMetadataProvider(),
+        config_writer=DotEnvConfigWriter(),
     )
 
     server = FastMCP(

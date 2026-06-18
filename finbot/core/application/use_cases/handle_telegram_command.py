@@ -117,6 +117,10 @@ class HandleTelegramCommand:
         if data.has_prefix("run") and data.segment_count >= 4:
             return await self._handle_run_callback(request, data)
 
+        # Confirmation callbacks (manual orders + clear): confirm:<sid>:<action>
+        if data.has_prefix("confirm") and data.segment_count >= 3:
+            return self._handle_confirm_callback(request, data)
+
         # Panic callbacks
         if data.has_prefix("panic") and data.segment_count >= 2:
             return self._handle_panic_callback(request, data)
@@ -902,6 +906,74 @@ class HandleTelegramCommand:
                 },
             )
 
+    def _handle_confirm_callback(
+        self, request, data
+    ) -> TelegramCommandResult:
+        """Handle Confirm/Cancel for manual orders and /clear.
+
+        Re-validates state on Confirm (prompt may be stale): re-checks the
+        active symbol, parses the stashed order params, and submits. The
+        BotManager re-runs risk gates internally, so a stale prompt that no
+        longer passes gates is rejected cleanly.
+        """
+        from decimal import Decimal
+
+        from finbot.core.domain.entities.order_side import OrderSide
+
+        session_id = data.action
+        action = data.value
+        session = self._session_store.get(session_id)
+        if session is None:
+            return TelegramCommandResult(
+                text="Session expired\\. Please start again\\.",
+                parse_mode="MarkdownV2",
+            )
+        if session.chat_id != request.chat_id:
+            return TelegramCommandResult(
+                text="Invalid selection\\.", parse_mode="MarkdownV2"
+            )
+        self._session_store.delete(session_id)
+
+        if action == "cancel":
+            return TelegramCommandResult(
+                text="\u23f9 Cancelled\\.", parse_mode="MarkdownV2"
+            )
+
+        if action == "clearexec":
+            return self._execute_clear()
+
+        if action == "exec":
+            # Parse stashed params: "<long|short>|<size>|<sl>|<tp>"
+            marker = session.interval or ""
+            parts = marker.split("|")
+            if len(parts) < 2:
+                return TelegramCommandResult(
+                    text="Session corrupted\\. Please start again\\.",
+                    parse_mode="MarkdownV2",
+                )
+            side = parts[0]
+            try:
+                size = Decimal(parts[1])
+            except Exception:
+                return TelegramCommandResult(
+                    text="Invalid size in session\\.", parse_mode="MarkdownV2"
+                )
+            sl_price = Decimal(parts[2]) if len(parts) > 2 and parts[2] not in ("None", "") else None
+            tp_price = Decimal(parts[3]) if len(parts) > 3 and parts[3] not in ("None", "") else None
+            active = self._bot_manager.get_active_symbol()
+            if active is None:
+                return TelegramCommandResult(
+                    text="No active symbol\\.", parse_mode="MarkdownV2"
+                )
+            order_side = OrderSide.BUY if side == "long" else OrderSide.SELL
+            return self._execute_manual_order(
+                order_side, active, size, sl_price, tp_price
+            )
+
+        return TelegramCommandResult(
+            text="Unknown confirmation action\\.", parse_mode="MarkdownV2"
+        )
+
     def _handle_panic_callback(
         self, request: CallbackQueryRequest, data: CallbackData
     ) -> TelegramCommandResult:
@@ -1188,7 +1260,7 @@ class HandleTelegramCommand:
         return await self._manual_entry(request, "sell")
 
     async def _manual_entry(self, request, side):
-        """Shared /long + /short flow: parse size + optional sl/tp brackets."""
+        """Shared /long + /short flow: parse, validate, confirm (live), submit."""
         from decimal import Decimal
 
         from finbot.core.domain.entities.order_side import OrderSide
@@ -1219,6 +1291,82 @@ class HandleTelegramCommand:
                 text=f"\u274c {_escape_mdv2(parse_err)}", parse_mode="MarkdownV2"
             )
         order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
+
+        # In testnet/live, require an explicit Confirm before real orders.
+        # Dry-run skips confirmation (no real risk).
+        if self._needs_confirmation():
+            return self._render_order_confirmation(
+                request, side, active, size, sl_price, tp_price
+            )
+
+        return self._execute_manual_order(
+            order_side, active, size, sl_price, tp_price
+        )
+
+    def _needs_confirmation(self) -> bool:
+        """True when the bot mode requires confirmation before real orders."""
+        mode = self._live_trading_ack_mode()
+        return mode in ("testnet", "live")
+
+    def _live_trading_ack_mode(self) -> str:
+        """Return the effective mode for confirmation decisions."""
+        # The handler doesn't hold Settings; rely on bot_manager status if
+        # available, otherwise assume dry-run (no confirmation).
+        try:
+            status = self._bot_manager.get_status()
+            mode = str(status.get("mode", "dry_run")).lower()
+            return mode
+        except Exception:
+            return "dry_run"
+
+    def _render_order_confirmation(
+        self, request, side, active, size, sl_price, tp_price
+    ) -> TelegramCommandResult:
+        """Show a Confirm/Cancel prompt for a live/testnet manual order."""
+        session = self._session_store.create(request.chat_id, request.message_id)
+        sid = session.session_id
+        action = "long" if side == "buy" else "short"
+        # Stash the order params in the session for re-validation on confirm.
+        session.symbol = active.symbol
+        session.interval = f"{action}|{size}|{sl_price}|{tp_price}"
+        self._session_store.save(session)
+
+        extras = []
+        if sl_price is not None:
+            extras.append(f"SL={_escape_mdv2(str(sl_price))}")
+        if tp_price is not None:
+            extras.append(f"TP={_escape_mdv2(str(tp_price))}")
+        extra_str = f" {_escape_mdv2(' '.join(extras))}" if extras else ""
+        mode = self._live_trading_ack_mode().upper()
+        return TelegramCommandResult(
+            text=(
+                f"\u26a0\ufe0f Open {action.upper()}\n"
+                f"Symbol: {_escape_mdv2(active.symbol)}\n"
+                f"Size: {_escape_mdv2(str(size))}{extra_str}\n"
+                f"Mode: {mode}\n\n"
+                "Real orders WILL be placed\\."
+            ),
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "\u2705 Confirm",
+                            "callback_data": f"confirm:{sid}:exec",
+                        },
+                        {
+                            "text": "\u274c Cancel",
+                            "callback_data": f"confirm:{sid}:cancel",
+                        },
+                    ]
+                ]
+            },
+        )
+
+    def _execute_manual_order(
+        self, order_side, active, size, sl_price, tp_price
+    ) -> TelegramCommandResult:
+        """Submit the manual order (no confirmation step)."""
         if sl_price is not None or tp_price is not None:
             result = self._bot_manager.submit_manual_order_with_brackets(
                 order_side, size, sl_price=sl_price, tp_price=tp_price
@@ -1235,7 +1383,9 @@ class HandleTelegramCommand:
             extras.append(f"SL={_escape_mdv2(str(sl_price))}")
         if tp_price is not None:
             extras.append(f"TP={_escape_mdv2(str(tp_price))}")
-        extra_str = f" \\[{_escape_mdv2(' '.join(extras))}\\]" if extras else ""
+        extra_str = (
+            f" \\[{_escape_mdv2(' '.join(extras))}\\]" if extras else ""
+        )
         warnings = result.get("warnings") or []
         warn_text = ""
         if warnings:
@@ -1264,6 +1414,43 @@ class HandleTelegramCommand:
 
     async def _handle_clear(self, request: TelegramCommandRequest):
         """Cancel all orders + close all positions (idle only)."""
+        # Require confirmation in testnet/live (design decision #6).
+        if self._needs_confirmation():
+            return self._render_clear_confirmation(request)
+        return self._execute_clear()
+
+    def _render_clear_confirmation(self, request) -> TelegramCommandResult:
+        """Show a Confirm/Cancel prompt for /clear in live/testnet."""
+        session = self._session_store.create(request.chat_id, request.message_id)
+        sid = session.session_id
+        session.interval = "clear"  # marker
+        self._session_store.save(session)
+        mode = self._live_trading_ack_mode().upper()
+        return TelegramCommandResult(
+            text=(
+                "\u26a0\ufe0f CLEAR ALL\n"
+                "This cancels ALL orders and closes ALL positions\\.\n"
+                f"Mode: {mode}"
+            ),
+            parse_mode="MarkdownV2",
+            reply_markup={
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "\u2705 Confirm clear",
+                            "callback_data": f"confirm:{sid}:clearexec",
+                        },
+                        {
+                            "text": "\u274c Cancel",
+                            "callback_data": f"confirm:{sid}:cancel",
+                        },
+                    ]
+                ]
+            },
+        )
+
+    def _execute_clear(self) -> TelegramCommandResult:
+        """Execute the clear (no confirmation step)."""
         result = self._bot_manager.clear_all()
         if result.get("status") != "ok":
             return TelegramCommandResult(
@@ -1344,6 +1531,9 @@ class HandleTelegramCommand:
         # Profile subcommand: /config profile save|load|list [NAME]
         if key == "profile":
             return await self._handle_config_profile(args[1] if len(args) > 1 else "")
+        # Persist runtime config to .env: /config save
+        if key == "save":
+            return await self._handle_config_save()
         if len(args) < 2:
             return TelegramCommandResult(
                 text=f"Usage: /config {key} VALUE", parse_mode="MarkdownV2"
@@ -1370,6 +1560,20 @@ class HandleTelegramCommand:
                 f"max_orders: {_escape_mdv2(str(cfg.max_open_orders))}\n"
                 f"stale_data: {_escape_mdv2(str(cfg.stale_data_seconds))}s\n"
             ),
+            parse_mode="MarkdownV2",
+        )
+
+    async def _handle_config_save(self):
+        """Handle /config save — persist runtime config to .env."""
+        result = self._bot_manager.save_config_to_env()
+        if result.get("status") != "ok":
+            return TelegramCommandResult(
+                text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
+                parse_mode="MarkdownV2",
+            )
+        saved = result.get("saved", 0)
+        return TelegramCommandResult(
+            text=f"\u2705 Saved {saved} settings to \\ .env\\.",
             parse_mode="MarkdownV2",
         )
 

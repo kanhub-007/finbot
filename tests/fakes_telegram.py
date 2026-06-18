@@ -284,6 +284,9 @@ class FakeBotManager:
     def update_bot_config(self, key: str, value: str) -> dict[str, str]:
         return {"status": "ok", "key": key, "value": value}
 
+    def save_config_to_env(self) -> dict[str, str]:
+        return {"status": "ok", "saved": 4}
+
     def set_default_size(self, size) -> dict[str, str]:
         self._default_size = size
         return {"status": "ok", "default_size": str(size)}
