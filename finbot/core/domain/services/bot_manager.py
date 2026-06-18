@@ -126,6 +126,8 @@ class BotManager:
         # Mutable runtime config shared by strategy + manual gates.
         # Seeded from settings (.env defaults) when available.
         self._runtime_config = self._seed_runtime_config(settings)
+        # Default order size for /long /short without explicit size (Slice 2).
+        self._default_size: Decimal | None = None
 
     @staticmethod
     def _seed_runtime_config(settings: Any) -> RuntimeBotConfig:
@@ -376,6 +378,25 @@ class BotManager:
             return {"status": "rejected", "message": str(exc)}
         return {"status": "ok", "key": key, "value": value}
 
+    def set_default_size(self, size) -> dict[str, str]:
+        """Set the default order size for /long /short without explicit size."""
+        size_dec = Decimal(str(size))
+        if size_dec <= 0:
+            return {"status": "rejected", "message": "Size must be positive."}
+        with self._lock:
+            self._default_size = size_dec
+        return {"status": "ok", "default_size": str(size_dec)}
+
+    def get_default_size(self) -> Decimal | None:
+        """Return the default order size, or None if unset."""
+        with self._lock:
+            return self._default_size
+
+    def clear_default_size(self) -> None:
+        """Clear the default order size."""
+        with self._lock:
+            self._default_size = None
+
     def submit_manual_order(self, side, size) -> dict[str, Any]:
         """Submit a manual market order on the active symbol.
 
@@ -398,7 +419,14 @@ class BotManager:
                     "status": "rejected",
                     "message": "A strategy is running. Stop it first (/stop).",
                 }
-            if Decimal(str(size)) <= 0:
+            # Resolve size: explicit > default > rejected
+            resolved = size if size is not None else self._default_size
+            if resolved is None:
+                return {
+                    "status": "rejected",
+                    "message": "No size given and no default set. Use /size first.",
+                }
+            if Decimal(str(resolved)) <= 0:
                 return {
                     "status": "rejected",
                     "message": "Size must be positive.",
@@ -418,7 +446,7 @@ class BotManager:
         intent = OrderIntent(
             symbol=symbol,
             side=side,
-            size=Decimal(str(size)),
+            size=Decimal(str(resolved)),
             order_type=OrderType.MARKET,
             reduce_only=False,
         )

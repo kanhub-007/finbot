@@ -25,7 +25,7 @@ _HANDLED_COMMANDS = [
     "panic", "help", "list", "mute", "unmute",
     # trading-control spec
     "symbol", "price", "balance", "leverage", "position",
-    "long", "short", "close", "clear", "sl", "tp", "config",
+    "long", "short", "close", "clear", "sl", "tp", "config", "size",
 ]
 
 

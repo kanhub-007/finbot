@@ -160,6 +160,7 @@ class FakeBotManager:
         mode: str,
         warmup_bars: int = 100,
         live_trading_ack: bool = False,
+        execution_config=None,
     ) -> dict[str, str]:
         self.start_called = True
         self.start_called_with = {
@@ -169,6 +170,7 @@ class FakeBotManager:
             "mode": mode,
             "warmup_bars": warmup_bars,
             "live_trading_ack": live_trading_ack,
+            "execution_config": execution_config,
         }
         run_id = f"r_{_short_id()}"
         self._bot_run_id = run_id
@@ -261,6 +263,16 @@ class FakeBotManager:
 
     def update_bot_config(self, key: str, value: str) -> dict[str, str]:
         return {"status": "ok", "key": key, "value": value}
+
+    def set_default_size(self, size) -> dict[str, str]:
+        self._default_size = size
+        return {"status": "ok", "default_size": str(size)}
+
+    def get_default_size(self):
+        return getattr(self, "_default_size", None)
+
+    def clear_default_size(self) -> None:
+        self._default_size = None
 
 
 # ---------------------------------------------------------------------------

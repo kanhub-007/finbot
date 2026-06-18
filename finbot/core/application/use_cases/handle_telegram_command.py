@@ -1334,6 +1334,40 @@ class HandleTelegramCommand:
             text=f"\u2705 {_escape_mdv2(key)} = {_escape_mdv2(args[1])}",
             parse_mode="MarkdownV2",
         )
+    async def _handle_size(self, request: TelegramCommandRequest):
+        """Set, view, or clear the default order size."""
+        from decimal import Decimal
+
+        arg = request.args.strip()
+        if not arg:
+            current = self._bot_manager.get_default_size()
+            val = "not set" if current is None else str(current)
+            return TelegramCommandResult(
+                text=f"Default size: {val}\n"
+                f"Set: /size 0\\.1  \\(or /size clear\\)",
+                parse_mode="MarkdownV2",
+            )
+        if arg.lower() == "clear":
+            self._bot_manager.clear_default_size()
+            return TelegramCommandResult(
+                text="\u2705 Default size cleared\\.", parse_mode="MarkdownV2"
+            )
+        try:
+            size = Decimal(arg)
+        except Exception:
+            return TelegramCommandResult(
+                text="Invalid size\\.", parse_mode="MarkdownV2"
+            )
+        result = self._bot_manager.set_default_size(size)
+        if result.get("status") != "ok":
+            return TelegramCommandResult(
+                text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
+                parse_mode="MarkdownV2",
+            )
+        return TelegramCommandResult(
+            text=f"\u2705 Default size: {_escape_mdv2(str(size))}",
+            parse_mode="MarkdownV2",
+        )
 
 
 # ------------------------------------------------------------------
@@ -1396,4 +1430,5 @@ _COMMAND_HANDLERS: dict[str, object] = {
     "/sl": HandleTelegramCommand._handle_sl,
     "/tp": HandleTelegramCommand._handle_tp,
     "/config": HandleTelegramCommand._handle_config,
+    "/size": HandleTelegramCommand._handle_size,
 }

@@ -741,3 +741,57 @@ class TestConfigDefaultsFromEnv:
         assert cfg.max_daily_loss_usd == Decimal("75")
         assert cfg.max_open_orders == 5
         assert cfg.stale_data_seconds == 60
+
+
+class TestDefaultOrderSize:
+    """Scenario 3 (Slice 2): /size sets a default for /long and /short."""
+
+    def test_set_default_size_stored(self):
+        """set_default_size stores the size for subsequent orders."""
+        exchange = FakeExchangeGateway()
+        exchange.price_to_report = Decimal("50000")
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.set_default_size(Decimal("0.1"))
+
+        assert result["status"] == "ok"
+        assert manager.get_default_size() == Decimal("0.1")
+
+    def test_default_size_used_when_no_size_given(self):
+        """submit_manual_order with size=None uses the default."""
+        from finbot.core.domain.entities.order_side import OrderSide
+
+        exchange = FakeExchangeGateway()
+        exchange.price_to_report = Decimal("50000")
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+        manager.update_bot_config("max_position", "100000")
+        manager.set_default_size(Decimal("0.1"))
+
+        result = manager.submit_manual_order(OrderSide.BUY, None)
+
+        assert result["status"] == "ok"
+        assert exchange.submitted_intents[0].size == Decimal("0.1")
+
+    def test_no_default_and_no_size_rejected(self):
+        """No default size and no explicit size → rejected."""
+        from finbot.core.domain.entities.order_side import OrderSide
+
+        manager = _make_manager()
+        manager.activate_symbol("BTC")
+
+        result = manager.submit_manual_order(OrderSide.BUY, None)
+
+        assert result["status"] == "rejected"
+
+    def test_clear_default_size(self):
+        """clear_default_size resets to None."""
+        exchange = FakeExchangeGateway()
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+        manager.set_default_size(Decimal("0.1"))
+
+        manager.clear_default_size()
+
+        assert manager.get_default_size() is None
