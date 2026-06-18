@@ -36,6 +36,84 @@ class HyperliquidMetadataProvider(MarketMetadataProvider):
 
     _PERP_DEXS_TTL: float = 300.0  # class-level default
 
+    def list_symbols(self) -> list[str]:
+        """Return all available perp symbols (standard + HIP-3).
+
+        Fetches from Hyperliquid on first call, caches permanently.
+        """
+        self._ensure_standard_fetched()
+        symbols = list(self._cache.keys())
+
+        # Add HIP-3 symbols
+        for dex in self._get_perp_dexs():
+            self._ensure_dex_fetched(dex)
+            dex_cache = self._dex_meta_cache.get(dex, {})
+            symbols.extend(dex_cache.keys())
+
+        return sorted(symbols)
+
+    def _ensure_standard_fetched(self) -> None:
+        """Fetch standard perp universe if not already cached."""
+        if self._fetched:
+            return
+        from hyperliquid.info import Info
+
+        info = Info(self._base_url, skip_ws=True)
+        meta_list = info.meta()
+        self._fetched = True
+
+        universe = meta_list.get("universe", [])
+        for asset in universe:
+            name = asset.get("name", "")
+            md = MarketMetadata(
+                symbol=name,
+                sz_decimals=asset.get("szDecimals", 0),
+                price_tick=_tick_to_decimal(
+                    asset.get("coinCdcDecimalPlaces", 0)
+                ),
+                max_leverage=asset.get("maxLeverage", 0),
+            )
+            self._cache[name.upper()] = md
+
+    def _ensure_dex_fetched(self, dex: str) -> None:
+        """Fetch HIP-3 DEX metadata if not already cached."""
+        if self._dex_fetched.get(dex):
+            return
+        from hyperliquid.info import Info
+
+        try:
+            info = Info(self._base_url, skip_ws=True)
+            result = info.post(
+                "/info",
+                {"type": "metaAndAssetCtxs", "dex": dex},
+            )
+        except Exception:
+            self._dex_fetched[dex] = True
+            return
+
+        if not result or len(result) < 1:
+            self._dex_fetched[dex] = True
+            return
+
+        meta = result[0]
+        universe = meta.get("universe", []) if isinstance(meta, dict) else []
+
+        per_dex: dict[str, MarketMetadata] = {}
+        for asset in universe:
+            name = asset.get("name", "")
+            md = MarketMetadata(
+                symbol=name,
+                sz_decimals=asset.get("szDecimals", 0),
+                price_tick=_tick_to_decimal(
+                    asset.get("coinCdcDecimalPlaces", 0)
+                ),
+                max_leverage=asset.get("maxLeverage", 0),
+            )
+            per_dex[name] = md
+
+        self._dex_meta_cache[dex] = per_dex
+        self._dex_fetched[dex] = True
+
     def __init__(
         self,
         base_url: str = "https://api.hyperliquid.xyz",
@@ -59,30 +137,8 @@ class HyperliquidMetadataProvider(MarketMetadataProvider):
             return self._get_hip3_metadata(symbol)
 
         # ── Standard perp path ──
-        key = symbol.upper()
-        if key in self._cache:
-            return self._cache[key]
-        if self._fetched:
-            return None
-
-        from hyperliquid.info import Info
-
-        info = Info(self._base_url, skip_ws=True)
-        meta_list = info.meta()
-        self._fetched = True
-
-        universe = meta_list.get("universe", [])
-        for asset in universe:
-            name = asset.get("name", "")
-            md = MarketMetadata(
-                symbol=name,
-                sz_decimals=asset.get("szDecimals", 0),
-                price_tick=_tick_to_decimal(asset.get("coinCdcDecimalPlaces", 0)),
-                max_leverage=asset.get("maxLeverage", 0),
-            )
-            self._cache[name.upper()] = md
-
-        return self._cache.get(key)
+        self._ensure_standard_fetched()
+        return self._cache.get(symbol.upper())
 
     # ── HIP-3 internals ──────────────────────────────────────────────
 
@@ -97,54 +153,14 @@ class HyperliquidMetadataProvider(MarketMetadataProvider):
 
         # Check per-dex cache
         dex_cache = self._dex_meta_cache.get(dex)
-        if dex_cache is not None and api_symbol in dex_cache:
-            return dex_cache[api_symbol]
+        if dex_cache is not None:
+            return dex_cache.get(api_symbol)
 
-        # Check if we already tried to fetch this DEX
         if self._dex_fetched.get(dex):
-            return None  # fetched but token not found
-
-        # Ensure perp_dexs list is loaded
-        dex_list = self._get_perp_dexs()
-        if dex not in dex_list:
-            self._dex_fetched[dex] = True
             return None
 
-        # Fetch metaAndAssetCtxs for this DEX
-        from hyperliquid.info import Info
-
-        try:
-            info = Info(self._base_url, skip_ws=True)
-            result = info.post(
-                "/info",
-                {"type": "metaAndAssetCtxs", "dex": dex},
-            )
-        except Exception:
-            self._dex_fetched[dex] = True
-            return None
-
-        if not result or len(result) < 1:
-            self._dex_fetched[dex] = True
-            return None
-
-        meta = result[0]
-        universe = meta.get("universe", []) if isinstance(meta, dict) else []
-
-        # Build per-dex cache
-        per_dex: dict[str, MarketMetadata] = {}
-        for asset in universe:
-            name = asset.get("name", "")
-            md = MarketMetadata(
-                symbol=name,
-                sz_decimals=asset.get("szDecimals", 0),
-                price_tick=_tick_to_decimal(asset.get("coinCdcDecimalPlaces", 0)),
-                max_leverage=asset.get("maxLeverage", 0),
-            )
-            per_dex[name] = md
-
-        self._dex_meta_cache[dex] = per_dex
-        self._dex_fetched[dex] = True
-        return per_dex.get(api_symbol)
+        self._ensure_dex_fetched(dex)
+        return self._dex_meta_cache.get(dex, {}).get(api_symbol)
 
     def _get_perp_dexs(self) -> list[str]:
         """Return cached DEX provider list, refreshing if expired."""

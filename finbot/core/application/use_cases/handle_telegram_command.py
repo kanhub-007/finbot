@@ -41,6 +41,7 @@ class HandleTelegramCommand:
         session_store: TelegramSessionStore,
         allowed_users: frozenset[int],
         live_trading_ack: bool = False,
+        metadata_provider: object | None = None,
     ) -> None:
         self._bot_manager = bot_manager
         self._chat_repo = chat_repo
@@ -48,6 +49,7 @@ class HandleTelegramCommand:
         self._session_store = session_store
         self._allowed_users = allowed_users
         self._live_trading_ack = live_trading_ack
+        self._metadata_provider = metadata_provider
 
     # ------------------------------------------------------------------
     # Public API
@@ -540,7 +542,7 @@ class HandleTelegramCommand:
         else:
             # Idle — show symbol picker
             buttons = []
-            for sym in _DEFAULT_SYMBOLS:
+            for sym in _get_symbols(self._metadata_provider)[:30]:
                 buttons.append(
                     {"text": sym, "callback_data": f"panic:sym:{sym}"}
                 )
@@ -621,8 +623,9 @@ class HandleTelegramCommand:
         self._session_store.save(session)
 
         sid = session.session_id
+        symbols = _get_symbols(self._metadata_provider)
         buttons = []
-        for sym in _DEFAULT_SYMBOLS:
+        for sym in symbols[:30]:  # Telegram limits inline keyboards
             buttons.append(
                 {"text": sym, "callback_data": f"run:{sid}:sym:{sym}"}
             )
@@ -631,7 +634,10 @@ class HandleTelegramCommand:
             keyboard_rows.append(buttons[i : i + 3])
 
         return TelegramCommandResult(
-            text=f"Strategy: {_escape_mdv2(strategy_name)}\nSelect symbol:",
+            text=(
+                f"Strategy: {_escape_mdv2(strategy_name)}\n"
+                f"Select symbol ({len(symbols)} available):"
+            ),
             parse_mode="MarkdownV2",
             reply_markup={"inline_keyboard": keyboard_rows},
         )
@@ -939,6 +945,20 @@ class HandleTelegramCommand:
 
 _DEFAULT_SYMBOLS = ("BTC", "ETH", "SOL", "ARB", "DOGE")
 _DEFAULT_INTERVALS = ("1m", "5m", "15m", "1h", "4h", "1d")
+
+
+def _get_symbols(metadata_provider: object | None) -> tuple[str, ...]:
+    """Return available symbols from Hyperliquid, or defaults on failure."""
+    if metadata_provider is not None and hasattr(
+        metadata_provider, "list_symbols"
+    ):
+        try:
+            symbols = metadata_provider.list_symbols()
+            if symbols:
+                return tuple(symbols)
+        except Exception:
+            pass
+    return _DEFAULT_SYMBOLS
 
 # Characters that MUST be escaped in Telegram MarkdownV2.
 # See: https://core.telegram.org/bots/api#markdownv2-style

@@ -99,6 +99,12 @@ class TelegramControlPlane:
             InMemoryTelegramSessionStore,
         )
 
+        from finbot.infrastructure.adapters.hyperliquid_metadata_provider import (
+            HyperliquidMetadataProvider,
+        )
+
+        metadata_provider = HyperliquidMetadataProvider()
+
         command_use_case = HandleTelegramCommand(
             bot_manager=self._bot_manager,
             chat_repo=self._chat_repo,
@@ -106,6 +112,7 @@ class TelegramControlPlane:
             session_store=InMemoryTelegramSessionStore(),
             allowed_users=self._settings.telegram_allowed_user_ids,
             live_trading_ack=self._settings.live_trading_ack,
+            metadata_provider=metadata_provider,
         )
 
         self._handler = TelegramBotHandler(
