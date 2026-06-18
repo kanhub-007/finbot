@@ -14,3 +14,4 @@ logs/
 *.egg-info/
 .venv313
 specs/
+research/

@@ -1,0 +1,106 @@
+# Trend-Aligned Momentum v2 — SMA crossover with ADX / volume confirmation
+#
+# Same logic as finbar/strategies/daily_trend/strategy_5_trend_momentum.json
+# Converted to YAML for Finbot test fixtures.
+#
+# LONG ENTRY: close > sma_trend AND close crosses above sma_fast AND
+#              adx_14 > 22 AND rvol_14 > 0.7 AND rsi_14 < 70
+# LONG EXIT:  close < sma_fast OR rsi_14 >= 75
+# SHORT ENTRY: close < sma_trend AND close crosses below sma_fast AND
+#              adx_14 > 22 AND rvol_14 > 0.7 AND rsi_14 > 30
+# SHORT EXIT:  close > sma_fast OR rsi_14 <= 25
+
+schema_version: "2.0"
+name: trend_momentum_v2
+description: >
+  Trend-following with strict regime alignment. Only trade in direction of
+  SMA_50 trend. ADX>22 filter. Uses price crosses SMA for entry.
+
+timeframes:
+  primary: 1d
+
+indicators:
+  - name: sma_fast
+    type: sma
+    period: 20
+  - name: sma_trend
+    type: sma
+    period: 50
+  - name: rsi_14
+    type: rsi
+    period: 14
+  - name: adx_14
+    type: adx
+    period: 14
+  - name: atr_14
+    type: atr
+    period: 14
+  - name: rvol_14
+    type: rvol
+
+sides:
+  long:
+    entry:
+      condition:
+        all:
+          - operator: ">"
+            left: close
+            right: sma_trend
+          - operator: crosses_above
+            left: close
+            right: sma_fast
+          - operator: ">"
+            left: adx_14
+            right: 22
+          - operator: ">"
+            left: rvol_14
+            right: 0.7
+          - operator: "<"
+            left: rsi_14
+            right: 70
+    exit:
+      condition:
+        any:
+          - operator: "<"
+            left: close
+            right: sma_fast
+          - operator: ">="
+            left: rsi_14
+            right: 75
+
+  short:
+    entry:
+      condition:
+        all:
+          - operator: "<"
+            left: close
+            right: sma_trend
+          - operator: crosses_below
+            left: close
+            right: sma_fast
+          - operator: ">"
+            left: adx_14
+            right: 22
+          - operator: ">"
+            left: rvol_14
+            right: 0.7
+          - operator: ">"
+            left: rsi_14
+            right: 30
+    exit:
+      condition:
+        any:
+          - operator: ">"
+            left: close
+            right: sma_fast
+          - operator: "<="
+            left: rsi_14
+            right: 25
+
+risk:
+  stop_loss:
+    type: atr
+    multiplier: 2.0
+  take_profit:
+    type: risk_reward
+    ratio: 2.5
