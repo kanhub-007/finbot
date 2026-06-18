@@ -448,6 +448,49 @@ class TestSubmitManualOrder:
         assert "positive" in result["message"].lower() or "size" in result["message"].lower()
 
 
+class TestCloseActivePosition:
+    """Scenario 9: /close closes the current position and clears SL/TP."""
+
+    def test_close_submits_reduce_only_market(self):
+        """close_active_position submits a reduce-only market close."""
+        from finbot.core.domain.entities.position_direction import PositionDirection
+        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+
+        exchange = FakeExchangeGateway()
+        exchange._position = PositionSnapshot(
+            symbol="BTC", direction=PositionDirection.LONG, size=Decimal("0.01")
+        )
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.close_active_position()
+
+        assert result["status"] == "ok"
+        assert len(exchange.submitted_intents) == 1
+        intent = exchange.submitted_intents[0]
+        assert intent.reduce_only is True
+
+    def test_close_no_position(self):
+        """No open position → message."""
+        exchange = FakeExchangeGateway()
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.close_active_position()
+
+        assert result["status"] == "rejected"
+        assert "no" in result["message"].lower() and "position" in result["message"].lower()
+
+    def test_close_requires_active_symbol(self):
+        """No active symbol → rejected."""
+        manager = _make_manager()
+
+        result = manager.close_active_position()
+
+        assert result["status"] == "rejected"
+        assert "symbol" in result["message"].lower()
+
+
 class TestBotStartsIdle:
     """Scenario 1: Bot starts fully idle — no symbol, no strategy, no position."""
 

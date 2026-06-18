@@ -536,16 +536,55 @@ class BotManager:
         if self._exchange is None:
             return {"error": "No exchange gateway wired"}
 
-        pos = self._exchange.get_position(symbol)
-        if pos is None or pos.direction.value == "flat":
-            return {"message": "No open position to close"}
+        result = self._close_symbol_position(symbol)
+        if result.get("status") != "ok":
+            return result
+        # Cancel attached SL/TP trigger orders (cloid scheme).
+        self._clear_risk_orders(symbol)
+        return result
 
+    def close_active_position(self) -> dict[str, str]:
+        """Reduce-only market close on the active symbol; clears SL/TP.
+
+        Per the trading-control spec: /close uses the active symbol. Allowed
+        even while a strategy runs (emergency exit) but warns.
+        """
+        with self._lock:
+            if self._active_symbol is None:
+                return {
+                    "status": "rejected",
+                    "message": "No active symbol. Use /symbol first.",
+                }
+            symbol = self._active_symbol.symbol
+            strategy_running = self._runtime is not None
+
+        if self._exchange is None:
+            return {"status": "error", "message": "No exchange gateway wired"}
+
+        result = self._close_symbol_position(symbol)
+        if result.get("status") == "ok":
+            self._clear_risk_orders(symbol)
+            if strategy_running:
+                result["warning"] = (
+                    "Strategy running — this may conflict. Consider /stop first."
+                )
+        return result
+
+    def _close_symbol_position(self, symbol: str) -> dict[str, object]:
+        """Submit a reduce-only market close for a symbol's full position."""
         from finbot.core.domain.entities.order_intent import OrderIntent
         from finbot.core.domain.entities.order_side import OrderSide
         from finbot.core.domain.entities.order_type import OrderType
         from finbot.core.domain.entities.position_direction import (
             PositionDirection,
         )
+
+        pos = self._exchange.get_position(symbol)
+        if pos is None or pos.direction.value == "flat":
+            return {
+                "status": "rejected",
+                "message": f"No open position on {symbol}.",
+            }
 
         side = (
             OrderSide.SELL if pos.direction == PositionDirection.LONG else OrderSide.BUY
@@ -557,7 +596,21 @@ class BotManager:
             order_type=OrderType.MARKET,
             reduce_only=True,
         )
-        return self._exchange.submit_order(intent)
+        response = self._exchange.submit_order(intent)
+        return {"status": "ok", "response": response, "symbol": symbol}
+
+    def _clear_risk_orders(self, symbol: str) -> None:
+        """Cancel SL/TP trigger orders for a symbol (cloid scheme).
+
+        No-op until /sl and /tp are implemented; failures are logged, not
+        raised, so a position close never fails due to cleanup.
+        """
+        for prefix in ("SL:", "TP:"):
+            cloid = f"{prefix}{symbol}"
+            try:
+                self._exchange.cancel_by_cloid(symbol, cloid)
+            except Exception:
+                logger.warning("Failed to cancel risk order %s", cloid)
 
     @property
     def has_exchange(self) -> bool:
