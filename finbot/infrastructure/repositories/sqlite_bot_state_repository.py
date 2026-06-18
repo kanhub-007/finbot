@@ -294,6 +294,55 @@ class SqliteBotStateRepository(BotStateRepository):
             ended_at=(datetime.fromisoformat(row[7]) if row[7] else None),
         )
 
+    # -- active symbol persistence (trading-control spec) ------------------
+
+    def _ensure_active_symbol_table(self) -> None:
+        """Create the single-row active_symbol table if absent."""
+        self._execute(
+            "CREATE TABLE IF NOT EXISTS active_symbol ("
+            "id INTEGER PRIMARY KEY CHECK (id = 1),"
+            "symbol TEXT NOT NULL,"
+            "leverage INTEGER NOT NULL,"
+            "margin_mode TEXT NOT NULL)"
+        )
+
+    def save_active_symbol(self, state) -> None:
+        """Persist (overwrite) the single active-symbol row."""
+        from finbot.core.domain.entities.active_symbol_state import (
+            ActiveSymbolState,
+        )
+
+        self._ensure_active_symbol_table()
+        self._execute(
+            "INSERT INTO active_symbol (id, symbol, leverage, margin_mode) "
+            "VALUES (1, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "symbol=excluded.symbol, leverage=excluded.leverage, "
+            "margin_mode=excluded.margin_mode",
+            (state.symbol, state.leverage, state.margin_mode),
+        )
+
+    def load_active_symbol(self):
+        """Return the persisted active symbol, or None if idle."""
+        from finbot.core.domain.entities.active_symbol_state import (
+            ActiveSymbolState,
+        )
+
+        self._ensure_active_symbol_table()
+        row = self._query_one(
+            "SELECT symbol, leverage, margin_mode FROM active_symbol WHERE id=1"
+        )
+        if row is None:
+            return None
+        return ActiveSymbolState(
+            symbol=row[0], leverage=row[1], margin_mode=row[2]
+        )
+
+    def clear_active_symbol(self) -> None:
+        """Delete the persisted active-symbol row."""
+        self._ensure_active_symbol_table()
+        self._execute("DELETE FROM active_symbol WHERE id=1")
+
     def get_last_signal(self) -> ProcessedSignal | None:
         row = self._query_one(
             "SELECT signal_key, bot_run_id, signal_action, bar_timestamp, "

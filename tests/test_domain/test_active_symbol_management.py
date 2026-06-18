@@ -659,6 +659,45 @@ class TestStopLossAndTakeProfit:
         assert "stop" in result["message"].lower()
 
 
+class TestActiveSymbolPersistence:
+    """Scenario 15: ActiveSymbolState persists so leverage survives restart."""
+
+    def test_activate_persists_to_repository(self):
+        """activate_symbol writes ActiveSymbolState to the repository."""
+        repo = InMemoryBotStateRepository()
+        manager = _make_manager(repo=repo)
+        manager.activate_symbol("BTC")
+
+        persisted = repo.load_active_symbol()
+        assert persisted is not None
+        assert persisted.symbol == "BTC"
+
+    def test_set_leverage_updates_persisted_state(self):
+        """set_leverage updates the persisted ActiveSymbolState."""
+        repo = InMemoryBotStateRepository()
+        manager = _make_manager(repo=repo)
+        manager.activate_symbol("BTC")
+        manager.set_leverage(5)
+
+        persisted = repo.load_active_symbol()
+        assert persisted is not None
+        assert persisted.leverage == 5
+
+    def test_new_manager_restores_persisted_symbol(self):
+        """A fresh BotManager with the same repo restores the active symbol."""
+        repo = InMemoryBotStateRepository()
+        manager_a = _make_manager(repo=repo)
+        manager_a.activate_symbol("BTC")
+        manager_a.set_leverage(5)
+
+        manager_b = _make_manager(repo=repo)
+
+        active = manager_b.get_active_symbol()
+        assert active is not None
+        assert active.symbol == "BTC"
+        assert active.leverage == 5
+
+
 class TestBotStartsIdle:
     """Scenario 1: Bot starts fully idle — no symbol, no strategy, no position."""
 

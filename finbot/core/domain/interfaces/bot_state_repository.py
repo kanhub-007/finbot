@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 from finbot.core.domain.dto.run_counts import RunCounts
+from finbot.core.domain.entities.active_symbol_state import ActiveSymbolState
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
 from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.fill_record import FillRecord
@@ -90,6 +91,20 @@ class BotStateRepository(ABC):
     @abstractmethod
     def get_latest_bot_run(self) -> BotRun | None:
         """Return the most recently created bot run, or None."""
+
+    # -- active symbol persistence (trading-control spec) ------------------
+
+    @abstractmethod
+    def save_active_symbol(self, state: ActiveSymbolState) -> None:
+        """Persist (overwrite) the single active-symbol row."""
+
+    @abstractmethod
+    def load_active_symbol(self) -> ActiveSymbolState | None:
+        """Return the persisted active symbol, or None if idle."""
+
+    @abstractmethod
+    def clear_active_symbol(self) -> None:
+        """Delete the persisted active-symbol row."""
 
     @abstractmethod
     def get_last_signal(self) -> ProcessedSignal | None:

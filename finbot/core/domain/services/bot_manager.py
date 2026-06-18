@@ -116,9 +116,20 @@ class BotManager:
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         # Active symbol state (None = fully idle). See trading-control spec.
-        self._active_symbol: ActiveSymbolState | None = None
+        # Restored from the repository so leverage survives restarts.
+        self._active_symbol: ActiveSymbolState | None = (
+            self._restore_active_symbol()
+        )
         # Mutable runtime config shared by strategy + manual gates.
         self._runtime_config = RuntimeBotConfig()
+
+    def _restore_active_symbol(self) -> ActiveSymbolState | None:
+        """Load persisted active symbol on startup (best-effort)."""
+        try:
+            return self._repo.load_active_symbol()
+        except Exception:
+            logger.warning("Could not restore active symbol state")
+            return None
 
     # -- public lifecycle ----------------------------------------------------
 
@@ -254,6 +265,7 @@ class BotManager:
                 leverage=leverage,
                 margin_mode=margin_mode,
             )
+            self._persist_active_symbol()
             return {
                 "status": "active",
                 "symbol": symbol,
@@ -456,6 +468,7 @@ class BotManager:
                     leverage=leverage,
                     margin_mode=margin_mode,
                 )
+                self._persist_active_symbol()
         return {
             "status": "ok",
             "symbol": symbol,
@@ -472,6 +485,14 @@ class BotManager:
         except Exception:
             return 0
         return int(getattr(meta, "max_leverage", 0)) if meta else 0
+
+    def _persist_active_symbol(self) -> None:
+        """Best-effort persist of the active symbol state."""
+        try:
+            if self._active_symbol is not None:
+                self._repo.save_active_symbol(self._active_symbol)
+        except Exception:
+            logger.warning("Could not persist active symbol state")
 
     # -- public query methods (delegate to repo/exchange) --------------------
 

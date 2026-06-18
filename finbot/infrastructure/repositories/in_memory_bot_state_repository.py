@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from finbot.core.domain.dto.run_counts import RunCounts
+from finbot.core.domain.entities.active_symbol_state import ActiveSymbolState
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
 from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.fill_record import FillRecord
@@ -41,6 +42,7 @@ class InMemoryBotStateRepository(BotStateRepository):
         self._risk_events: list[RiskEventRecord] = []
         self._audit_log: list[AuditLogEntry] = []
         self._lifecycles: dict[str, object] = {}
+        self._active_symbol: ActiveSymbolState | None = None
         self._trades: dict[str, Trade] = {}  # position_id -> Trade
 
     # -- bot run lifecycle --------------------------------------------------
@@ -110,6 +112,18 @@ class InMemoryBotStateRepository(BotStateRepository):
 
     def get_latest_bot_run(self) -> BotRun | None:
         return self._bot_runs[-1] if self._bot_runs else None
+
+    def save_active_symbol(self, state: ActiveSymbolState) -> None:
+        """Persist (overwrite) the single active-symbol row."""
+        self._active_symbol = state
+
+    def load_active_symbol(self) -> ActiveSymbolState | None:
+        """Return the persisted active symbol, or None if idle."""
+        return self._active_symbol
+
+    def clear_active_symbol(self) -> None:
+        """Delete the persisted active-symbol row."""
+        self._active_symbol = None
 
     def get_last_signal(self) -> ProcessedSignal | None:
         return self._processed_signals[-1] if self._processed_signals else None
