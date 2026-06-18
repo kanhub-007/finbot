@@ -101,6 +101,7 @@ class BotManager:
         settings: Any | None = None,
         create_bot_config: BotConfigFactory | None = None,
         startup_time: float | None = None,
+        metadata_provider: Any | None = None,
     ) -> None:
         self._runtime_factory = runtime_factory
         self._repo = repository
@@ -108,6 +109,7 @@ class BotManager:
         self._settings = settings
         self._create_bot_config = create_bot_config
         self._startup_time = startup_time or time.time()
+        self._metadata_provider = metadata_provider
         self._state = BotLiveState()
         self._runtime: Any | None = None
         self._thread: threading.Thread | None = None
@@ -285,6 +287,65 @@ class BotManager:
         if self._exchange is None:
             return None
         return self._exchange.get_balance()
+
+    def set_leverage(
+        self, leverage: int, margin_mode: str = "isolated"
+    ) -> dict[str, str]:
+        """Set leverage on the active symbol, validating against its max.
+
+        Per the trading-control spec: validates ``1 <= leverage <= max_leverage``
+        (when metadata is available), then calls the exchange and updates
+        :class:`ActiveSymbolState`. Surface exchange errors verbatim.
+        """
+        with self._lock:
+            if self._active_symbol is None:
+                return {
+                    "status": "rejected",
+                    "message": "No active symbol. Use /symbol first.",
+                }
+            if leverage < 1:
+                return {
+                    "status": "rejected",
+                    "message": f"Leverage must be >= 1.",
+                }
+
+            symbol = self._active_symbol.symbol
+            max_lev = self._symbol_max_leverage(symbol)
+            if max_lev and leverage > max_lev:
+                return {
+                    "status": "rejected",
+                    "message": f"{symbol} max leverage is {max_lev}x.",
+                }
+
+        # Call exchange outside the lock (network I/O).
+        try:
+            self._exchange.set_leverage(symbol, leverage, margin_mode)
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+
+        with self._lock:
+            if self._active_symbol is not None:
+                self._active_symbol = ActiveSymbolState(
+                    symbol=symbol,
+                    leverage=leverage,
+                    margin_mode=margin_mode,
+                )
+        return {
+            "status": "ok",
+            "symbol": symbol,
+            "leverage": str(leverage),
+            "margin_mode": margin_mode,
+        }
+
+    def _symbol_max_leverage(self, symbol: str) -> int:
+        """Return max leverage for a symbol, or 0 if unknown."""
+        if self._metadata_provider is None:
+            return 0
+        try:
+            meta = self._metadata_provider.get_metadata(symbol)
+        except Exception:
+            return 0
+        return int(getattr(meta, "max_leverage", 0)) if meta else 0
 
     # -- public query methods (delegate to repo/exchange) --------------------
 

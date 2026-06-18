@@ -159,6 +159,71 @@ class TestGetBalance:
         assert balance is None
 
 
+class TestSetLeverage:
+    """Scenario 5: /leverage sets leverage with symbol-aware validation."""
+
+    def test_set_leverage_updates_active_state_and_exchange(self):
+        """set_leverage(5) calls exchange + updates ActiveSymbolState."""
+        exchange = FakeExchangeGateway()
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.set_leverage(5)
+
+        assert result["status"] == "ok"
+        assert ("BTC", 5, "isolated") in exchange.set_leverage_calls
+        active = manager.get_active_symbol()
+        assert active.leverage == 5
+        assert active.margin_mode == "isolated"
+
+    def test_set_leverage_cross_margin(self):
+        """set_leverage(5, 'cross') sets cross margin."""
+        exchange = FakeExchangeGateway()
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        manager.set_leverage(5, margin_mode="cross")
+
+        assert ("BTC", 5, "cross") in exchange.set_leverage_calls
+        assert manager.get_active_symbol().margin_mode == "cross"
+
+    def test_set_leverage_requires_active_symbol(self):
+        """No active symbol → rejected."""
+        manager = _make_manager()
+
+        result = manager.set_leverage(5)
+
+        assert result["status"] == "rejected"
+        assert "symbol" in result["message"].lower()
+
+    def test_set_leverage_rejects_above_max(self):
+        """leverage > symbol max_leverage → rejected."""
+        from tests.fakes import InMemoryMarketMetadataProvider
+
+        meta = InMemoryMarketMetadataProvider.for_btc()
+        exchange = FakeExchangeGateway()
+        manager = _make_manager(exchange=exchange)
+        manager._metadata_provider = meta
+        manager.activate_symbol("BTC")
+
+        result = manager.set_leverage(60)  # BTC max is 50
+
+        assert result["status"] == "rejected"
+        assert "50" in result["message"]
+        assert exchange.set_leverage_calls == []
+
+    def test_set_leverage_rejects_zero(self):
+        """leverage < 1 → rejected."""
+        exchange = FakeExchangeGateway()
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.set_leverage(0)
+
+        assert result["status"] == "rejected"
+        assert exchange.set_leverage_calls == []
+
+
 class TestBotStartsIdle:
     """Scenario 1: Bot starts fully idle — no symbol, no strategy, no position."""
 
