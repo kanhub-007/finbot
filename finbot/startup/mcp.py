@@ -148,7 +148,7 @@ def get_transport_config() -> dict:
     return {
         "transport": os.getenv("FINBOT_TRANSPORT", "stdio").lower(),
         "host": os.getenv("FINBOT_HOST", "127.0.0.1"),
-        "port": int(os.getenv("FINBOT_PORT", "8003")),
+        "port": int(os.getenv("FINBOT_PORT", "8006")),
     }
 
 

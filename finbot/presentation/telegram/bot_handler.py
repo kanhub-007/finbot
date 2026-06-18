@@ -67,24 +67,33 @@ class TelegramBotHandler:
         if update.message is None or update.effective_user is None:
             return
 
-        request = TelegramCommandRequest(
-            command=f"/{update.message.text.split()[0].strip('/').split('@')[0]}"
-            if update.message.text
-            else "/start",
-            args=update.message.text.split(maxsplit=1)[1]
-            if update.message.text and " " in update.message.text
-            else "",
-            chat_id=update.effective_chat.id,
-            user_id=update.effective_user.id,
-            message_id=update.message.message_id,
-        )
+        try:
+            request = TelegramCommandRequest(
+                command=f"/{update.message.text.split()[0].strip('/').split('@')[0]}"
+                if update.message.text
+                else "/start",
+                args=update.message.text.split(maxsplit=1)[1]
+                if update.message.text and " " in update.message.text
+                else "",
+                chat_id=update.effective_chat.id,
+                user_id=update.effective_user.id,
+                message_id=update.message.message_id,
+            )
 
-        result = await self._use_case.execute(request)
-        await self._send_result(
-            chat_id=request.chat_id,
-            message_id=request.message_id,
-            result=result,
-        )
+            result = await self._use_case.execute(request)
+            send_result = await self._send_result(
+                chat_id=request.chat_id,
+                message_id=request.message_id,
+                result=result,
+            )
+            if not send_result.success:
+                logger.error(
+                    "Failed to send command response for %s: %s",
+                    request.command,
+                    send_result.error,
+                )
+        except Exception:
+            logger.exception("Unhandled error in command handler")
 
     async def _handle_callback(self, update: Update, context: object) -> None:
         """Convert a PTB callback query to DTO, execute, edit result."""
@@ -94,37 +103,50 @@ class TelegramBotHandler:
 
         await self._bot_port.answer_callback_query(query.id)
 
-        request = CallbackQueryRequest(
-            callback_data=query.data or "",
-            chat_id=update.effective_chat.id,
-            user_id=update.effective_user.id,
-            message_id=query.message.message_id if query.message else 0,
-            callback_query_id=query.id,
-        )
-
-        result = await self._use_case.handle_callback(request)
-        if query.message:
-            await self._send_result(
-                chat_id=request.chat_id,
-                message_id=query.message.message_id,
-                result=result,
+        try:
+            request = CallbackQueryRequest(
+                callback_data=query.data or "",
+                chat_id=update.effective_chat.id,
+                user_id=update.effective_user.id,
+                message_id=query.message.message_id if query.message else 0,
+                callback_query_id=query.id,
             )
+
+            result = await self._use_case.handle_callback(request)
+            if query.message:
+                send_result = await self._send_result(
+                    chat_id=request.chat_id,
+                    message_id=query.message.message_id,
+                    result=result,
+                )
+                if not send_result.success:
+                    logger.error(
+                        "Failed to send callback response for %s: %s",
+                        request.callback_data,
+                        send_result.error,
+                    )
+        except Exception:
+            logger.exception("Unhandled error in callback handler")
 
     async def _send_result(
         self,
         chat_id: int,
         message_id: int,
         result: object,
-    ) -> None:
-        """Send or edit a message based on the use-case result DTO."""
+    ):
+        """Send or edit a message based on the use-case result DTO.
+
+        Returns the SendResult so callers can check for delivery errors.
+        """
         from finbot.core.application.dto.telegram_command_result import (
             TelegramCommandResult,
         )
+        from finbot.core.domain.entities.send_result import SendResult
 
         r: TelegramCommandResult = result  # type: ignore[assignment]
 
         if r.edit_message_id is not None:
-            await self._bot_port.edit_message_text(
+            return await self._bot_port.edit_message_text(
                 chat_id=chat_id,
                 message_id=r.edit_message_id,
                 text=r.text,
@@ -132,7 +154,7 @@ class TelegramBotHandler:
                 reply_markup=r.reply_markup,
             )
         else:
-            await self._bot_port.send_message(
+            return await self._bot_port.send_message(
                 chat_id=chat_id,
                 text=r.text,
                 parse_mode=r.parse_mode,

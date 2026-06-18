@@ -269,10 +269,10 @@ class HandleTelegramCommand:
         text = (
             "\U0001f4ca *Bot Status*\n"
             f"State: \u25b6 Running\n"
-            f"Run ID: {run_id}\n"
-            f"Strategy: {strategy}\n"
-            f"Symbol: {symbol} / {interval}\n"
-            f"Mode: {mode}\n"
+            f"Run ID: {_escape_mdv2(run_id)}\n"
+            f"Strategy: {_escape_mdv2(strategy)}\n"
+            f"Symbol: {_escape_mdv2(symbol)} / {_escape_mdv2(interval)}\n"
+            f"Mode: {_escape_mdv2(mode)}\n"
             f"Uptime: {hours}h {minutes}m\n\n"
             f"*Totals:*\n"
             f"Signals: {total_signals} | Orders: {total_orders} "
@@ -303,16 +303,20 @@ class HandleTelegramCommand:
 
         if last_run is not None:
             lines.append("")
-            lines.append("*Last Run:* " + str(last_run.get("run_id", "")))
             lines.append(
-                "Strategy: " + str(last_run.get("strategy_name", ""))
+                "*Last Run:* "
+                + _escape_mdv2(str(last_run.get("run_id", "")))
             )
-            symbol = str(last_run.get("symbol", ""))
-            interval = str(last_run.get("interval", ""))
+            lines.append(
+                "Strategy: "
+                + _escape_mdv2(str(last_run.get("strategy_name", "")))
+            )
+            symbol = _escape_mdv2(str(last_run.get("symbol", "")))
+            interval = _escape_mdv2(str(last_run.get("interval", "")))
             lines.append(f"Symbol: {symbol} / {interval}")
             ended = str(last_run.get("ended_at", ""))
             if ended:
-                lines.append(f"Ended: {ended}")
+                lines.append(f"Ended: {_escape_mdv2(ended)}")
         else:
             lines.append("")
             lines.append("No run history\\.")
@@ -344,7 +348,7 @@ class HandleTelegramCommand:
         return TelegramCommandResult(
             text=(
                 "\u23f9 *Bot stopped\\.*\n"
-                f"Run: {stop_result.get('bot_run_id', '')}"
+                f"Run: {_escape_mdv2(str(stop_result.get('bot_run_id', '')))}"
             ),
             parse_mode="MarkdownV2",
             reply_markup={
@@ -362,11 +366,11 @@ class HandleTelegramCommand:
     ) -> TelegramCommandResult:
         """Start the guided /run flow or reject if bot is already running."""
         if self._bot_manager.is_running():
-            run_id = self._bot_manager.get_status().get("bot_run_id", "")
+            run_id = str(self._bot_manager.get_status().get("bot_run_id", ""))
             return TelegramCommandResult(
                 text=(
-                    f"\u26a0\ufe0f A bot is already running "
-                    f"\\({run_id}\\)\\.\n"
+                    "\u26a0\ufe0f A bot is already running "
+                    f"\\({_escape_mdv2(run_id)}\\)\\.\n"
                     "Stop it first with /stop, then start a new one\\."
                 ),
                 parse_mode="MarkdownV2",
@@ -422,7 +426,7 @@ class HandleTelegramCommand:
 
         lines = ["\U0001f4c1 *Available Strategies*"]
         for i, s in enumerate(strategies, 1):
-            lines.append(f"{i}\\. {s}")
+            lines.append(f"{i}\\. {_escape_mdv2(s)}")
 
         return TelegramCommandResult(
             text="\n".join(lines),
@@ -475,11 +479,11 @@ class HandleTelegramCommand:
 
         lines = ["\U0001f4cb *Recent Bot Runs*"]
         for i, run in enumerate(runs, 1):
-            r_id = getattr(run, "run_id", "")
-            name = getattr(run, "strategy_name", "")
-            sym = getattr(run, "symbol", "")
-            iv = getattr(run, "interval", "")
-            md = getattr(run, "mode", "")
+            r_id = _escape_mdv2(str(getattr(run, "run_id", "")))
+            name = _escape_mdv2(str(getattr(run, "strategy_name", "")))
+            sym = _escape_mdv2(str(getattr(run, "symbol", "")))
+            iv = _escape_mdv2(str(getattr(run, "interval", "")))
+            md = _escape_mdv2(str(getattr(run, "mode", "")))
             lines.append(
                 f"{i}\\. {r_id} \u2014 {name} / {sym} / {iv}\n{md}"
             )
@@ -503,7 +507,7 @@ class HandleTelegramCommand:
         """Emergency panic — show action options or pick symbol first."""
         if self._bot_manager.is_running():
             status = self._bot_manager.get_status()
-            symbol = str(status.get("symbol", ""))
+            symbol = _escape_mdv2(str(status.get("symbol", "")))
             suffix = f" \u2014 {symbol}" if symbol else ""
             return TelegramCommandResult(
                 text=f"\U0001f6a8 *EMERGENCY{suffix}*\nSelect action:",
@@ -625,7 +629,7 @@ class HandleTelegramCommand:
             keyboard_rows.append(buttons[i : i + 3])
 
         return TelegramCommandResult(
-            text=f"Strategy: {strategy_name}\nSelect symbol:",
+            text=f"Strategy: {_escape_mdv2(strategy_name)}\nSelect symbol:",
             parse_mode="MarkdownV2",
             reply_markup={"inline_keyboard": keyboard_rows},
         )
@@ -649,8 +653,8 @@ class HandleTelegramCommand:
 
         return TelegramCommandResult(
             text=(
-                f"Strategy: {session.strategy_path}\n"
-                f"Symbol: {symbol}\n"
+                f"Strategy: {_escape_mdv2(session.strategy_path or '')}\n"
+                f"Symbol: {_escape_mdv2(symbol)}\n"
                 "Select interval:"
             ),
             parse_mode="MarkdownV2",
@@ -667,8 +671,9 @@ class HandleTelegramCommand:
         sid = session.session_id
         return TelegramCommandResult(
             text=(
-                f"Strategy: {session.strategy_path}\n"
-                f"Symbol: {session.symbol} / {interval}\n"
+                f"Strategy: {_escape_mdv2(session.strategy_path or '')}\n"
+                f"Symbol: {_escape_mdv2(session.symbol or '')}"
+                f" / {_escape_mdv2(interval)}\n"
                 "Select mode:"
             ),
             parse_mode="MarkdownV2",
@@ -708,8 +713,9 @@ class HandleTelegramCommand:
         return TelegramCommandResult(
             text=(
                 "\u26a0\ufe0f *LIVE TRADING CONFIRMATION*\n"
-                f"Strategy: {session.strategy_path}\n"
-                f"Symbol: {session.symbol} / {session.interval}\n"
+                f"Strategy: {_escape_mdv2(session.strategy_path or '')}\n"
+                f"Symbol: {_escape_mdv2(session.symbol or '')}"
+                f" / {_escape_mdv2(session.interval or '')}\n"
                 "Mode: LIVE\n\n"
                 "This will place *real orders* on Hyperliquid "
                 "with real funds\\.\n"
@@ -757,19 +763,23 @@ class HandleTelegramCommand:
             return TelegramCommandResult(
                 text=(
                     "\u274c Failed to start bot: "
-                    f"{result.get('message', 'Unknown error')}\\."
+                    f"{_escape_mdv2(str(result.get('message', 'Unknown error')))}"
+                    "\\."
                 ),
                 parse_mode="MarkdownV2",
             )
 
-        run_id = result.get("bot_run_id", "")
+        run_id = _escape_mdv2(str(result.get("bot_run_id", "")))
+        strategy = _escape_mdv2(session.strategy_path or "")
+        symbol = _escape_mdv2(session.symbol or "")
+        interval = _escape_mdv2(session.interval or "1h")
         if mode == "dry_run":
             return TelegramCommandResult(
                 text=(
                     "\u2705 *Bot started\\!*\n"
                     f"Run ID: {run_id}\n"
-                    f"Strategy: {session.strategy_path}\n"
-                    f"Symbol: {session.symbol} / {session.interval}\n"
+                    f"Strategy: {strategy}\n"
+                    f"Symbol: {symbol} / {interval}\n"
                     f"Mode: DRY\\_RUN\n\n"
                     "No real orders will be placed\\.\n"
                     "Use /status to monitor or /stop to halt\\."
@@ -789,8 +799,8 @@ class HandleTelegramCommand:
                 text=(
                     "\u2705 *Bot started\\!*\n"
                     f"Run ID: {run_id}\n"
-                    f"Strategy: {session.strategy_path}\n"
-                    f"Symbol: {session.symbol} / {session.interval}\n"
+                    f"Strategy: {strategy}\n"
+                    f"Symbol: {symbol} / {interval}\n"
                     f"Mode: {mode.upper()}\n\n"
                     "Real orders WILL be placed\\.\n"
                     "Use /status to monitor or /stop to halt\\."
@@ -815,8 +825,9 @@ class HandleTelegramCommand:
 
         if action == "sym":
             # User selected a symbol while idle — show action options
+            escaped_sym = _escape_mdv2(symbol)
             return TelegramCommandResult(
-                text=f"\U0001f6a8 *EMERGENCY \u2014 {symbol}*\nSelect action:",
+                text=f"\U0001f6a8 *EMERGENCY \u2014 {escaped_sym}*\nSelect action:",
                 parse_mode="MarkdownV2",
                 reply_markup={
                     "inline_keyboard": [
@@ -864,7 +875,8 @@ class HandleTelegramCommand:
         return TelegramCommandResult(
             text=(
                 "\u26a0\ufe0f *PANIC CONFIRMATION*\n"
-                f"This will: {action_label} for {symbol}\n"
+                f"This will: {_escape_mdv2(action_label)} for"
+                f" {_escape_mdv2(symbol)}\n"
                 "Are you sure?"
             ),
             parse_mode="MarkdownV2",
@@ -925,6 +937,21 @@ class HandleTelegramCommand:
 
 _DEFAULT_SYMBOLS = ("BTC", "ETH", "SOL", "ARB", "DOGE")
 _DEFAULT_INTERVALS = ("1m", "5m", "15m", "1h", "4h", "1d")
+
+# Characters that MUST be escaped in Telegram MarkdownV2.
+# See: https://core.telegram.org/bots/api#markdownv2-style
+_MDV2_ESCAPE_CHARS = str.maketrans({
+    '_': '\\_', '*': '\\*', '[': '\\[', ']': '\\]',
+    '(': '\\(', ')': '\\)', '~': '\\~', '`': '\\`',
+    '>': '\\>', '#': '\\#', '+': '\\+', '-': '\\-',
+    '=': '\\=', '|': '\\|', '{': '\\{', '}': '\\}',
+    '.': '\\.', '!': '\\!',
+})
+
+
+def _escape_mdv2(text: str) -> str:
+    """Escape special characters for Telegram MarkdownV2."""
+    return str(text).translate(_MDV2_ESCAPE_CHARS)
 
 _COMMAND_HANDLERS: dict[str, object] = {
     "/start": HandleTelegramCommand._handle_start,

@@ -1,7 +1,7 @@
 """Convenience entry point — run with: python run_mcp.py
 
 Starts the MCP server. Defaults to stdio transport.
-Set FINBOT_TRANSPORT=http to run on port 8003.
+Set FINBOT_TRANSPORT=http to run on port 8006.
 
 All startup logic lives in finbot/startup/mcp.py (composition root).
 """
