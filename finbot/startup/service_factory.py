@@ -309,9 +309,6 @@ def create_live_trading_runtime_use_case(
     stream — plus an account stream for testnet/live — is built here so
     all wiring lives in the composition root.
     """
-    from finbot.core.application.use_cases.live_trading_runtime import (
-        LiveTradingRuntimeUseCase,
-    )
     from finbot.core.domain.entities.trading_mode import TradingMode
     from finbot.core.domain.services.enrichment_validator import (
         EnrichmentValidator,
@@ -440,11 +437,11 @@ def create_live_trading_runtime_use_case(
     # Wire the event emitter + Telegram observer (if available)
     event_emitter = SimpleRuntimeEventEmitter()
     if notification_sender is not None:
-        from finbot.infrastructure.adapters.telegram_runtime_observer import (
-            TelegramRuntimeObserver,
-        )
         from finbot.core.domain.events.runtime_events import (
             RiskTriggeredEvent,
+        )
+        from finbot.infrastructure.adapters.telegram_runtime_observer import (
+            TelegramRuntimeObserver,
         )
 
         observer = TelegramRuntimeObserver(notification_sender)
