@@ -669,6 +669,134 @@ class BotManager:
             "closed_positions": closed,
         }
 
+    def attach_stop_loss(self, price) -> dict[str, Any]:
+        """Attach a reduce-only stop-loss trigger (cloid SL:<symbol>).
+
+        Validates the price is on the correct side of entry (below for long,
+        above for short). Replaces any existing SL for the symbol.
+        """
+        return self._attach_risk_order("SL", price)
+
+    def attach_take_profit(self, price) -> dict[str, Any]:
+        """Attach a reduce-only take-profit trigger (cloid TP:<symbol>).
+
+        Validates the price is on the correct side of entry (above for long,
+        below for short). Replaces any existing TP for the symbol.
+        """
+        return self._attach_risk_order("TP", price)
+
+    def clear_risk_order(self, kind: str) -> dict[str, Any]:
+        """Cancel an SL or TP trigger order by kind ('sl' or 'tp')."""
+        prefix = {"sl": "SL:", "tp": "TP:"}.get(kind.lower())
+        if prefix is None:
+            return {"status": "rejected", "message": f"Unknown kind: {kind}"}
+        with self._lock:
+            if self._active_symbol is None:
+                return {
+                    "status": "rejected",
+                    "message": "No active symbol.",
+                }
+            symbol = self._active_symbol.symbol
+        cloid = f"{prefix}{symbol}"
+        try:
+            self._exchange.cancel_by_cloid(symbol, cloid)
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+        return {"status": "ok", "kind": kind, "symbol": symbol}
+
+    def _attach_risk_order(self, kind: str, price) -> dict[str, Any]:
+        """Shared SL/TP attachment: validate, cancel existing, place new.
+
+        ``kind`` is "SL" or "TP". Price-direction validation:
+          - SL on a long must be below entry; on a short, above entry.
+          - TP on a long must be above entry; on a short, below entry.
+        """
+        from finbot.core.domain.entities.order_intent import OrderIntent
+        from finbot.core.domain.entities.order_side import OrderSide
+        from finbot.core.domain.entities.order_type import OrderType
+        from finbot.core.domain.entities.position_direction import (
+            PositionDirection,
+        )
+
+        with self._lock:
+            if self._active_symbol is None:
+                return {
+                    "status": "rejected",
+                    "message": "No active symbol. Use /symbol first.",
+                }
+            if self._runtime is not None:
+                return {
+                    "status": "rejected",
+                    "message": "A strategy is running. Stop it first (/stop).",
+                }
+            symbol = self._active_symbol.symbol
+
+        pos = self._exchange.get_position(symbol)
+        if pos is None or pos.direction.value == "flat":
+            return {
+                "status": "rejected",
+                "message": f"No open position on {symbol} to protect.",
+            }
+
+        entry = pos.entry_price or Decimal("0")
+        is_long = pos.direction == PositionDirection.LONG
+        price_dec = Decimal(str(price))
+
+        if kind == "SL":
+            if is_long and price_dec >= entry:
+                return {
+                    "status": "rejected",
+                    "message": "Stop must be below entry for a long.",
+                }
+            if not is_long and price_dec <= entry:
+                return {
+                    "status": "rejected",
+                    "message": "Stop must be above entry for a short.",
+                }
+            order_type = OrderType.STOP
+            side = OrderSide.SELL if is_long else OrderSide.BUY
+        else:  # TP
+            if is_long and price_dec <= entry:
+                return {
+                    "status": "rejected",
+                    "message": "Take-profit must be above entry for a long.",
+                }
+            if not is_long and price_dec >= entry:
+                return {
+                    "status": "rejected",
+                    "message": "Take-profit must be below entry for a short.",
+                }
+            order_type = OrderType.TAKE_PROFIT
+            side = OrderSide.SELL if is_long else OrderSide.BUY
+
+        # Replace existing (cancel old cloid first)
+        cloid = f"{kind}:{symbol}"
+        try:
+            self._exchange.cancel_by_cloid(symbol, cloid)
+        except Exception:
+            logger.warning("No existing %s order to replace for %s", kind, symbol)
+
+        intent = OrderIntent(
+            symbol=symbol,
+            side=side,
+            size=pos.size,
+            order_type=order_type,
+            reduce_only=True,
+            limit_price=price_dec,
+            cloid=cloid,
+        )
+        try:
+            response = self._exchange.submit_order(intent)
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+        return {
+            "status": "ok",
+            "kind": kind.lower(),
+            "symbol": symbol,
+            "price": str(price_dec),
+            "response": response,
+        }
+
     @property
     def has_exchange(self) -> bool:
         """Return True if an exchange gateway is wired."""

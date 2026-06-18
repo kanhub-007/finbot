@@ -8,3 +8,7 @@ class OrderType(StrEnum):
 
     MARKET = "market"
     LIMIT = "limit"
+    STOP = "stop"
+    """Stop-loss trigger order (reduce-only)."""
+    TAKE_PROFIT = "take_profit"
+    """Take-profit trigger order (reduce-only)."""

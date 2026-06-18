@@ -549,6 +549,116 @@ class TestClearAll:
         assert "nothing" in result["message"].lower()
 
 
+class TestStopLossAndTakeProfit:
+    """Scenarios 11 & 12: /sl and /tp attach reduce-only trigger orders."""
+
+    def _long_manager(self):
+        from finbot.core.domain.entities.position_direction import PositionDirection
+        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+
+        exchange = FakeExchangeGateway()
+        exchange._position = PositionSnapshot(
+            symbol="BTC",
+            direction=PositionDirection.LONG,
+            size=Decimal("0.01"),
+            entry_price=Decimal("95000"),
+        )
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+        return manager, exchange
+
+    def test_attach_stop_loss_places_trigger_with_cloid(self):
+        """attach_stop_loss places a reduce-only order with cloid SL:BTC."""
+        manager, exchange = self._long_manager()
+
+        result = manager.attach_stop_loss(Decimal("94000"))
+
+        assert result["status"] == "ok"
+        assert len(exchange.submitted_intents) == 1
+        intent = exchange.submitted_intents[0]
+        assert intent.cloid == "SL:BTC"
+        assert intent.reduce_only is True
+
+    def test_attach_take_profit_places_trigger_with_cloid(self):
+        """attach_take_profit places a reduce-only order with cloid TP:BTC."""
+        manager, exchange = self._long_manager()
+
+        result = manager.attach_take_profit(Decimal("97000"))
+
+        assert result["status"] == "ok"
+        intent = exchange.submitted_intents[0]
+        assert intent.cloid == "TP:BTC"
+        assert intent.reduce_only is True
+
+    def test_sl_rejects_above_entry_for_long(self):
+        """SL above entry on a long → rejected."""
+        manager, exchange = self._long_manager()
+
+        result = manager.attach_stop_loss(Decimal("100000"))
+
+        assert result["status"] == "rejected"
+        assert exchange.submitted_intents == []
+
+    def test_tp_rejects_below_entry_for_long(self):
+        """TP below entry on a long → rejected."""
+        manager, exchange = self._long_manager()
+
+        result = manager.attach_take_profit(Decimal("90000"))
+
+        assert result["status"] == "rejected"
+        assert exchange.submitted_intents == []
+
+    def test_sl_requires_open_position(self):
+        """No position → rejected."""
+        manager = _make_manager()
+        manager.activate_symbol("BTC")
+
+        result = manager.attach_stop_loss(Decimal("94000"))
+
+        assert result["status"] == "rejected"
+        assert "position" in result["message"].lower()
+
+    def test_clear_risk_order_cancels_by_cloid(self):
+        """clear_risk_order('sl') cancels the SL:BTC order."""
+        manager, exchange = self._long_manager()
+        manager.attach_stop_loss(Decimal("94000"))
+
+        result = manager.clear_risk_order("sl")
+
+        assert result["status"] == "ok"
+
+    def test_sl_blocked_when_strategy_running(self):
+        """SL/TP hard-blocked while a strategy runs."""
+        from tests.fakes import FakeRuntime
+
+        repo = InMemoryBotStateRepository()
+        runtime = FakeRuntime(repo=repo)
+        from finbot.core.domain.entities.position_direction import PositionDirection
+        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+        from finbot.core.domain.services.bot_manager import BotManager
+
+        exchange = FakeExchangeGateway()
+        exchange._position = PositionSnapshot(
+            symbol="BTC", direction=PositionDirection.LONG, size=Decimal("0.01")
+        )
+        manager = BotManager(
+            runtime_factory=lambda **kw: runtime,
+            repository=repo,
+            exchange=exchange,
+            startup_time=time.time(),
+        )
+        manager.activate_symbol("BTC")
+        manager.start(
+            strategy_path="tests/fixtures/strategies/amt_dip_buyer_final.yaml",
+            symbol="BTC", interval="1h", mode="dry_run", warmup_bars=0,
+        )
+
+        result = manager.attach_stop_loss(Decimal("94000"))
+
+        assert result["status"] == "rejected"
+        assert "stop" in result["message"].lower()
+
+
 class TestBotStartsIdle:
     """Scenario 1: Bot starts fully idle — no symbol, no strategy, no position."""
 
