@@ -5,6 +5,7 @@ and an active symbol must be selected before manual orders / leverage work.
 """
 
 import time
+from decimal import Decimal
 
 from finbot.infrastructure.repositories.in_memory_bot_state_repository import (
     InMemoryBotStateRepository,
@@ -12,7 +13,10 @@ from finbot.infrastructure.repositories.in_memory_bot_state_repository import (
 from tests.fakes import FakeExchangeGateway
 
 
-def _make_manager(repo=None, exchange=None):
+_NO_EXCHANGE = object()
+
+
+def _make_manager(repo=None, exchange=_NO_EXCHANGE):
     """Build a real BotManager with in-memory fakes at the boundaries."""
     from finbot.core.domain.services.bot_manager import BotManager
 
@@ -21,7 +25,7 @@ def _make_manager(repo=None, exchange=None):
     return BotManager(
         runtime_factory=factory,
         repository=repo,
-        exchange=exchange or FakeExchangeGateway(),
+        exchange=FakeExchangeGateway() if exchange is _NO_EXCHANGE else exchange,
         startup_time=time.time(),
     )
 
@@ -100,6 +104,59 @@ class TestActivateSymbol:
         assert "stop" in result["message"].lower()
         # Active symbol unchanged
         assert manager.get_active_symbol().symbol == "BTC"
+
+
+class TestGetPrice:
+    """Scenario 3: /price shows current price for the active symbol."""
+
+    def test_get_active_price_returns_exchange_price(self):
+        """get_active_price() returns the exchange price for the active symbol."""
+        exchange = FakeExchangeGateway()
+        exchange.price_to_report = Decimal("96250.50")
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        price = manager.get_active_price()
+
+        assert price == Decimal("96250.50")
+
+    def test_get_active_price_requires_active_symbol(self):
+        """With no active symbol, get_active_price() returns None."""
+        manager = _make_manager()
+
+        price = manager.get_active_price()
+
+        assert price is None
+
+
+class TestGetBalance:
+    """Scenario 4: /balance shows wallet balance."""
+
+    def test_get_balance_returns_exchange_balance(self):
+        """get_balance() returns the exchange-reported wallet balance."""
+        from finbot.core.domain.entities.wallet_balance import WalletBalance
+
+        exchange = FakeExchangeGateway()
+        exchange.balance_to_report = WalletBalance(
+            wallet_value=Decimal("1250"),
+            margin_used=Decimal("300"),
+            available=Decimal("950"),
+        )
+        manager = _make_manager(exchange=exchange)
+
+        balance = manager.get_balance()
+
+        assert balance.wallet_value == Decimal("1250")
+        assert balance.margin_used == Decimal("300")
+        assert balance.available == Decimal("950")
+
+    def test_get_balance_returns_none_without_exchange(self):
+        """No exchange wired → get_balance() returns None."""
+        manager = _make_manager(exchange=None)
+
+        balance = manager.get_balance()
+
+        assert balance is None
 
 
 class TestBotStartsIdle:

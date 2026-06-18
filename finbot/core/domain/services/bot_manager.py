@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -24,6 +25,7 @@ from finbot.core.domain.entities.order_response_record import (
 )
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
 from finbot.core.domain.entities.risk_event_record import RiskEventRecord
+from finbot.core.domain.entities.wallet_balance import WalletBalance
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
@@ -265,6 +267,24 @@ class BotManager:
         if reported is None:
             return 1, "isolated"
         return reported
+
+    def get_active_price(self) -> Decimal | None:
+        """Return the current price for the active symbol, or None if idle.
+
+        Returns None when no symbol is active so callers can surface a clear
+        "select a symbol first" message.
+        """
+        with self._lock:
+            if self._active_symbol is None or self._exchange is None:
+                return None
+            symbol = self._active_symbol.symbol
+        return self._exchange.get_price(symbol)
+
+    def get_balance(self) -> WalletBalance | None:
+        """Return the wallet balance, or None if no exchange is wired."""
+        if self._exchange is None:
+            return None
+        return self._exchange.get_balance()
 
     # -- public query methods (delegate to repo/exchange) --------------------
 

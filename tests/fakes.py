@@ -499,6 +499,15 @@ class FakeExchangeGateway(InMemoryExchangeGateway):
         # Leverage recording (trading-control spec)
         self.set_leverage_calls: list[tuple] = []
         self.leverage_to_report: tuple[int, str] | None = None
+        # Price/balance recording
+        self.price_to_report: Decimal = Decimal("100")
+        from finbot.core.domain.entities.wallet_balance import WalletBalance
+
+        self.balance_to_report: WalletBalance = WalletBalance(
+            wallet_value=Decimal("10000"),
+            margin_used=Decimal("0"),
+            available=Decimal("10000"),
+        )
 
     def submit_order(self, intent) -> dict:
         self.submitted_order_count += 1
@@ -520,6 +529,12 @@ class FakeExchangeGateway(InMemoryExchangeGateway):
 
     def get_leverage(self, symbol: str):
         return self.leverage_to_report
+
+    def get_price(self, symbol: str):
+        return self.price_to_report
+
+    def get_balance(self):
+        return self.balance_to_report
 
 
 # ---------------------------------------------------------------------------
