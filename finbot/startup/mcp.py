@@ -46,7 +46,6 @@ def _make_runtime_factory(settings: Settings, notification_sender=None):
             interval=interval,
             mode=mode,
             live_data=live_data,
-            warmup_bars=warmup_bars,
             notification_sender=notification_sender,
         )
 
