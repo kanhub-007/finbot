@@ -191,7 +191,7 @@ def _build_testnet_runtime(monkeypatch, *, fake_exchange, settings=None, base_ts
     factory's real wiring runs against fakes at the SDK boundary only.
     """
     settings = settings or _test_settings()
-    monkeypatch.setattr("finbot.startup.service_factory.Settings", lambda: settings)
+    monkeypatch.setattr("finbot.startup.runtime_factory.Settings", lambda: settings)
     _patch_sdk(monkeypatch, fake_exchange)
     return create_live_trading_runtime_use_case(
         STRATEGY_PATH,

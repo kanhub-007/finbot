@@ -1,6 +1,8 @@
-"""Composition root for Finbot services."""
+"""Composition root for Finbot services.
 
-import hashlib
+The runtime factory lives in ``runtime_factory.py`` (S10 split);
+it is re-exported here for backwards-compatible imports.
+"""
 
 from finbot.config.settings import Settings
 from finbot.core.application.dto.run_bot_request import RunBotRequest
@@ -22,9 +24,6 @@ from finbot.infrastructure.adapters.hyperliquid_exchange_gateway import (
 )
 from finbot.infrastructure.adapters.in_memory_market_data_stream import (
     InMemoryMarketDataStream,
-)
-from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
-    SharedRuntimeStrategyEvaluatorFactory,
 )
 from finbot.infrastructure.repositories.in_memory_bot_state_repository import (
     InMemoryBotStateRepository,
@@ -121,11 +120,17 @@ def _build_strategy_evaluator(strategy_path: str, symbol: str, interval: str):
     own evaluator via the shared factory.
     """
     from finbot.core.domain.interfaces.strategy_evaluator import StrategyEvaluator
+    from finbot.infrastructure.adapters import (
+        shared_runtime_strategy_evaluator_factory as _eval_factory_mod,
+    )
+    from finbot.startup.runtime_factory import _hash_strategy_file
 
     loader = YamlStrategyDefinitionLoader()
     definition = loader.load_from_file(strategy_path)
     strategy_hash = _hash_strategy_file(strategy_path)
-    evaluator: StrategyEvaluator = SharedRuntimeStrategyEvaluatorFactory().create(
+    evaluator: (
+        StrategyEvaluator
+    ) = _eval_factory_mod.SharedRuntimeStrategyEvaluatorFactory().create(
         definition=definition,
         symbol=symbol,
         interval=interval,
@@ -180,10 +185,14 @@ def create_replay_strategy_use_case(
     if warmup_min_bars:
         warmup = WarmupWindow(min_bars=warmup_min_bars)
 
+    from finbot.infrastructure.adapters import (
+        shared_runtime_strategy_evaluator_factory as _eval_factory_mod,
+    )
+
     return ReplayStrategyUseCase(
         loader=YamlStrategyDefinitionLoader(),
         bar_loader=CsvBarLoader(),
-        evaluator_factory=SharedRuntimeStrategyEvaluatorFactory(),
+        evaluator_factory=_eval_factory_mod.SharedRuntimeStrategyEvaluatorFactory(),
         warmup=warmup,
     )
 
@@ -287,246 +296,9 @@ def create_bot_loop(
     return BotEventLoop(queue, stream, account_stream=account_stream)
 
 
-def create_live_trading_runtime_use_case(
-    strategy_path: str,
-    symbol: str,
-    interval: str,
-    *,
-    mode: str = "dry_run",
-    live_data: bool = False,
-    warmup_bars: list | None = None,
-    bot_loop=None,
-    notification_sender: object | None = None,
-):
-    """Create a fully wired LiveTradingRuntimeUseCase.
-
-    Loads the YAML strategy, creates a real ``SharedRuntimeStrategyEvaluator``
-    via the shared runtime factory, and wires all adapters.  Never uses a
-    placeholder evaluator in the live path.
-
-    When ``live_data`` is True (or *bot_loop* is omitted on the
-    testnet/live path) a :class:`BotEventLoop` owning the market data
-    stream — plus an account stream for testnet/live — is built here so
-    all wiring lives in the composition root.
-    """
-    from finbot.core.domain.entities.trading_mode import TradingMode
-    from finbot.core.domain.services.enrichment_validator import (
-        EnrichmentValidator,
-    )
-    from finbot.core.domain.services.order_planner import OrderPlanner
-    from finbot.core.domain.services.risk_gates.daily_loss_gate import (
-        DailyLossGate,
-    )
-    from finbot.core.domain.services.risk_gates.duplicate_signal_gate import (
-        DuplicateSignalGate,
-    )
-    from finbot.core.domain.services.risk_gates.max_leverage_gate import (
-        MaxLeverageGate,
-    )
-    from finbot.core.domain.services.risk_gates.max_open_orders_gate import (
-        MaxOpenOrdersGate,
-    )
-    from finbot.core.domain.services.risk_gates.max_position_gate import (
-        MaxPositionGate,
-    )
-    from finbot.core.domain.services.risk_gates.mode_gate import ModeGate
-    from finbot.core.domain.services.risk_gates.reduce_only_gate import (
-        ReduceOnlyGate,
-    )
-    from finbot.core.domain.services.risk_gates.stale_data_gate import (
-        StaleDataGate,
-    )
-    from finbot.infrastructure.strategy.pandas_bar_frame_converter import (
-        PandasBarFrameConverter,
-    )
-    from finbot.infrastructure.strategy.shared_runtime_indicator_calculator import (
-        SharedRuntimeIndicatorCalculator,
-    )
-
-    trading_mode = TradingMode(mode)
-    settings = Settings()
-    if trading_mode in (TradingMode.TESTNET, TradingMode.LIVE):
-        repo = create_bot_state_repository()
-    elif settings.database_path and settings.database_path not in (
-        "data/finbot.db",
-        "",
-    ):
-        # Dry-run with explicit database path — use SQLite for persistent audit
-        repo = create_bot_state_repository()
-    else:
-        repo = create_in_memory_repository()
-
-    gateway = _build_exchange_gateway(settings, trading_mode)
-
-    # Build the bot loop + account stream in the composition root unless the
-    # caller supplied one (tests inject fakes).
-    if bot_loop is None and live_data:
-        bot_loop = create_bot_loop(
-            settings,
-            gateway,
-            account=trading_mode in (TradingMode.TESTNET, TradingMode.LIVE),
-        )
-
-    # Load YAML strategy and create real evaluator
-    loader = YamlStrategyDefinitionLoader()
-    definition = loader.load_from_file(strategy_path)
-    strategy_hash = _hash_strategy_file(strategy_path)
-
-    from finbot.core.domain.services.trade_ledger import TradeLedger
-
-    trade_ledger = TradeLedger(repo, strategy_hash=strategy_hash)
-    evaluator = SharedRuntimeStrategyEvaluatorFactory().create(
-        definition=definition,
-        symbol=symbol,
-        interval=interval,
-        strategy_hash=strategy_hash,
-    )
-
-    # Required enriched columns come from the package validation result
-    # (concrete, directly-referenced columns), not the strategy-local aliases.
-    required_columns = set(loader.last_required_columns())
-    # The indicator calculator must compute the FULL declared chain, including
-    # intermediate indicators (vp_vah/vp_val) that only feed composites
-    # (above_value). required_columns alone omits them and the composites read
-    # NaN. The list order matters too: the package calculator computes
-    # indicators in order, so composites must follow their intermediates.
-    required_indicators = loader.last_required_indicators()
-
-    # Pre-load warmup bars from Hyperliquid when using live data
-    if warmup_bars is None and live_data:
-        warmup_bars = _load_warmup_bars(symbol, interval, min_bars=100)
-
-    # Wire the mode-specific submission strategy
-    from finbot.infrastructure.adapters.dry_run_submission_strategy import (
-        DryRunSubmissionStrategy,
-    )
-    from finbot.infrastructure.adapters.live_submission_strategy import (
-        LiveSubmissionStrategy,
-    )
-    from finbot.infrastructure.adapters.simple_runtime_event_emitter import (
-        SimpleRuntimeEventEmitter,
-    )
-    from finbot.startup.live_trading_runtime_builder import (
-        LiveTradingRuntimeBuilder,
-    )
-
-    # Build the exchange metadata + precision normalizer once. Both are used
-    # by the LiveSubmissionStrategy (for normalization) and by the runtime
-    # (for the OrderNormalizer port). Dry-run uses neither.
-    if trading_mode == TradingMode.DRY_RUN:
-        submission_strategy = DryRunSubmissionStrategy(
-            repo, trade_ledger, exchange=gateway
-        )
-        metadata_provider = None
-        normalizer = None
-    else:
-        from finbot.core.domain.services.order_normalizer import OrderNormalizer
-        from finbot.infrastructure.adapters.hyperliquid_metadata_provider import (
-            HyperliquidMetadataProvider,
-        )
-
-        metadata_provider = HyperliquidMetadataProvider()
-        metadata = metadata_provider.get_metadata(symbol)
-        normalizer = (
-            OrderNormalizer(metadata=metadata) if metadata is not None else None
-        )
-        submission_strategy = LiveSubmissionStrategy(
-            gateway, order_normalizer=normalizer, repo=repo
-        )
-
-    # Wire the event emitter + Telegram observer (if available)
-    event_emitter = SimpleRuntimeEventEmitter()
-    if notification_sender is not None:
-        from finbot.core.domain.events.runtime_events import (
-            RiskTriggeredEvent,
-        )
-        from finbot.infrastructure.adapters.telegram_runtime_observer import (
-            TelegramRuntimeObserver,
-        )
-
-        observer = TelegramRuntimeObserver(notification_sender)
-        event_emitter.subscribe(RiskTriggeredEvent, observer.on_risk_triggered)
-
-    order_planner = OrderPlanner(
-        gates=[
-            ModeGate(
-                mode=trading_mode.value,
-                live_trading_ack=settings.live_trading_ack,
-            ),
-            StaleDataGate(max_age_seconds=settings.stale_data_seconds),
-            MaxPositionGate(max_notional_usd=settings.max_position_usd),
-            MaxLeverageGate(max_leverage=settings.max_leverage),
-            MaxOpenOrdersGate(max_orders=settings.max_open_orders),
-            DailyLossGate(max_loss_usd=settings.max_daily_loss_usd),
-            ReduceOnlyGate(),
-            DuplicateSignalGate(repo),
-        ]
-    )
-
-    builder = (
-        LiveTradingRuntimeBuilder()
-        .with_exchange(gateway)
-        .with_evaluator(evaluator)
-        .with_repository(repo)
-        .with_indicator_calculator(SharedRuntimeIndicatorCalculator())
-        .with_enrichment_validator(EnrichmentValidator())
-        .with_bar_converter(PandasBarFrameConverter())
-        .with_mode(trading_mode)
-        .with_submission_strategy(submission_strategy)
-        .with_event_emitter(event_emitter)
-        .with_warmup_bars(warmup_bars)
-        .with_required_columns(required_columns)
-        .with_required_indicators(required_indicators)
-        .with_order_planner(order_planner)
-        .with_bot_loop(bot_loop)
-        .with_strategy_validator(create_validate_strategy_use_case())
-    )
-    # Testnet/live need an idempotent cloid and exchange precision so orders
-    # actually reach the exchange (C1). Dry-run omits both deliberately.
-    if trading_mode != TradingMode.DRY_RUN:
-        from finbot.core.domain.services.cloid_generator import CloidGenerator
-
-        builder = builder.with_metadata_provider(metadata_provider)
-        builder = builder.with_cloid_generator(CloidGenerator())
-        if normalizer is not None:
-            builder = builder.with_order_normalizer(normalizer)
-    return builder.build()
-
-
-def _hash_strategy_file(path: str) -> str:
-    """Return a hex digest of the strategy file contents."""
-    from finbot.core.domain.entities.strategy_load_error import StrategyLoadError
-
-    try:
-        with open(path, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()[:16]
-    except OSError as e:
-        raise StrategyLoadError(f"Cannot read strategy file for hashing: {e}") from e
-
-
-def _load_warmup_bars(
-    symbol: str,
-    interval: str,
-    min_bars: int = 100,
-) -> list[dict]:
-    """Load historical bars from Hyperliquid for warmup.
-
-    Handles both standard perps and HIP-3 ``dex:COIN`` symbols.
-    Returns an empty list if the API call fails (runtime will warm
-    up from live candles instead).
-    """
-    import logging
-
-    from finbot.infrastructure.strategy.hyperliquid_bar_source import (
-        HyperliquidBarSource,
-    )
-
-    logger = logging.getLogger(__name__)
-    try:
-        source = HyperliquidBarSource()
-        bars = source.load_bars(symbol, interval, min_bars)
-        logger.info("Loaded %d warmup bars for %s/%s", len(bars), symbol, interval)
-        return bars
-    except Exception as e:  # noqa: BLE001 - degrade gracefully to live warmup
-        logger.warning("Warmup bar load failed for %s: %s", symbol, e)
-        return []
+# Re-export the runtime factory at the bottom (S10) to avoid a circular
+# import: runtime_factory imports helpers from this module, so this must
+# run after they are defined.
+from finbot.startup.runtime_factory import (  # noqa: E402, F401
+    create_live_trading_runtime_use_case,
+)
