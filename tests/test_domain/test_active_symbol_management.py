@@ -795,3 +795,52 @@ class TestDefaultOrderSize:
         manager.clear_default_size()
 
         assert manager.get_default_size() is None
+
+
+class TestStopLossTakeProfitPercentage:
+    """Scenario 4 (Slice 2): /sl 2% and /tp 5% as percentage of entry."""
+
+    def _long_manager(self):
+        from finbot.core.domain.entities.position_direction import PositionDirection
+        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+
+        exchange = FakeExchangeGateway()
+        exchange._position = PositionSnapshot(
+            symbol="BTC",
+            direction=PositionDirection.LONG,
+            size=Decimal("0.01"),
+            entry_price=Decimal("95000"),
+        )
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+        return manager, exchange
+
+    def test_sl_percentage_below_entry_for_long(self):
+        """/sl 2% on a long at 95000 → SL at 93100 (2% below)."""
+        manager, exchange = self._long_manager()
+
+        result = manager.attach_stop_loss("2%")
+
+        assert result["status"] == "ok"
+        intent = exchange.submitted_intents[0]
+        # 95000 * (1 - 0.02) = 93100
+        assert intent.limit_price == Decimal("93100.0")
+
+    def test_tp_percentage_above_entry_for_long(self):
+        """/tp 5% on a long at 95000 → TP at 99750 (5% above)."""
+        manager, exchange = self._long_manager()
+
+        result = manager.attach_take_profit("5%")
+
+        assert result["status"] == "ok"
+        intent = exchange.submitted_intents[0]
+        # 95000 * (1 + 0.05) = 99750
+        assert intent.limit_price == Decimal("99750.0")
+
+    def test_sl_absolute_still_works(self):
+        """Absolute price (/sl 94000) still works alongside percentage."""
+        manager, exchange = self._long_manager()
+
+        manager.attach_stop_loss(Decimal("94000"))
+
+        assert exchange.submitted_intents[0].limit_price == Decimal("94000")

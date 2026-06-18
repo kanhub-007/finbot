@@ -557,6 +557,30 @@ class BotManager:
             return 0
         return int(getattr(meta, "max_leverage", 0)) if meta else 0
 
+    @staticmethod
+    def _resolve_risk_price(
+        price, entry: Decimal, kind: str, is_long: bool
+    ) -> Decimal:
+        """Resolve an SL/TP price from absolute or percentage input.
+
+        ``"2%"`` is interpreted relative to entry:
+          - SL on long: entry * (1 - pct/100)  (below entry)
+          - SL on short: entry * (1 + pct/100) (above entry)
+          - TP on long: entry * (1 + pct/100)  (above entry)
+          - TP on short: entry * (1 - pct/100) (below entry)
+
+        Absolute prices (``94000``, ``Decimal('94000')``) are used as-is.
+        """
+        price_str = str(price).strip()
+        if price_str.endswith("%"):
+            pct = Decimal(price_str[:-1])
+            if kind == "SL":
+                factor = Decimal("1") - (pct / Decimal("100")) if is_long else Decimal("1") + (pct / Decimal("100"))
+            else:  # TP
+                factor = Decimal("1") + (pct / Decimal("100")) if is_long else Decimal("1") - (pct / Decimal("100"))
+            return entry * factor
+        return Decimal(price_str)
+
     def _persist_active_symbol(self) -> None:
         """Best-effort persist of the active symbol state."""
         try:
@@ -832,7 +856,7 @@ class BotManager:
 
         entry = pos.entry_price or Decimal("0")
         is_long = pos.direction == PositionDirection.LONG
-        price_dec = Decimal(str(price))
+        price_dec = self._resolve_risk_price(price, entry, kind, is_long)
 
         if kind == "SL":
             if is_long and price_dec >= entry:
