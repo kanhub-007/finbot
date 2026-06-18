@@ -491,6 +491,64 @@ class TestCloseActivePosition:
         assert "symbol" in result["message"].lower()
 
 
+class TestClearAll:
+    """Scenario 10: /clear closes all + cancels all orders (idle only)."""
+
+    def test_clear_cancels_orders_and_closes_position(self):
+        """clear_all cancels orders + closes position on the active symbol."""
+        from finbot.core.domain.entities.position_direction import PositionDirection
+        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+
+        exchange = FakeExchangeGateway()
+        exchange._position = PositionSnapshot(
+            symbol="BTC", direction=PositionDirection.LONG, size=Decimal("0.01")
+        )
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.clear_all()
+
+        assert result["status"] == "ok"
+        assert result["cancelled_orders"] >= 0
+        assert result["closed_positions"] >= 1
+
+    def test_clear_blocked_when_strategy_running(self):
+        """Strategy running → hard block (use /panic for emergency)."""
+        from tests.fakes import FakeRuntime
+
+        repo = InMemoryBotStateRepository()
+        runtime = FakeRuntime(repo=repo)
+        from finbot.core.domain.services.bot_manager import BotManager
+
+        manager = BotManager(
+            runtime_factory=lambda **kw: runtime,
+            repository=repo,
+            exchange=FakeExchangeGateway(),
+            startup_time=time.time(),
+        )
+        manager.activate_symbol("BTC")
+        manager.start(
+            strategy_path="tests/fixtures/strategies/amt_dip_buyer_final.yaml",
+            symbol="BTC", interval="1h", mode="dry_run", warmup_bars=0,
+        )
+
+        result = manager.clear_all()
+
+        assert result["status"] == "rejected"
+        assert "stop" in result["message"].lower()
+
+    def test_clear_nothing_to_clear(self):
+        """No position, no orders → 'Nothing to clear'."""
+        exchange = FakeExchangeGateway()
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.clear_all()
+
+        assert result["status"] == "rejected"
+        assert "nothing" in result["message"].lower()
+
+
 class TestBotStartsIdle:
     """Scenario 1: Bot starts fully idle — no symbol, no strategy, no position."""
 

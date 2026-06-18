@@ -612,6 +612,63 @@ class BotManager:
             except Exception:
                 logger.warning("Failed to cancel risk order %s", cloid)
 
+    def clear_all(self) -> dict[str, Any]:
+        """Cancel all orders and close all positions on the active symbol.
+
+        Per the trading-control spec: requires no running strategy (hard
+        block — use /panic for emergency stop+clear). Clears the active
+        symbol's orders, SL/TP triggers, and position.
+
+        Note: multi-symbol clear is deferred to portfolio support (Slice 3).
+        """
+        with self._lock:
+            if self._runtime is not None:
+                return {
+                    "status": "rejected",
+                    "message": (
+                        "A strategy is running. Stop it first (/stop). "
+                        "Use /panic for emergency stop+clear."
+                    ),
+                }
+            if self._active_symbol is None:
+                return {
+                    "status": "rejected",
+                    "message": "No active symbol to clear.",
+                }
+            symbol = self._active_symbol.symbol
+
+        if self._exchange is None:
+            return {"status": "error", "message": "No exchange gateway wired"}
+
+        # Cancel all open orders on the symbol
+        cancel_result = self._exchange.cancel_all(symbol)
+        cancelled = (
+            cancel_result.get("cancelled", 0) if isinstance(cancel_result, dict) else 0
+        )
+
+        # Clear SL/TP trigger orders
+        self._clear_risk_orders(symbol)
+
+        # Close any open position
+        pos = self._exchange.get_position(symbol)
+        closed = 0
+        if pos is not None and pos.direction.value != "flat":
+            close_result = self._close_symbol_position(symbol)
+            if close_result.get("status") == "ok":
+                closed = 1
+
+        if cancelled == 0 and closed == 0:
+            return {
+                "status": "rejected",
+                "message": "Nothing to clear.",
+            }
+        return {
+            "status": "ok",
+            "symbol": symbol,
+            "cancelled_orders": cancelled,
+            "closed_positions": closed,
+        }
+
     @property
     def has_exchange(self) -> bool:
         """Return True if an exchange gateway is wired."""
