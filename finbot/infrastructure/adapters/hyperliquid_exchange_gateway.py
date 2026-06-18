@@ -171,6 +171,69 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         self._account_cache.remove_open_order(symbol, lambda o: o.get("cloid") == cloid)
         return result
 
+    def cancel_by_oid(self, symbol: str, oid: str) -> dict[str, Any]:
+        """Cancel a single order by its exchange-assigned ID."""
+        exchange = self._ensure_exchange()
+        result = exchange.cancel(symbol, oid)  # type: ignore[no-any-return]
+        self._account_cache.remove_open_order(symbol, lambda o: str(o.get("oid", "")) == oid)
+        return result
+
+    # -- leverage / market data (trading-control spec) ---------------------
+
+    def set_leverage(
+        self, symbol: str, leverage: int, margin_mode: str = "isolated"
+    ) -> dict[str, Any]:
+        """Set leverage and margin mode for a symbol via the SDK."""
+        exchange = self._ensure_exchange()
+        is_cross = margin_mode.lower() == "cross"
+        return exchange.update_leverage(  # type: ignore[no-any-return]
+            leverage=int(leverage), coin=symbol, is_cross=is_cross
+        )
+
+    def get_leverage(self, symbol: str) -> tuple[int, str] | None:
+        """Read current leverage and margin mode for a symbol.
+
+        Hyperliquid exposes per-asset leverage in ``user_state`` under
+        ``assetPositions``. Returns ``(leverage, margin_mode)`` or None.
+        """
+        try:
+            info = self._ensure_info()
+            state = info.user_state(self._account_address or "")
+            positions = state.get("assetPositions", [])
+            for pos in positions:
+                pos_info = pos.get("position", {})
+                if pos_info.get("coin", "").upper() == symbol.upper():
+                    leverage = int(pos_info.get("leverage", {}).get("value", 1))
+                    is_cross = (
+                        pos_info.get("leverage", {}).get("type", "cross").lower()
+                        == "cross"
+                    )
+                    return leverage, ("cross" if is_cross else "isolated")
+            return None
+        except Exception:
+            return None
+
+    def get_price(self, symbol: str) -> Decimal:
+        """Return the current mark/mid price via ``all_mids``."""
+        info = self._ensure_info()
+        mids = info.all_mids()
+        price = mids.get(symbol, mids.get(symbol.upper(), "0"))
+        return Decimal(str(price))
+
+    def get_balance(self) -> WalletBalance:
+        """Return wallet value, margin used, and available margin."""
+        info = self._ensure_info()
+        state = info.user_state(self._account_address or "")
+        margin_summary = state.get("marginSummary", {})
+        wallet_value = Decimal(str(margin_summary.get("accountValue", "0")))
+        margin_used = Decimal(str(margin_summary.get("initialMargin", "0")))
+        available = Decimal(str(margin_summary.get("availableMargin", "0")))
+        return WalletBalance(
+            wallet_value=wallet_value,
+            margin_used=margin_used,
+            available=available,
+        )
+
     def get_exchange(self) -> Exchange:
         """Return the underlying SDK ``Exchange`` (lazy-initialised).
 
