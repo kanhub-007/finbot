@@ -187,6 +187,16 @@ class BotStateRepository(ABC):
     def save_order_lifecycle(self, lifecycle: OrderLifecycle) -> None:
         """Persist an order lifecycle state update."""
 
+    @abstractmethod
+    def list_open_order_lifecycles(
+        self, symbol: str | None = None
+    ) -> list[OrderLifecycle]:
+        """Return lifecycles currently in an open state, optionally by symbol.
+
+        Used by startup reconciliation to detect oids the DB tracks that the
+        exchange no longer reports (stale local state).
+        """
+
     # -- trades ---------------------------------------------------------------
 
     @abstractmethod

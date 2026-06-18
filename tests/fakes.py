@@ -344,6 +344,18 @@ class StubBotStateRepository(BotStateRepository):
     def save_order_lifecycle(self, lifecycle) -> None:
         self._lifecycles[lifecycle.order_id] = lifecycle
 
+    def list_open_order_lifecycles(self, symbol: str | None = None):
+        from finbot.core.domain.entities.order_state import ACTIVE_ORDER_STATES
+
+        results = []
+        for lc in self._lifecycles.values():
+            if lc.state not in ACTIVE_ORDER_STATES:
+                continue
+            if symbol is not None and lc.symbol != symbol:
+                continue
+            results.append(lc)
+        return results
+
     def count_signals(self) -> int:
         return len(self._processed)
 
@@ -426,15 +438,11 @@ class StubBotStateRepository(BotStateRepository):
     def list_open_trades(self) -> list[Trade]:
         return [t for t in self._trades.values() if t.status == "open"]
 
-    def list_closed_trades(
-        self, *, bot_run_id: str | None = None
-    ) -> list[Trade]:
+    def list_closed_trades(self, *, bot_run_id: str | None = None) -> list[Trade]:
         result = [t for t in self._trades.values() if t.status == "closed"]
         if bot_run_id is not None:
             result = [t for t in result if t.bot_run_id == bot_run_id]
-        result.sort(
-            key=lambda t: t.closed_at or datetime.min, reverse=True
-        )
+        result.sort(key=lambda t: t.closed_at or datetime.min, reverse=True)
         return result
 
     def realized_loss_on(self, day: date) -> Decimal:

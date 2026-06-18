@@ -308,9 +308,6 @@ class SqliteBotStateRepository(BotStateRepository):
 
     def save_active_symbol(self, state) -> None:
         """Persist (overwrite) the single active-symbol row."""
-        from finbot.core.domain.entities.active_symbol_state import (
-            ActiveSymbolState,
-        )
 
         self._ensure_active_symbol_table()
         self._execute(
@@ -334,9 +331,7 @@ class SqliteBotStateRepository(BotStateRepository):
         )
         if row is None:
             return None
-        return ActiveSymbolState(
-            symbol=row[0], leverage=row[1], margin_mode=row[2]
-        )
+        return ActiveSymbolState(symbol=row[0], leverage=row[1], margin_mode=row[2])
 
     def clear_active_symbol(self) -> None:
         """Delete the persisted active-symbol row."""
@@ -578,6 +573,31 @@ class SqliteBotStateRepository(BotStateRepository):
         # appends new ones — avoids O(k²) re-insertion over an order's life.
         lifecycle.persisted_transition_count = len(lifecycle.transition_history)
 
+    def list_open_order_lifecycles(
+        self, symbol: str | None = None
+    ) -> list[OrderLifecycle]:
+        """Return lifecycles in an active state, optionally filtered by symbol.
+
+        Used by startup reconciliation to detect local lifecycles the
+        exchange no longer reports (stale rows after a crash/restart).
+        """
+        from finbot.core.domain.entities.order_state import ACTIVE_ORDER_STATES
+
+        placeholders = ",".join("?" for _ in ACTIVE_ORDER_STATES)
+        states = tuple(s.value for s in ACTIVE_ORDER_STATES)
+        sql = (
+            f"SELECT order_id, symbol, side, original_size, remaining_size, "
+            f"filled_size, state FROM order_lifecycles "
+            f"WHERE state IN ({placeholders})"
+        )
+        params: tuple = states
+        if symbol is not None:
+            sql += " AND symbol = ?"
+            params = states + (symbol,)
+        sql += " ORDER BY created_at"
+        rows = self._connection.execute(sql, params).fetchall()
+        return [_lifecycle_from_row(r) for r in rows]
+
     # -- trades ---------------------------------------------------------------
 
     def open_trade(self, trade: Trade) -> None:
@@ -644,9 +664,7 @@ class SqliteBotStateRepository(BotStateRepository):
         ).fetchall()
         return [_trade_from_row(r) for r in rows]
 
-    def list_closed_trades(
-        self, *, bot_run_id: str | None = None
-    ) -> list[Trade]:
+    def list_closed_trades(self, *, bot_run_id: str | None = None) -> list[Trade]:
         if bot_run_id is not None:
             rows = self._connection.execute(
                 f"SELECT {_TRADE_COLS} FROM trades "
@@ -667,9 +685,7 @@ class SqliteBotStateRepository(BotStateRepository):
         Loads matching rows and sums with Decimal arithmetic to avoid
         precision loss from CAST to REAL.
         """
-        day_start = _to_utc_text(
-            datetime(day.year, day.month, day.day, tzinfo=UTC)
-        )
+        day_start = _to_utc_text(datetime(day.year, day.month, day.day, tzinfo=UTC))
         day_end = _to_utc_text(
             datetime(day.year, day.month, day.day, 23, 59, 59, 999999, tzinfo=UTC)
         )
@@ -689,9 +705,7 @@ class SqliteBotStateRepository(BotStateRepository):
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:
             _ensure_directory(self._db_path)
-            self._conn = sqlite3.connect(
-                self._db_path, check_same_thread=False
-            )
+            self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn

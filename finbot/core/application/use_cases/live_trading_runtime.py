@@ -16,6 +16,7 @@ import json
 import logging
 from datetime import UTC
 from datetime import datetime as _dt
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,8 @@ from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.enrichment_validation_result import (
     EnrichmentValidationResult,
 )
+from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
+from finbot.core.domain.entities.order_state import OrderState
 from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.processed_signal import ProcessedSignal
@@ -272,12 +275,19 @@ class LiveTradingRuntimeUseCase:
             self._started = False
 
     def reconcile_on_startup(self) -> ReconciliationRecord:
-        """Fetch the exchange position; reconstruct an open Trade if needed.
+        """Fetch exchange position + open orders; reconcile against the DB.
 
-        Called once at the start of ``run_forever()``.  If the exchange
-        reports an open position but the DB has no Trade for it (e.g. crash
-        mid-session), an open Trade is reconstructed with unknown entry
-        price and a :class:`ReconciliationRecord` is persisted.
+        Called once at the start of ``run_forever()``. Two reconciliations
+        run:
+
+        * **Position** — if the exchange reports an open position but the
+          DB has no Trade for it (e.g. crash mid-session), an open Trade is
+          reconstructed with unknown entry price.
+        * **Open orders** — exchange open orders are fetched and any oid the
+          DB doesn't know about is persisted as a stub ``OrderLifecycle``
+          in the ``OPEN`` state (so ``MaxOpenOrdersGate`` and duplicate-cloid
+          tracking see them). ``open_orders_match`` reflects whether the two
+          sides agreed; mismatches are enumerated in ``details``.
         """
         position = self._exchange.get_position(self._symbol)
         existing = self._repo.get_open_trade(self._symbol)
@@ -288,17 +298,79 @@ class LiveTradingRuntimeUseCase:
                 strategy_hash=self._strategy_hash,
             )
             self._repo.open_trade(trade)
+
+        open_orders_match, order_details = self._reconcile_open_orders()
+
         record = ReconciliationRecord(
             bot_run_id=self._bot_run_id,
             position_matches=(
                 existing is not None or position.direction == PositionDirection.FLAT
             ),
-            open_orders_match=True,  # placeholder; full order reconcile later
-            details=f"startup: exchange={position.direction.value} "
-            f"db_open={'yes' if existing else 'no'}",
+            open_orders_match=open_orders_match,
+            details=(
+                f"startup: exchange={position.direction.value} "
+                f"db_open={'yes' if existing else 'no'}; {order_details}"
+            ),
         )
         self._repo.record_reconciliation(record)
         return record
+
+    def _reconcile_open_orders(self) -> tuple[bool, str]:
+        """Diff exchange open orders against DB lifecycles.
+
+        Upserts a stub ``OrderLifecycle`` (state=OPEN) for every exchange oid
+        the DB doesn't already track. Existing lifecycles are left untouched
+        so their transition history is preserved.
+
+        Returns ``(match, details)`` where ``match`` is False when the two
+        sides disagreed **before** reconcile (either side had an oid the
+        other didn't) and ``details`` enumerates the unmatched oids for
+        operator diagnosis. Newly-persisted stubs count as a mismatch —
+        the DB was genuinely missing them.
+        """
+        try:
+            exchange_orders = self._exchange.list_open_orders(self._symbol)
+        except Exception:
+            logger.warning(
+                "open-orders reconcile: list_open_orders failed", exc_info=True
+            )
+            return True, "open-orders reconcile skipped (exchange read failed)"
+
+        exchange_oids: set[str] = set()
+        newly_persisted: list[str] = []
+        for order in exchange_orders or []:
+            oid = str(order.get("oid", ""))
+            if not oid:
+                continue
+            exchange_oids.add(oid)
+            if self._repo.get_order_lifecycle(oid) is None:
+                self._repo.save_order_lifecycle(
+                    OrderLifecycle(
+                        order_id=oid,
+                        symbol=self._symbol,
+                        side=_normalise_order_side(order.get("side", "")),
+                        original_size=_parse_decimal(order.get("sz")),
+                        state=OrderState.OPEN,
+                    )
+                )
+                newly_persisted.append(oid)
+
+        # Diff against DB oids the exchange reports as open. Stale local
+        # rows (DB has them, exchange doesn't) are the other mismatch source.
+        db_open_oids = {
+            lc.order_id
+            for lc in self._repo.list_open_order_lifecycles(symbol=self._symbol)
+        }
+        only_db = db_open_oids - exchange_oids
+        match = not newly_persisted and not only_db
+        if match:
+            return True, f"open-orders match ({len(exchange_oids)})"
+        parts: list[str] = []
+        if newly_persisted:
+            parts.append(f"newly-persisted={sorted(newly_persisted)}")
+        if only_db:
+            parts.append(f"db-only={sorted(only_db)}")
+        return False, "open-orders mismatch: " + "; ".join(parts)
 
     def run_forever(self) -> None:
         """Start the event loop and block until stopped.
@@ -692,3 +764,30 @@ def _normalize_ts(candle: dict[str, Any]) -> int:
     if isinstance(ts, float):
         return int(ts)
     return int(ts)
+
+
+def _normalise_order_side(raw: Any) -> str:
+    """Normalise a Hyperliquid open-order ``side`` field to a lifecycle side.
+
+    The exchange uses "B"/"S" (and occasionally "buy"/"sell"); lifecycles
+    store the lowercase word. Falls back to "unknown" so an unexpected
+    payload never crashes reconciliation.
+    """
+    s = str(raw).strip().lower()
+    if s in ("b", "buy", "long"):
+        return "buy"
+    if s in ("s", "sell", "short"):
+        return "sell"
+    return "unknown"
+
+
+def _parse_decimal(value: Any) -> Decimal:
+    """Parse an exchange numeric field into a Decimal (0 on failure).
+
+    Used for ``sz`` fields in open-order payloads. Never raises — a
+    malformed size shouldn't abort reconciliation.
+    """
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return Decimal("0")

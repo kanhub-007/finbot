@@ -159,6 +159,23 @@ class InMemoryBotStateRepository(BotStateRepository):
     def save_order_lifecycle(self, lifecycle: OrderLifecycle) -> None:
         self._lifecycles[lifecycle.order_id] = lifecycle
 
+    def list_open_order_lifecycles(
+        self, symbol: str | None = None
+    ) -> list[OrderLifecycle]:
+        """Return lifecycles in an active state, optionally filtered by symbol."""
+        from finbot.core.domain.entities.order_state import ACTIVE_ORDER_STATES
+
+        results: list[OrderLifecycle] = []
+        for lc in self._lifecycles.values():
+            if not isinstance(lc, OrderLifecycle):
+                continue
+            if lc.state not in ACTIVE_ORDER_STATES:
+                continue
+            if symbol is not None and lc.symbol != symbol:
+                continue
+            results.append(lc)
+        return results
+
     # -- run history queries -------------------------------------------------
 
     def get_bot_run(self, run_id: str) -> BotRun | None:

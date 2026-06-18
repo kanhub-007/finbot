@@ -19,3 +19,17 @@ class OrderState(StrEnum):
     REJECTED = "rejected"
     EXPIRED = "expired"
     UNKNOWN_RECONCILE_REQUIRED = "unknown_reconcile_required"
+
+
+#: States where the order is still considered "live" on the exchange.
+#: Used by reconciliation to detect local lifecycles the exchange no
+#: longer reports (stale rows after a crash/restart).
+ACTIVE_ORDER_STATES: frozenset[OrderState] = frozenset(
+    {
+        OrderState.SUBMITTED,
+        OrderState.ACCEPTED,
+        OrderState.OPEN,
+        OrderState.PARTIALLY_FILLED,
+        OrderState.CANCEL_REQUESTED,
+    }
+)
