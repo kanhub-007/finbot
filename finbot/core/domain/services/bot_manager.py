@@ -128,6 +128,8 @@ class BotManager:
         self._runtime_config = self._seed_runtime_config(settings)
         # Default order size for /long /short without explicit size (Slice 2).
         self._default_size: Decimal | None = None
+        # Named config profiles (Slice 3). name -> snapshot dict.
+        self._config_profiles: dict[str, Any] = {}
 
     @staticmethod
     def _seed_runtime_config(settings: Any) -> RuntimeBotConfig:
@@ -408,6 +410,40 @@ class BotManager:
         """Clear the default order size."""
         with self._lock:
             self._default_size = None
+
+    def save_config_profile(self, name: str) -> dict[str, Any]:
+        """Snapshot the current RuntimeBotConfig under a profile name."""
+        with self._lock:
+            self._config_profiles[name] = self._runtime_config.snapshot()
+        return {"status": "ok", "profile": name}
+
+    def load_config_profile(self, name: str) -> dict[str, Any]:
+        """Restore a named profile. Rejected if the profile is unknown."""
+        with self._lock:
+            snapshot = self._config_profiles.get(name)
+            if snapshot is None:
+                return {
+                    "status": "rejected",
+                    "message": (
+                        f"Unknown profile '{name}'. Saved: "
+                        f"{', '.join(sorted(self._config_profiles)) or 'none'}"
+                    ),
+                }
+        # Apply each value through the public setter so validation runs.
+        for key, value in (
+            ("max_position", str(snapshot.max_position_usd)),
+            ("daily_loss", str(snapshot.max_daily_loss_usd)),
+            ("max_orders", str(snapshot.max_open_orders)),
+            ("stale_data", str(snapshot.stale_data_seconds)),
+        ):
+            self._runtime_config.set(key, value)
+        return {"status": "ok", "profile": name}
+
+    def list_config_profiles(self) -> dict[str, Any]:
+        """Return the saved profile names."""
+        with self._lock:
+            names = sorted(self._config_profiles.keys())
+        return {"status": "ok", "profiles": names}
 
     def submit_manual_order(self, side, size) -> dict[str, Any]:
         """Submit a manual market order on the active symbol.

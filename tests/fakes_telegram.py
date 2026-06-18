@@ -262,6 +262,15 @@ class FakeBotManager:
     def cancel_order(self, order_id: str) -> dict:
         return {"status": "ok", "order_id": order_id}
 
+    def save_config_profile(self, name: str) -> dict:
+        return {"status": "ok", "profile": name}
+
+    def load_config_profile(self, name: str) -> dict:
+        return {"status": "ok", "profile": name}
+
+    def list_config_profiles(self) -> dict:
+        return {"status": "ok", "profiles": []}
+
     def get_bot_config(self):
         from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
 

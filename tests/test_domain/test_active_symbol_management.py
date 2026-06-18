@@ -915,3 +915,56 @@ class TestCancelOrder:
 
         assert result["status"] == "error"
         assert "not found" in result["message"].lower()
+
+
+class TestConfigSaveProfiles:
+    """Scenario: /config profile save/load named profiles (Slice 3)."""
+
+    def test_save_profile_stores_current_config(self):
+        """/config profile save X stores the current RuntimeBotConfig."""
+        manager = _make_manager()
+        manager.update_bot_config("max_position", "500")
+
+        result = manager.save_config_profile("scalping")
+
+        assert result["status"] == "ok"
+        assert result["profile"] == "scalping"
+
+    def test_load_profile_restores_values(self):
+        """/config profile load X restores the saved values."""
+        manager = _make_manager()
+        manager.update_bot_config("max_position", "500")
+        manager.update_bot_config("daily_loss", "75")
+        manager.save_config_profile("scalping")
+
+        # Change values
+        manager.update_bot_config("max_position", "100")
+        manager.update_bot_config("daily_loss", "25")
+
+        result = manager.load_config_profile("scalping")
+
+        assert result["status"] == "ok"
+        cfg = manager.get_bot_config()
+        assert cfg.max_position_usd == Decimal("500")
+        assert cfg.max_daily_loss_usd == Decimal("75")
+
+    def test_load_unknown_profile_rejected(self):
+        """/config profile load X for an unsaved profile → rejected."""
+        manager = _make_manager()
+
+        result = manager.load_config_profile("nonexistent")
+
+        assert result["status"] == "rejected"
+        assert "scalping" in result["message"] or "not found" in result["message"].lower() or "unknown" in result["message"].lower()
+
+    def test_list_profiles(self):
+        """/config profile list shows saved profile names."""
+        manager = _make_manager()
+        manager.save_config_profile("scalping")
+        manager.save_config_profile("swing")
+
+        result = manager.list_config_profiles()
+
+        assert result["status"] == "ok"
+        assert "scalping" in result["profiles"]
+        assert "swing" in result["profiles"]
