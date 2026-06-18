@@ -615,7 +615,9 @@ class HandleTelegramCommand:
                      "Please start again with /run\\."
             )
 
-        session.strategy_path = strategy_name
+        session.strategy_path = self._strategy_dir.get_strategy_path(
+            strategy_name
+        )
         self._session_store.save(session)
 
         sid = session.session_id

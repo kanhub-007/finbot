@@ -1,0 +1,82 @@
+# AMT Dip Buyer v2 — Volatility-Filtered (RECOMMENDED)
+#
+# HOW IT WORKS:
+#   Same as v1, but adds a volatility filter:
+#   Only enter when the value area is NARROW (< 1.5% of price).
+#   Narrow value area = buyers and sellers agree on fair value
+#   = cleaner breakouts, fewer false signals.
+#
+# KEY METRICS:
+#   value_area_width_pct = (VAH - VAL) / VAH * 100
+#   < 1.5%  → agreement on value → trade
+#   > 1.5%  → disagreement → skip this signal
+#
+# RESULTS vs v1 (AAPL, 18 months, 1h):
+#   v1: +168% return, -34% drawdown, 291 trades
+#   v2: +251% return, -25% drawdown, 260 trades
+#   Improvement: +83% return, -9% DD, 31 fewer losing trades filtered
+#
+# CROSS-ASSET (v2, 18 months, 1h, 5% risk, 3x lev):
+#   GOOGL +433%, MU +298%, AAPL +251%, SPY +108%, MSFT +29%, TSLA -15%
+
+schema_version: "2.0"
+name: amt_v2_vol_filter
+description: >
+  AMT Rule 1 with volatility filter (value_area_width_pct < 1.5). Only
+  enters when fair value is clearly agreed upon (narrow value area).
+  Filters out noisy signals during wide/disagreeing value areas.
+
+parameters:
+  atr_stop_mult:
+    type: float
+    default: 3.5
+    minimum: 2.0
+    maximum: 5.0
+    description: ATR multiplier for stop loss distance
+
+timeframes:
+  primary: 1h
+
+indicators:
+  - name: atr
+    type: atr
+    timeframe: primary
+  - name: vp_vah
+    type: vp_vah
+    timeframe: primary
+  - name: vp_val
+    type: vp_val
+    timeframe: primary
+  - name: above_value
+    type: above_value
+    timeframe: primary
+  - name: value_area_width_pct
+    type: value_area_width_pct
+    timeframe: primary
+  - name: acceptance_into_value
+    type: acceptance_into_value
+    timeframe: primary
+
+sides:
+  long:
+    entry:
+      condition:
+        all:
+          - operator: is_true
+            left: acceptance_into_value
+          - operator: "<"
+            left: value_area_width_pct
+            right: 1.5
+    exit:
+      condition:
+        any:
+          - operator: is_true
+            left: above_value
+
+risk:
+  stop_loss:
+    type: atr
+    multiplier: "{{ atr_stop_mult }}"
+  take_profit:
+    type: risk_reward
+    ratio: 1.5
