@@ -291,8 +291,7 @@ class LiveTradingRuntimeUseCase:
         record = ReconciliationRecord(
             bot_run_id=self._bot_run_id,
             position_matches=(
-                existing is not None
-                or position.direction == PositionDirection.FLAT
+                existing is not None or position.direction == PositionDirection.FLAT
             ),
             open_orders_match=True,  # placeholder; full order reconcile later
             details=f"startup: exchange={position.direction.value} "
@@ -392,9 +391,7 @@ class LiveTradingRuntimeUseCase:
         pay no setup cost.
         """
         if self._account_handler is None:
-            self._account_handler = AccountEventHandler(
-                self._repo, self._trade_ledger
-            )
+            self._account_handler = AccountEventHandler(self._repo, self._trade_ledger)
         return self._account_handler.handle(
             event,
             bot_run_id=self._bot_run_id,
@@ -588,13 +585,29 @@ class LiveTradingRuntimeUseCase:
             "bot_run_id": self._bot_run_id,
             "mode": self._mode.value,
             "position_size": position.size,
+            "leverage": self._read_leverage(),
             "open_order_count": len(
                 self._exchange.list_open_orders(self._symbol or "")
             ),
-            "daily_loss_usd": self._trade_ledger.realized_loss_on(
-                _dt.now(UTC).date()
-            ),
+            "daily_loss_usd": self._trade_ledger.realized_loss_on(_dt.now(UTC).date()),
         }
+
+    def _read_leverage(self) -> int:
+        """Return the active symbol's leverage, falling back to 1 when unknown.
+
+        ``ExchangeGateway.get_leverage`` returns ``None`` when the exchange
+        has no position yet for the symbol (Hyperliquid only reports
+        leverage on an open position). The fallback matches the
+        ``MaxLeverageGate`` documented default of 1x.
+        """
+        try:
+            reported = self._exchange.get_leverage(self._symbol or "")
+        except Exception:
+            logger.debug("get_leverage failed", exc_info=True)
+            return 1
+        if reported is None:
+            return 1
+        return int(reported[0])
 
     def _mark_signal_processed(self, plan, action: str, candle_ts: int) -> None:
         """Record the signal key so replays are treated as duplicates."""
@@ -632,7 +645,8 @@ class LiveTradingRuntimeUseCase:
         # Notify for actionable risk events (skip noise like duplicate signals)
         if gate_name not in ("duplicate_signal",):
             self._emit_risk(
-                gate_name, plan.reason or f"Order blocked by {gate_name}",
+                gate_name,
+                plan.reason or f"Order blocked by {gate_name}",
                 bot_stopped=(gate_name in ("daily_loss", "mode")),
             )
 
@@ -651,9 +665,7 @@ class LiveTradingRuntimeUseCase:
 
     # -- event emission -----------------------------------------------------
 
-    def _emit_risk(
-        self, event_type: str, reason: str, *, bot_stopped: bool
-    ) -> None:
+    def _emit_risk(self, event_type: str, reason: str, *, bot_stopped: bool) -> None:
         """Emit a risk-triggered event to all registered observers."""
         try:
             from finbot.core.domain.events.runtime_events import (

@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     max_position_usd: Decimal = Field(default=Decimal("100"))
     max_daily_loss_usd: Decimal = Field(default=Decimal("25"))
     max_open_orders: int = Field(default=3)
+    max_leverage: int = Field(default=20)
     stale_data_seconds: int = Field(default=120)
     telegram_bot_token: SecretStr = Field(default=SecretStr(""))
     telegram_allowed_users: str = Field(default="")

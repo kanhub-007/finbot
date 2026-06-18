@@ -87,7 +87,12 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         return snapshot
 
     def _fetch_position(self, symbol: str) -> PositionSnapshot:
-        """Fetch the position from the exchange (REST) and normalise it."""
+        """Fetch the position from the exchange (REST) and normalise it.
+
+        Also populates the leverage cache for *symbol* from the same
+        ``user_state`` payload so the per-candle ``get_leverage`` read
+        never triggers a second REST call.
+        """
         info = self._ensure_info()
         state = info.user_state(self._account_address or "")
         positions = state.get("assetPositions", [])
@@ -102,12 +107,17 @@ class HyperliquidExchangeGateway(ExchangeGateway):
                     else PositionDirection.SHORT if size < 0 else PositionDirection.FLAT
                 )
                 entry_px = Decimal(str(pos_info.get("entryPx", 0)))
+                # Cache leverage from the same payload (P7 — avoid a second
+                # user_state round-trip in the per-candle get_leverage read).
+                self._account_cache.set_leverage(symbol, _parse_leverage(pos_info))
                 return PositionSnapshot(
                     symbol=coin,
                     direction=direction,
                     size=abs(size),
                     entry_price=entry_px,
                 )
+        # Symbol has no position — leverage is genuinely unknown.
+        self._account_cache.set_leverage(symbol, None)
         return PositionSnapshot(
             symbol=symbol,
             direction=PositionDirection.FLAT,
@@ -175,7 +185,9 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         """Cancel a single order by its exchange-assigned ID."""
         exchange = self._ensure_exchange()
         result = exchange.cancel(symbol, oid)  # type: ignore[no-any-return]
-        self._account_cache.remove_open_order(symbol, lambda o: str(o.get("oid", "")) == oid)
+        self._account_cache.remove_open_order(
+            symbol, lambda o: str(o.get("oid", "")) == oid
+        )
         return result
 
     # -- leverage / market data (trading-control spec) ---------------------
@@ -195,21 +207,22 @@ class HyperliquidExchangeGateway(ExchangeGateway):
 
         Hyperliquid exposes per-asset leverage in ``user_state`` under
         ``assetPositions``. Returns ``(leverage, margin_mode)`` or None.
+        Consults the account-state cache first so the per-candle hot path
+        doesn't add a REST round-trip beyond the one ``get_position`` already
+        makes. A cached ``None`` ("no position") is honoured and does not
+        trigger a refetch.
         """
+        from finbot.infrastructure.adapters.account_state_cache import _CACHE_MISS
+
+        cached = self._account_cache.get_leverage(symbol)
+        if cached is not _CACHE_MISS:
+            return cached  # type: ignore[return-value]
+        # Cache miss (cold start) — do one fresh fetch. ``_fetch_position``
+        # repopulates the leverage cache as a side effect, so call it and
+        # then read the now-populated cache.
         try:
-            info = self._ensure_info()
-            state = info.user_state(self._account_address or "")
-            positions = state.get("assetPositions", [])
-            for pos in positions:
-                pos_info = pos.get("position", {})
-                if pos_info.get("coin", "").upper() == symbol.upper():
-                    leverage = int(pos_info.get("leverage", {}).get("value", 1))
-                    is_cross = (
-                        pos_info.get("leverage", {}).get("type", "cross").lower()
-                        == "cross"
-                    )
-                    return leverage, ("cross" if is_cross else "isolated")
-            return None
+            self._fetch_position(symbol)
+            return self._account_cache.get_leverage(symbol)
         except Exception:
             return None
 
@@ -265,6 +278,20 @@ class HyperliquidExchangeGateway(ExchangeGateway):
 
             self._info = Info(self._base_url, skip_ws=True)
         return self._info
+
+
+def _parse_leverage(pos_info: dict[str, Any]) -> tuple[int, str] | None:
+    """Extract ``(leverage, margin_mode)`` from a Hyperliquid position.
+
+    Returns ``None`` when the payload lacks a leverage block. Margin mode is
+    normalised to ``"cross"`` / ``"isolated"``.
+    """
+    lev_block = pos_info.get("leverage")
+    if not lev_block:
+        return None
+    leverage = int(lev_block.get("value", 1))
+    is_cross = str(lev_block.get("type", "cross")).lower() == "cross"
+    return leverage, ("cross" if is_cross else "isolated")
 
 
 def _execute_order(

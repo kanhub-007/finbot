@@ -21,6 +21,29 @@ from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 
 
+class _CacheMissType:
+    """Singleton sentinel marking a cache miss.
+
+    Distinct from ``None`` because ``None`` is a valid cached value
+    ("symbol has no position / leverage unknown"). Typed so callers and
+    type-checkers can distinguish the three return states of ``get_leverage``.
+    """
+
+    _instance: _CacheMissType | None = None
+
+    def __new__(cls) -> _CacheMissType:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "_CACHE_MISS"
+
+
+#: Sentinel returned by ``get_leverage`` when no cache entry exists.
+_CACHE_MISS: _CacheMissType = _CacheMissType()
+
+
 class AccountStateCache:
     """In-memory cache of position and open-order state for one account.
 
@@ -38,6 +61,12 @@ class AccountStateCache:
         self._position_updated_at: dict[str, float] = {}
         self._open_orders: dict[str, list[dict[str, Any]]] = {}
         self._open_orders_updated_at: dict[str, float] = {}
+        # Leverage cache: symbol -> (leverage, margin_mode). Populated by
+        # ``_fetch_position`` (which already has the user_state payload) so
+        # the per-candle ``get_leverage`` read never makes a separate REST
+        # call. ``None`` means "symbol has no position / unknown leverage".
+        self._leverage: dict[str, tuple[int, str] | None] = {}
+        self._leverage_updated_at: dict[str, float] = {}
 
     # -- position ----------------------------------------------------------
 
@@ -63,6 +92,35 @@ class AccountStateCache:
             sym = symbol.upper()
             self._positions.pop(sym, None)
             self._position_updated_at.pop(sym, None)
+            self._leverage.pop(sym, None)
+            self._leverage_updated_at.pop(sym, None)
+
+    # -- leverage ----------------------------------------------------------
+
+    def get_leverage(self, symbol: str) -> tuple[int, str] | None | _CacheMissType:
+        """Return cached ``(leverage, margin_mode)``, cached ``None``, or
+        ``_CACHE_MISS``.
+
+        - ``(leverage, margin_mode)``: fresh cached leverage.
+        - ``None``: cached "symbol has no position / leverage unknown".
+        - ``_CACHE_MISS``: no entry or expired; caller should fetch.
+        """
+        if self._ttl <= 0:
+            return _CACHE_MISS
+        sym = symbol.upper()
+        with self._lock:
+            if sym not in self._leverage_updated_at:
+                return _CACHE_MISS
+            updated = self._leverage_updated_at.get(sym, 0.0)
+            if time.monotonic() - updated > self._ttl:
+                return _CACHE_MISS
+            return self._leverage.get(sym)
+
+    def set_leverage(self, symbol: str, value: tuple[int, str] | None) -> None:
+        with self._lock:
+            sym = symbol.upper()
+            self._leverage[sym] = value
+            self._leverage_updated_at[sym] = time.monotonic()
 
     # -- open orders -------------------------------------------------------
 
@@ -108,6 +166,8 @@ class AccountStateCache:
             self._position_updated_at.clear()
             self._open_orders.clear()
             self._open_orders_updated_at.clear()
+            self._leverage.clear()
+            self._leverage_updated_at.clear()
 
 
 def flat_position(symbol: str) -> PositionSnapshot:

@@ -65,7 +65,8 @@ class TestAccountStateCache:
 
 
 class TestGatewayUsesCache:
-    def _gateway(self) -> HyperliquidExchangeGateway:
+    @staticmethod
+    def _gateway() -> HyperliquidExchangeGateway:
         return HyperliquidExchangeGateway(private_key="0x" + "a" * 64)
 
     def test_get_position_caches_so_second_call_skips_rest(self) -> None:
@@ -125,3 +126,89 @@ class TestGatewayUsesCache:
             with patch.object(gateway, "_ensure_info", return_value=mock_info):
                 gateway.cancel_all("BTC")
         assert gateway.account_cache().get_open_orders("BTC") is None
+
+
+class TestLeverageCache:
+    """C5 support: ``get_leverage`` must not add a per-candle REST call.
+
+    The cache distinguishes three states so a symbol with no position (valid
+    ``None``) doesn't trigger a refetch every candle.
+    """
+
+    def test_miss_returns_cache_miss_sentinel(self) -> None:
+        from finbot.infrastructure.adapters.account_state_cache import _CACHE_MISS
+
+        cache = AccountStateCache(ttl_seconds=5)
+        assert cache.get_leverage("BTC") is _CACHE_MISS
+
+    def test_cached_none_is_honoured_not_treated_as_miss(self) -> None:
+        """A symbol with no position caches ``None``; reads return ``None``, not
+        the miss sentinel, so the gateway skips the REST refetch."""
+        from finbot.infrastructure.adapters.account_state_cache import _CACHE_MISS
+
+        cache = AccountStateCache(ttl_seconds=5)
+        cache.set_leverage("BTC", None)
+        got = cache.get_leverage("BTC")
+        assert got is None
+        assert got is not _CACHE_MISS
+
+    def test_cached_leverage_returned_as_is(self) -> None:
+        cache = AccountStateCache(ttl_seconds=5)
+        cache.set_leverage("BTC", (10, "isolated"))
+        assert cache.get_leverage("BTC") == (10, "isolated")
+
+    def test_clear_position_also_clears_leverage(self) -> None:
+        from finbot.infrastructure.adapters.account_state_cache import _CACHE_MISS
+
+        cache = AccountStateCache(ttl_seconds=5)
+        cache.set_leverage("BTC", (5, "cross"))
+        cache.clear_position("BTC")
+        assert cache.get_leverage("BTC") is _CACHE_MISS
+
+    def test_clear_all_clears_leverage(self) -> None:
+        from finbot.infrastructure.adapters.account_state_cache import _CACHE_MISS
+
+        cache = AccountStateCache(ttl_seconds=5)
+        cache.set_leverage("BTC", (5, "cross"))
+        cache.clear()
+        assert cache.get_leverage("BTC") is _CACHE_MISS
+
+    def test_get_leverage_reuses_position_fetch_user_state(self) -> None:
+        """``get_leverage`` does not make a second REST call when ``get_position``
+        already populated the leverage cache from the same ``user_state``."""
+        gateway = TestGatewayUsesCache._gateway()
+        mock_info = MagicMock()
+        mock_info.user_state.return_value = {
+            "assetPositions": [
+                {
+                    "position": {
+                        "coin": "BTC",
+                        "szi": "0.5",
+                        "entryPx": "50000",
+                        "leverage": {"value": 7, "type": "isolated"},
+                    }
+                }
+            ]
+        }
+        with patch.object(gateway, "_ensure_info", return_value=mock_info):
+            # get_position populates both the position and leverage cache
+            gateway.get_position("BTC")
+            # get_leverage reads from cache — no extra user_state call
+            lev = gateway.get_leverage("BTC")
+
+        assert lev == (7, "isolated")
+        assert (
+            mock_info.user_state.call_count == 1
+        ), "get_leverage made an extra REST call instead of reading the cache"
+
+    def test_get_leverage_honours_cached_none_no_refetch(self) -> None:
+        """Symbol with no position: cached None must not trigger a refetch."""
+        gateway = TestGatewayUsesCache._gateway()
+        mock_info = MagicMock()
+        mock_info.user_state.return_value = {"assetPositions": []}
+        with patch.object(gateway, "_ensure_info", return_value=mock_info):
+            gateway.get_position("BTC")  # caches leverage=None
+            lev = gateway.get_leverage("BTC")  # should read cache, not refetch
+
+        assert lev is None
+        assert mock_info.user_state.call_count == 1

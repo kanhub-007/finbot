@@ -413,13 +413,28 @@ def create_live_trading_runtime_use_case(
         LiveTradingRuntimeBuilder,
     )
 
+    # Build the exchange metadata + precision normalizer once. Both are used
+    # by the LiveSubmissionStrategy (for normalization) and by the runtime
+    # (for the OrderNormalizer port). Dry-run uses neither.
     if trading_mode == TradingMode.DRY_RUN:
         submission_strategy = DryRunSubmissionStrategy(
             repo, trade_ledger, exchange=gateway
         )
+        metadata_provider = None
+        normalizer = None
     else:
+        from finbot.core.domain.services.order_normalizer import OrderNormalizer
+        from finbot.infrastructure.adapters.hyperliquid_metadata_provider import (
+            HyperliquidMetadataProvider,
+        )
+
+        metadata_provider = HyperliquidMetadataProvider()
+        metadata = metadata_provider.get_metadata(symbol)
+        normalizer = (
+            OrderNormalizer(metadata=metadata) if metadata is not None else None
+        )
         submission_strategy = LiveSubmissionStrategy(
-            gateway, order_normalizer=None, repo=repo
+            gateway, order_normalizer=normalizer, repo=repo
         )
 
     # Wire the event emitter + Telegram observer (if available)
@@ -443,7 +458,7 @@ def create_live_trading_runtime_use_case(
             ),
             StaleDataGate(max_age_seconds=settings.stale_data_seconds),
             MaxPositionGate(max_notional_usd=settings.max_position_usd),
-            MaxLeverageGate(),
+            MaxLeverageGate(max_leverage=settings.max_leverage),
             MaxOpenOrdersGate(max_orders=settings.max_open_orders),
             DailyLossGate(max_loss_usd=settings.max_daily_loss_usd),
             ReduceOnlyGate(),
@@ -451,7 +466,7 @@ def create_live_trading_runtime_use_case(
         ]
     )
 
-    return (
+    builder = (
         LiveTradingRuntimeBuilder()
         .with_exchange(gateway)
         .with_evaluator(evaluator)
@@ -468,8 +483,17 @@ def create_live_trading_runtime_use_case(
         .with_order_planner(order_planner)
         .with_bot_loop(bot_loop)
         .with_strategy_validator(create_validate_strategy_use_case())
-        .build()
     )
+    # Testnet/live need an idempotent cloid and exchange precision so orders
+    # actually reach the exchange (C1). Dry-run omits both deliberately.
+    if trading_mode != TradingMode.DRY_RUN:
+        from finbot.core.domain.services.cloid_generator import CloidGenerator
+
+        builder = builder.with_metadata_provider(metadata_provider)
+        builder = builder.with_cloid_generator(CloidGenerator())
+        if normalizer is not None:
+            builder = builder.with_order_normalizer(normalizer)
+    return builder.build()
 
 
 def _hash_strategy_file(path: str) -> str:
