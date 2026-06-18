@@ -48,6 +48,7 @@ class HandleTelegramCommand:
         session_store: TelegramSessionStore,
         allowed_users: frozenset[int],
         live_trading_ack: bool = False,
+        mode: str = "dry_run",
         metadata_provider: object | None = None,
     ) -> None:
         self._bot_manager = bot_manager
@@ -56,6 +57,7 @@ class HandleTelegramCommand:
         self._session_store = session_store
         self._allowed_users = allowed_users
         self._live_trading_ack = live_trading_ack
+        self._mode = mode
         self._metadata_provider = metadata_provider
 
     # ------------------------------------------------------------------
@@ -877,14 +879,10 @@ class HandleTelegramCommand:
         """Handle Confirm/Cancel for manual orders and /clear.
 
         Re-validates state on Confirm (prompt may be stale): re-checks the
-        active symbol, parses the stashed order params, and submits. The
+        active symbol, reads the stashed draft, and submits. The
         BotManager re-runs risk gates internally, so a stale prompt that no
         longer passes gates is rejected cleanly.
         """
-        from decimal import Decimal
-
-        from finbot.core.domain.entities.order_side import OrderSide
-
         session_id = data.action
         action = data.value
         session = self._session_store.get(session_id)
@@ -908,39 +906,20 @@ class HandleTelegramCommand:
             return self._execute_clear()
 
         if action == "exec":
-            # Parse stashed params: "<long|short>|<size>|<sl>|<tp>"
-            marker = session.interval or ""
-            parts = marker.split("|")
-            if len(parts) < 2:
+            # Read the typed draft stashed at prompt time (M9).
+            draft = session.manual_order_draft
+            if draft is None:
                 return TelegramCommandResult(
                     text="Session corrupted\\. Please start again\\.",
                     parse_mode="MarkdownV2",
                 )
-            side = parts[0]
-            try:
-                size = Decimal(parts[1])
-            except Exception:
-                return TelegramCommandResult(
-                    text="Invalid size in session\\.", parse_mode="MarkdownV2"
-                )
-            sl_price = (
-                Decimal(parts[2])
-                if len(parts) > 2 and parts[2] not in ("None", "")
-                else None
-            )
-            tp_price = (
-                Decimal(parts[3])
-                if len(parts) > 3 and parts[3] not in ("None", "")
-                else None
-            )
             active = self._bot_manager.get_active_symbol()
             if active is None:
                 return TelegramCommandResult(
                     text="No active symbol\\.", parse_mode="MarkdownV2"
                 )
-            order_side = OrderSide.BUY if side == "long" else OrderSide.SELL
             return self._execute_manual_order(
-                order_side, active, size, sl_price, tp_price
+                draft.side, active, draft.size, draft.sl_price, draft.tp_price
             )
 
         return TelegramCommandResult(
@@ -1289,31 +1268,39 @@ class HandleTelegramCommand:
         return self._execute_manual_order(order_side, active, size, sl_price, tp_price)
 
     def _needs_confirmation(self) -> bool:
-        """True when the bot mode requires confirmation before real orders."""
-        mode = self._live_trading_ack_mode()
-        return mode in ("testnet", "live")
+        """True when the configured mode requires confirmation before real orders.
+
+        Decided from the injected ``mode`` (M4) — not from
+        ``bot_manager.get_status()``, which returns 'dry_run' whenever the
+        bot isn't running and would silently skip confirmation for an idle
+        live deployment.
+        """
+        return self._mode in ("testnet", "live")
 
     def _live_trading_ack_mode(self) -> str:
-        """Return the effective mode for confirmation decisions."""
-        # The handler doesn't hold Settings; rely on bot_manager status if
-        # available, otherwise assume dry-run (no confirmation).
-        try:
-            status = self._bot_manager.get_status()
-            mode = str(status.get("mode", "dry_run")).lower()
-            return mode
-        except Exception:
-            return "dry_run"
+        """Return the configured mode for confirmation/display decisions."""
+        return self._mode
 
     def _render_order_confirmation(
         self, request, side, active, size, sl_price, tp_price
     ) -> TelegramCommandResult:
         """Show a Confirm/Cancel prompt for a live/testnet manual order."""
+        from finbot.core.domain.entities.manual_order_draft import (
+            ManualOrderDraft,
+        )
+        from finbot.core.domain.entities.order_side import OrderSide
+
         session = self._session_store.create(request.chat_id, request.message_id)
         sid = session.session_id
         action = "long" if side == "buy" else "short"
-        # Stash the order params in the session for re-validation on confirm.
+        # Stash the order params as a typed draft for re-validation on confirm (M9).
         session.symbol = active.symbol
-        session.interval = f"{action}|{size}|{sl_price}|{tp_price}"
+        session.manual_order_draft = ManualOrderDraft(
+            side=(OrderSide.BUY if side == "buy" else OrderSide.SELL),
+            size=size,
+            sl_price=sl_price,
+            tp_price=tp_price,
+        )
         self._session_store.save(session)
 
         extras = []

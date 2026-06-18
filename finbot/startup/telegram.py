@@ -77,9 +77,7 @@ class TelegramControlPlane:
     def start_in_background(self) -> None:
         """Start the Telegram event loop on a daemon thread."""
         if self._bot_manager is None:
-            raise RuntimeError(
-                "BotManager must be attached before starting Telegram"
-            )
+            raise RuntimeError("BotManager must be attached before starting Telegram")
 
         token = self._settings.telegram_bot_token.get_secret_value()
         if not token:
@@ -112,6 +110,7 @@ class TelegramControlPlane:
             session_store=InMemoryTelegramSessionStore(),
             allowed_users=self._settings.telegram_allowed_user_ids,
             live_trading_ack=self._settings.live_trading_ack,
+            mode=self._settings.mode,
             metadata_provider=metadata_provider,
         )
 
@@ -173,8 +172,7 @@ def create_telegram_control_plane(
     token = settings.telegram_bot_token.get_secret_value()
     if not token:
         raise ValueError(
-            "FINBOT_TELEGRAM_BOT_TOKEN is required when "
-            "FINBOT_TELEGRAM_ENABLED=true"
+            "FINBOT_TELEGRAM_BOT_TOKEN is required when " "FINBOT_TELEGRAM_ENABLED=true"
         )
 
     if chat_repo is None:

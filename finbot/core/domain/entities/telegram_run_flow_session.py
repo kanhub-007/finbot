@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+from finbot.core.domain.entities.manual_order_draft import ManualOrderDraft
+
 
 @dataclass
 class TelegramRunFlowSession:
@@ -20,6 +22,9 @@ class TelegramRunFlowSession:
     symbol: str | None = None
     interval: str | None = None
     mode: str | None = None
+    #: Typed stash for manual-order params awaiting confirmation (M9).
+    #: Replaces the prior ``interval = "long|0.1|sl|tp"`` serialised hack.
+    manual_order_draft: ManualOrderDraft | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc) + timedelta(minutes=30)

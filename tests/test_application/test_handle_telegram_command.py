@@ -1078,21 +1078,13 @@ class TestConfirmationFlow:
 
         fake = FakeBotManager()
         fake._mode = mode
-        # Override get_status to report the mode for confirmation checks
-        orig = fake.get_status
-
-        def status():
-            s = orig()
-            s["mode"] = mode
-            return s
-
-        fake.get_status = status
         return HandleTelegramCommand(
             bot_manager=fake,
             chat_repo=InMemoryTelegramChatRepository(),
             strategy_dir=FakeStrategyDirectory([]),
             session_store=InMemoryTelegramSessionStore(),
             allowed_users=frozenset({1}),
+            mode=mode,
         )
 
     @pytest.mark.asyncio
@@ -1356,3 +1348,77 @@ class TestPanicCancelledCount:
 
         assert "Orders cancelled: 3" in result.text
         assert "Position closed" in result.text
+
+
+# ---------------------------------------------------------------------------
+# S9 — Inject mode/live_trading_ack; ManualOrderDraft replaces session stash (M4, M9)
+# ---------------------------------------------------------------------------
+
+
+class TestManualOrderConfirmationModeInjected:
+    """M4: confirmation must be decided from injected mode/live_trading_ack,
+    not from bot_manager.get_status(). On ``main`` ``_live_trading_ack_mode``
+    returns 'dry_run' whenever the bot isn't running — so /long while idle
+    in a live deployment never asks for confirmation."""
+
+    def _use_case(self, *, mode: str, live_trading_ack: bool):
+        return HandleTelegramCommand(
+            bot_manager=FakeBotManager(is_running=False),
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({123}),
+            live_trading_ack=live_trading_ack,
+            mode=mode,
+        )
+
+    def test_live_mode_idle_bot_still_requires_confirmation(self):
+        """While idle in live mode, /long must still confirm (not skip)."""
+        from decimal import Decimal
+
+        from finbot.core.domain.entities.active_symbol_state import (
+            ActiveSymbolState,
+        )
+
+        uc = self._use_case(mode="live", live_trading_ack=True)
+        # Active symbol set so /long doesn't bail with 'no symbol'
+        uc._bot_manager._active_symbol = ActiveSymbolState(
+            symbol="BTC", leverage=1, margin_mode="isolated"
+        )
+
+        result = uc._needs_confirmation()
+
+        assert (
+            result is True
+        ), "live mode must require confirmation even when the bot is idle (M4)"
+
+    def test_dry_run_mode_never_requires_confirmation(self):
+        uc = self._use_case(mode="dry_run", live_trading_ack=False)
+        assert uc._needs_confirmation() is False
+
+    def test_testnet_mode_requires_confirmation(self):
+        uc = self._use_case(mode="testnet", live_trading_ack=True)
+        assert uc._needs_confirmation() is True
+
+
+class TestManualOrderDraftReplacesSessionStash:
+    """M9: manual-order params are stashed in a typed ManualOrderDraft field,
+    not serialised into session.interval as 'long|0.1|sl|tp'."""
+
+    def test_manual_order_draft_entity_exists_and_is_typed(self):
+        from finbot.core.domain.entities.manual_order_draft import (
+            ManualOrderDraft,
+        )
+        from finbot.core.domain.entities.order_side import OrderSide
+        from decimal import Decimal
+
+        draft = ManualOrderDraft(
+            side=OrderSide.BUY,
+            size=Decimal("0.1"),
+            sl_price=Decimal("94000"),
+            tp_price=None,
+        )
+        assert draft.side == OrderSide.BUY
+        assert draft.size == Decimal("0.1")
+        assert draft.sl_price == Decimal("94000")
+        assert draft.tp_price is None
