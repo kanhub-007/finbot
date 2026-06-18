@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from finbot.core.domain.dto.run_counts import RunCounts
+from finbot.core.domain.entities.active_symbol_state import ActiveSymbolState
 from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
 from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.fill_record import FillRecord
@@ -109,6 +110,8 @@ class BotManager:
         self._runtime: Any | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        # Active symbol state (None = fully idle). See trading-control spec.
+        self._active_symbol: ActiveSymbolState | None = None
 
     # -- public lifecycle ----------------------------------------------------
 
@@ -210,6 +213,16 @@ class BotManager:
         """Return True if a bot is currently running."""
         with self._lock:
             return self._runtime is not None
+
+    def get_active_symbol(self) -> ActiveSymbolState | None:
+        """Return the active symbol state, or None if the bot is fully idle.
+
+        On startup this is None. ``/symbol`` sets it; ``/symbol clear`` or a
+        switch replaces it. The exchange is the source of truth for positions,
+        but leverage/margin live here so they survive restarts.
+        """
+        with self._lock:
+            return self._active_symbol
 
     # -- public query methods (delegate to repo/exchange) --------------------
 
