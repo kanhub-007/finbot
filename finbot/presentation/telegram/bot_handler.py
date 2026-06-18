@@ -26,6 +26,7 @@ _HANDLED_COMMANDS = [
     # trading-control spec
     "symbol", "price", "balance", "leverage", "position",
     "long", "short", "close", "clear", "sl", "tp", "config", "size",
+    "orders", "cancel",
 ]
 
 

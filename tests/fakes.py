@@ -125,7 +125,7 @@ class InMemoryExchangeGateway(ExchangeGateway):
         return self._position
 
     def list_open_orders(self, symbol: str) -> list[dict]:
-        return []
+        return getattr(self, "orders_to_report", [])
 
     def submit_order(self, intent) -> dict:
         self.submitted_order_count += 1
@@ -135,6 +135,9 @@ class InMemoryExchangeGateway(ExchangeGateway):
         return {"status": "fake_cancelled"}
 
     def cancel_by_cloid(self, symbol: str, cloid: str) -> dict:
+        return {"status": "fake_cancelled"}
+
+    def cancel_by_oid(self, symbol: str, oid: str) -> dict:
         return {"status": "fake_cancelled"}
 
     def set_leverage(self, symbol, leverage, margin_mode="isolated"):
@@ -517,6 +520,11 @@ class FakeExchangeGateway(InMemoryExchangeGateway):
             margin_used=Decimal("0"),
             available=Decimal("10000"),
         )
+        # Open orders recording
+        self.orders_to_report: list[dict] = []
+        # cancel_by_oid recording
+        self.last_cancel_oid: str | None = None
+        self.cancel_by_oid_result: dict = {"status": "ok", "cancelled": ""}
 
     def submit_order(self, intent) -> dict:
         self.submitted_order_count += 1
@@ -544,6 +552,12 @@ class FakeExchangeGateway(InMemoryExchangeGateway):
 
     def get_balance(self):
         return self.balance_to_report
+
+    def cancel_by_oid(self, symbol: str, oid: str) -> dict:
+        self.last_cancel_oid = oid
+        result = dict(self.cancel_by_oid_result)
+        result.setdefault("cancelled", oid)
+        return result
 
 
 # ---------------------------------------------------------------------------

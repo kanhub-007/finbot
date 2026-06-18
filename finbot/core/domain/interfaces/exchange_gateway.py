@@ -32,6 +32,13 @@ class ExchangeGateway(ABC):
     def cancel_by_cloid(self, symbol: str, cloid: str) -> dict[str, Any]:
         """Cancel a single order by its client-assigned ID."""
 
+    def cancel_by_oid(self, symbol: str, oid: str) -> dict[str, Any]:
+        """Cancel a single order by its exchange-assigned ID.
+
+        Base method raises so subclasses opt in explicitly. Used by /cancel.
+        """
+        raise NotImplementedError
+
     # -- leverage / market data (trading-control spec) ---------------------
 
     def set_leverage(

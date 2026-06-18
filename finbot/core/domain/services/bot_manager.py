@@ -354,6 +354,18 @@ class BotManager:
             symbol = self._active_symbol.symbol
         return self._exchange.get_position(symbol)
 
+    def list_active_orders(self) -> list[dict[str, Any]] | None:
+        """Return open orders for the active symbol, or None if idle.
+
+        Returns an empty list when the symbol has no open orders. The
+        exchange is the source of truth.
+        """
+        with self._lock:
+            if self._active_symbol is None or self._exchange is None:
+                return None
+            symbol = self._active_symbol.symbol
+        return self._exchange.list_open_orders(symbol)
+
     def get_balance(self) -> WalletBalance | None:
         """Return the wallet balance, or None if no exchange is wired."""
         if self._exchange is None:
@@ -792,6 +804,36 @@ class BotManager:
         above for short). Replaces any existing SL for the symbol.
         """
         return self._attach_risk_order("SL", price)
+
+    def cancel_order(self, order_id: str) -> dict[str, Any]:
+        """Cancel a single order on the active symbol by exchange oid.
+
+        Different from /clear (all orders) and /sl clear (cloid-prefixed
+        trigger). Returns ok/error from the exchange.
+        """
+        with self._lock:
+            if self._active_symbol is None:
+                return {
+                    "status": "rejected",
+                    "message": "No active symbol. Use /symbol first.",
+                }
+            if self._exchange is None:
+                return {"status": "error", "message": "No exchange wired"}
+            symbol = self._active_symbol.symbol
+        try:
+            result = self._exchange.cancel_by_oid(symbol, order_id)
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+        if isinstance(result, dict) and result.get("status") not in (
+            "ok",
+            "success",
+            None,
+        ):
+            return {
+                "status": "error",
+                "message": str(result.get("message", "unknown")),
+            }
+        return {"status": "ok", "order_id": order_id, "symbol": symbol}
 
     def attach_take_profit(self, price) -> dict[str, Any]:
         """Attach a reduce-only take-profit trigger (cloid TP:<symbol>).

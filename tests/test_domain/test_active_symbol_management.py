@@ -844,3 +844,74 @@ class TestStopLossTakeProfitPercentage:
         manager.attach_stop_loss(Decimal("94000"))
 
         assert exchange.submitted_intents[0].limit_price == Decimal("94000")
+
+
+class TestListActiveOrders:
+    """Scenario: /orders lists open orders for the active symbol (Slice 3)."""
+
+    def test_list_active_orders_returns_exchange_orders(self):
+        """list_active_orders returns orders from the exchange for the symbol."""
+        exchange = FakeExchangeGateway()
+        exchange.orders_to_report = [
+            {"oid": "1", "side": "buy", "sz": "0.01", "limit_px": "95000"},
+            {"oid": "2", "side": "sell", "sz": "0.02", "limit_px": "96000"},
+        ]
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        orders = manager.list_active_orders()
+
+        assert len(orders) == 2
+        assert orders[0]["oid"] == "1"
+
+    def test_list_active_orders_none_when_idle(self):
+        """No active symbol → returns None."""
+        manager = _make_manager()
+
+        assert manager.list_active_orders() is None
+
+    def test_list_active_orders_empty_when_no_orders(self):
+        """Active symbol with no open orders → empty list."""
+        exchange = FakeExchangeGateway()
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        orders = manager.list_active_orders()
+
+        assert orders == []
+
+
+class TestCancelOrder:
+    """Scenario: /cancel ORDER_ID cancels a specific order (Slice 3)."""
+
+    def test_cancel_order_cancels_by_oid(self):
+        """cancel_order('123') cancels the order with oid=123 on the exchange."""
+        exchange = FakeExchangeGateway()
+        exchange.cancel_by_oid_result = {"status": "ok", "cancelled": "123"}
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.cancel_order("123")
+
+        assert result["status"] == "ok"
+        assert exchange.last_cancel_oid == "123"
+
+    def test_cancel_order_requires_active_symbol(self):
+        """No active symbol → rejected."""
+        manager = _make_manager()
+
+        result = manager.cancel_order("123")
+
+        assert result["status"] == "rejected"
+
+    def test_cancel_order_unknown_oid_returns_error(self):
+        """Unknown oid → exchange rejects, surfaced as error."""
+        exchange = FakeExchangeGateway()
+        exchange.cancel_by_oid_result = {"status": "error", "message": "not found"}
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.cancel_order("999")
+
+        assert result["status"] == "error"
+        assert "not found" in result["message"].lower()

@@ -880,3 +880,45 @@ class TestTradingControlHandlers:
             TelegramCommandRequest(command="/price", args="", chat_id=1, user_id=1, message_id=1)
         )
         assert "BTC" in result.text
+
+
+class TestOrdersAndCancelHandlers:
+    """Smoke tests for /orders and /cancel (Slice 3 wiring)."""
+
+    def _use_case(self):
+        from tests.fakes_telegram import FakeBotManager
+
+        return HandleTelegramCommand(
+            bot_manager=FakeBotManager(),
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory([]),
+            session_store=InMemoryTelegramSessionStore(),
+            allowed_users=frozenset({1}),
+        )
+
+    @pytest.mark.asyncio
+    async def test_orders_requires_symbol(self):
+        uc = self._use_case()
+        result = await uc.execute(
+            TelegramCommandRequest(command="/orders", args="", chat_id=1, user_id=1, message_id=1)
+        )
+        assert "symbol" in result.text.lower()
+
+    @pytest.mark.asyncio
+    async def test_cancel_requires_symbol(self):
+        uc = self._use_case()
+        result = await uc.execute(
+            TelegramCommandRequest(command="/cancel", args="123", chat_id=1, user_id=1, message_id=1)
+        )
+        assert "symbol" in result.text.lower()
+
+    @pytest.mark.asyncio
+    async def test_cancel_no_args(self):
+        uc = self._use_case()
+        await uc.execute(
+            TelegramCommandRequest(command="/symbol", args="BTC", chat_id=1, user_id=1, message_id=1)
+        )
+        result = await uc.execute(
+            TelegramCommandRequest(command="/cancel", args="", chat_id=1, user_id=1, message_id=1)
+        )
+        assert "ORDER" in result.text or "Usage" in result.text or "usage" in result.text.lower()

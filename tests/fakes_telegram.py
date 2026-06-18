@@ -256,6 +256,12 @@ class FakeBotManager:
     def clear_risk_order(self, kind: str) -> dict:
         return {"status": "ok", "kind": kind}
 
+    def list_active_orders(self):
+        return [] if getattr(self, "_active_symbol", None) is not None else None
+
+    def cancel_order(self, order_id: str) -> dict:
+        return {"status": "ok", "order_id": order_id}
+
     def get_bot_config(self):
         from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
 

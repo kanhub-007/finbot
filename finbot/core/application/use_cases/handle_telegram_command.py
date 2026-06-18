@@ -1369,6 +1369,57 @@ class HandleTelegramCommand:
             parse_mode="MarkdownV2",
         )
 
+    async def _handle_orders(self, request: TelegramCommandRequest):
+        """List open orders for the active symbol."""
+        active = self._bot_manager.get_active_symbol()
+        if active is None:
+            return TelegramCommandResult(
+                text="No symbol selected\\. Use /symbol first\\.",
+                parse_mode="MarkdownV2",
+            )
+        orders = self._bot_manager.list_active_orders()
+        if not orders:
+            return TelegramCommandResult(
+                text=f"No open orders on {_escape_mdv2(active.symbol)}\\.",
+                parse_mode="MarkdownV2",
+            )
+        lines = [f"\U0001f4cb Open Orders ({_escape_mdv2(active.symbol)})"]
+        for o in orders:
+            oid = _escape_mdv2(str(o.get("oid", o.get("cloid", ""))))
+            side = _escape_mdv2(str(o.get("side", "")))
+            sz = _escape_mdv2(str(o.get("sz", "")))
+            px = _escape_mdv2(str(o.get("limit_px", "")))
+            lines.append(f"\\#{oid} {side} {sz} @ {px}")
+        return TelegramCommandResult(
+            text="\n".join(lines), parse_mode="MarkdownV2"
+        )
+
+    async def _handle_cancel(self, request: TelegramCommandRequest):
+        """Cancel a single order by oid on the active symbol."""
+        active = self._bot_manager.get_active_symbol()
+        if active is None:
+            return TelegramCommandResult(
+                text="No symbol selected\\. Use /symbol first\\.",
+                parse_mode="MarkdownV2",
+            )
+        arg = request.args.strip()
+        if not arg:
+            return TelegramCommandResult(
+                text="Usage: /cancel ORDER\\_ID", parse_mode="MarkdownV2"
+            )
+        # Strip leading # if user pasted from /orders output
+        order_id = arg.lstrip("#")
+        result = self._bot_manager.cancel_order(order_id)
+        if result.get("status") != "ok":
+            return TelegramCommandResult(
+                text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
+                parse_mode="MarkdownV2",
+            )
+        return TelegramCommandResult(
+            text=f"\u2705 Cancelled order {_escape_mdv2(order_id)}\\.",
+            parse_mode="MarkdownV2",
+        )
+
 
 # ------------------------------------------------------------------
 # Module constants
@@ -1431,4 +1482,6 @@ _COMMAND_HANDLERS: dict[str, object] = {
     "/tp": HandleTelegramCommand._handle_tp,
     "/config": HandleTelegramCommand._handle_config,
     "/size": HandleTelegramCommand._handle_size,
+    "/orders": HandleTelegramCommand._handle_orders,
+    "/cancel": HandleTelegramCommand._handle_cancel,
 }
