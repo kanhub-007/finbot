@@ -311,6 +311,15 @@ class StubBotStateRepository(BotStateRepository):
     def get_latest_bot_run(self):
         return self._bot_runs[-1] if self._bot_runs else None
 
+    def save_active_symbol(self, state) -> None:
+        self._active_symbol = state
+
+    def load_active_symbol(self):
+        return getattr(self, "_active_symbol", None)
+
+    def clear_active_symbol(self) -> None:
+        self._active_symbol = None
+
     def get_last_signal(self):
         return self._processed_signals[-1] if self._processed_signals else None
 
