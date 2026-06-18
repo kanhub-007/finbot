@@ -4,6 +4,11 @@ import json
 
 from fastmcp import FastMCP
 
+from finbot.config.settings import Settings
+from finbot.core.domain.services.mode_url_guard import (
+    check_mode_url_consistency,
+)
+
 from ._shared import _get_bot_manager
 
 
@@ -29,6 +34,19 @@ def register_bot_control_tools(mcp: FastMCP) -> None:
         live_trading_ack: bool = False,
     ) -> str:
         """Start a bot with the given strategy and parameters."""
+        # C4: refuse mode/URL combinations that would route orders to the
+        # wrong environment before touching the BotManager.  Mirrors the
+        # CLI guard in cli/main.py:_cmd_run.
+        reasons = check_mode_url_consistency(
+            mode=mode,
+            hyperliquid_testnet=Settings().hyperliquid_testnet,
+        )
+        if reasons:
+            return json.dumps(
+                {"status": "rejected", "message": "; ".join(reasons)},
+                indent=2,
+            )
+
         manager = _get_bot_manager(mcp)
         result = manager.start(
             strategy_path=strategy_path,
