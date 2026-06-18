@@ -5,6 +5,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Protocol
 
+from finbot.core.domain.entities.order_side import OrderSide
+
 
 class BotManagerPort(Protocol):
     """Protocol defining the bot lifecycle methods used by HandleTelegramCommand.
@@ -50,13 +52,15 @@ class BotManagerPort(Protocol):
 
     def get_balance(self) -> Any: ...
 
-    def set_leverage(self, leverage: int, margin_mode: str = "isolated") -> dict[str, str]: ...
+    def set_leverage(
+        self, leverage: int, margin_mode: str = "isolated"
+    ) -> dict[str, str]: ...
 
-    def submit_manual_order(self, side: Any, size: Decimal) -> dict[str, Any]: ...
+    def submit_manual_order(self, side: OrderSide, size: Decimal) -> dict[str, Any]: ...
 
     def submit_manual_order_with_brackets(
         self,
-        side: Any,
+        side: OrderSide,
         size: Decimal,
         sl_price: Decimal | None = None,
         tp_price: Decimal | None = None,
@@ -66,9 +70,9 @@ class BotManagerPort(Protocol):
 
     def clear_all(self) -> dict[str, Any]: ...
 
-    def attach_stop_loss(self, price: Decimal) -> dict[str, Any]: ...
+    def attach_stop_loss(self, price: Decimal | str) -> dict[str, Any]: ...
 
-    def attach_take_profit(self, price: Decimal) -> dict[str, Any]: ...
+    def attach_take_profit(self, price: Decimal | str) -> dict[str, Any]: ...
 
     def clear_risk_order(self, kind: str) -> dict[str, Any]: ...
 

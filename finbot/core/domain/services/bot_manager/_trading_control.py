@@ -13,14 +13,21 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from finbot.core.domain.dto.run_counts import RunCounts
 from finbot.core.domain.entities.active_symbol_state import ActiveSymbolState
+from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
+from finbot.core.domain.entities.bot_run import BotRun
+from finbot.core.domain.entities.fill_record import FillRecord
+from finbot.core.domain.entities.order_response_record import (
+    OrderResponseRecord,
+)
+from finbot.core.domain.entities.order_side import OrderSide
+from finbot.core.domain.entities.processed_signal import ProcessedSignal
+from finbot.core.domain.entities.risk_event_record import RiskEventRecord
 from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
 from finbot.core.domain.entities.wallet_balance import WalletBalance
 
 logger = logging.getLogger(__name__)
-
-
-
 
 
 class TradingControlMixin:
@@ -196,7 +203,7 @@ class TradingControlMixin:
             self._config_writer.write(key, value)
         return {"status": "ok", "saved": len(entries)}
 
-    def set_default_size(self, size) -> dict[str, str]:
+    def set_default_size(self, size: Decimal) -> dict[str, str]:
         """Set the default order size for /long /short without explicit size."""
         size_dec = Decimal(str(size))
         if size_dec <= 0:
@@ -249,7 +256,7 @@ class TradingControlMixin:
             names = sorted(self._config_profiles.keys())
         return {"status": "ok", "profiles": names}
 
-    def submit_manual_order(self, side, size) -> dict[str, Any]:
+    def submit_manual_order(self, side: OrderSide, size: Decimal) -> dict[str, Any]:
         """Submit a manual market order on the active symbol.
 
         Guards (trading-control spec): requires an active symbol, no running
@@ -294,9 +301,7 @@ class TradingControlMixin:
         if position.direction.value != "flat":
             return {
                 "status": "rejected",
-                "message": (
-                    f"Position open on {symbol}. Close it first (/close)."
-                ),
+                "message": (f"Position open on {symbol}. Close it first (/close)."),
             }
 
         intent = OrderIntent(
@@ -321,8 +326,8 @@ class TradingControlMixin:
 
     def submit_manual_order_with_brackets(
         self,
-        side,
-        size,
+        side: OrderSide,
+        size: Decimal,
         sl_price: Decimal | None = None,
         tp_price: Decimal | None = None,
     ) -> dict[str, Any]:
@@ -366,9 +371,7 @@ class TradingControlMixin:
         except Exception:
             return None
 
-    def _run_manual_gates(
-        self, intent, context: dict[str, Any]
-    ) -> str | None:
+    def _run_manual_gates(self, intent, context: dict[str, Any]) -> str | None:
         """Run the manual gate chain; return the first rejection reason or None."""
         from finbot.core.domain.services.risk_gates.manual_max_position_gate import (
             ManualMaxPositionGate,
@@ -377,7 +380,9 @@ class TradingControlMixin:
             ManualModeGate,
         )
 
-        mode = getattr(self._settings, "mode", "dry_run") if self._settings else "dry_run"
+        mode = (
+            getattr(self._settings, "mode", "dry_run") if self._settings else "dry_run"
+        )
         ack = (
             getattr(self._settings, "live_trading_ack", False)
             if self._settings
@@ -478,19 +483,15 @@ class TradingControlMixin:
             decimals = 0
         if decimals > sz_decimals:
             return (
-                f"Size too precise for {meta.symbol} "
-                f"(uses {sz_decimals} decimals)."
+                f"Size too precise for {meta.symbol} " f"(uses {sz_decimals} decimals)."
             )
         if min_size > 0 and size_dec < min_size:
-            return (
-                f"Size below minimum for {meta.symbol} "
-                f"(min {min_size})."
-            )
+            return f"Size below minimum for {meta.symbol} " f"(min {min_size})."
         return None
 
     @staticmethod
     def _resolve_risk_price(
-        price, entry: Decimal, kind: str, is_long: bool
+        price: Decimal | str, entry: Decimal, kind: str, is_long: bool
     ) -> Decimal:
         """Resolve an SL/TP price from absolute or percentage input.
 
@@ -506,9 +507,17 @@ class TradingControlMixin:
         if price_str.endswith("%"):
             pct = Decimal(price_str[:-1])
             if kind == "SL":
-                factor = Decimal("1") - (pct / Decimal("100")) if is_long else Decimal("1") + (pct / Decimal("100"))
+                factor = (
+                    Decimal("1") - (pct / Decimal("100"))
+                    if is_long
+                    else Decimal("1") + (pct / Decimal("100"))
+                )
             else:  # TP
-                factor = Decimal("1") + (pct / Decimal("100")) if is_long else Decimal("1") - (pct / Decimal("100"))
+                factor = (
+                    Decimal("1") + (pct / Decimal("100"))
+                    if is_long
+                    else Decimal("1") - (pct / Decimal("100"))
+                )
             return entry * factor
         return Decimal(price_str)
 
@@ -716,7 +725,7 @@ class TradingControlMixin:
             "closed_positions": closed,
         }
 
-    def attach_stop_loss(self, price) -> dict[str, Any]:
+    def attach_stop_loss(self, price: Decimal | str) -> dict[str, Any]:
         """Attach a reduce-only stop-loss trigger (cloid SL:<symbol>).
 
         Validates the price is on the correct side of entry (below for long,
@@ -754,7 +763,7 @@ class TradingControlMixin:
             }
         return {"status": "ok", "order_id": order_id, "symbol": symbol}
 
-    def attach_take_profit(self, price) -> dict[str, Any]:
+    def attach_take_profit(self, price: Decimal | str) -> dict[str, Any]:
         """Attach a reduce-only take-profit trigger (cloid TP:<symbol>).
 
         Validates the price is on the correct side of entry (above for long,
@@ -781,7 +790,7 @@ class TradingControlMixin:
             return {"status": "error", "message": str(exc)}
         return {"status": "ok", "kind": kind, "symbol": symbol}
 
-    def _attach_risk_order(self, kind: str, price) -> dict[str, Any]:
+    def _attach_risk_order(self, kind: str, price: Decimal | str) -> dict[str, Any]:
         """Shared SL/TP attachment: validate, cancel existing, place new.
 
         ``kind`` is "SL" or "TP". Price-direction validation:
@@ -1000,6 +1009,3 @@ class TradingControlMixin:
 
 
 # -- module-level helpers -----------------------------------------------------
-
-
-
