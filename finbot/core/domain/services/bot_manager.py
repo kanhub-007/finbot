@@ -282,6 +282,18 @@ class BotManager:
             symbol = self._active_symbol.symbol
         return self._exchange.get_price(symbol)
 
+    def get_active_position(self):
+        """Return the exchange position for the active symbol, or None if idle.
+
+        The exchange is the source of truth for positions (see Restart
+        scenario). Returns a FLAT snapshot when the symbol has no position.
+        """
+        with self._lock:
+            if self._active_symbol is None or self._exchange is None:
+                return None
+            symbol = self._active_symbol.symbol
+        return self._exchange.get_position(symbol)
+
     def get_balance(self) -> WalletBalance | None:
         """Return the wallet balance, or None if no exchange is wired."""
         if self._exchange is None:

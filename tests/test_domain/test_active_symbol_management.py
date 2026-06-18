@@ -224,6 +224,51 @@ class TestSetLeverage:
         assert exchange.set_leverage_calls == []
 
 
+class TestGetPosition:
+    """Scenario 6: /position shows current position + PnL."""
+
+    def test_get_active_position_returns_exchange_position(self):
+        """get_active_position() returns the position for the active symbol."""
+        from finbot.core.domain.entities.position_direction import PositionDirection
+        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+
+        exchange = FakeExchangeGateway()
+        exchange._position = PositionSnapshot(
+            symbol="BTC",
+            direction=PositionDirection.LONG,
+            size=Decimal("0.01"),
+            entry_price=Decimal("95000"),
+            unrealized_pnl=Decimal("12"),
+        )
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        position = manager.get_active_position()
+
+        assert position is not None
+        assert position.direction == PositionDirection.LONG
+        assert position.size == Decimal("0.01")
+        assert position.unrealized_pnl == Decimal("12")
+
+    def test_get_active_position_none_when_idle(self):
+        """No active symbol → get_active_position() returns None."""
+        manager = _make_manager()
+
+        assert manager.get_active_position() is None
+
+    def test_get_active_position_flat_when_no_position(self):
+        """Active symbol but no position → returns a FLAT snapshot."""
+        from finbot.core.domain.entities.position_direction import PositionDirection
+
+        manager = _make_manager()
+        manager.activate_symbol("BTC")
+
+        position = manager.get_active_position()
+
+        assert position is not None
+        assert position.direction == PositionDirection.FLAT
+
+
 class TestBotStartsIdle:
     """Scenario 1: Bot starts fully idle — no symbol, no strategy, no position."""
 
