@@ -13,3 +13,4 @@ data/*.db-wal
 logs/
 *.egg-info/
 .venv313
+specs/
