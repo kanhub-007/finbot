@@ -396,6 +396,11 @@ class HandleTelegramCommand:
 
         # Create a session for the run flow
         session = self._session_store.create(request.chat_id, request.message_id)
+
+        # If user typed "/run BTC", pre-fill symbol to skip the picker
+        if request.args.strip():
+            session.symbol = request.args.strip().upper()
+
         sid = session.session_id
 
         # Build inline keyboard for strategies
@@ -648,7 +653,7 @@ class HandleTelegramCommand:
 
         # Search hint row
         keyboard_rows.append([
-            {"text": "\u2315 Type /run SYMBOL to skip picker", "callback_data": "none"}
+            {"text": "\u2315 Tip: /run BTC skips this step", "callback_data": "none"}
         ])
 
         return TelegramCommandResult(
@@ -678,6 +683,10 @@ class HandleTelegramCommand:
             strategy_name
         )
         self._session_store.save(session)
+
+        # If symbol was pre-filled via "/run BTC", skip the picker
+        if session.symbol:
+            return self._run_cb_sym(session, session.symbol)
 
         return self._render_symbol_page(session, page=0)
 
