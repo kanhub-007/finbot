@@ -264,8 +264,8 @@ class TestStatus:
         )
 
         assert "Idle" in result.text or "idle" in result.text.lower()
-        assert "r_abc122" in result.text
-        assert "trend_follow" in result.text
+        assert "r\_abc122" in result.text
+        assert "trend\_follow" in result.text
         assert result.reply_markup is not None
 
     @pytest.mark.asyncio
@@ -326,8 +326,8 @@ class TestStatus:
             )
         )
 
-        assert "r_abc123" in result.text
-        assert "macd_cross" in result.text
+        assert "r\_abc123" in result.text
+        assert "macd\_cross" in result.text
         assert "47" in result.text
         assert "12" in result.text
         assert "11" in result.text
@@ -598,8 +598,8 @@ class TestHistory:
             )
         )
 
-        assert "r_001" in result.text
-        assert "r_002" in result.text
+        assert "r\_001" in result.text
+        assert "r\_002" in result.text
         assert result.reply_markup is not None
 
     @pytest.mark.asyncio
@@ -648,8 +648,8 @@ class TestList:
             )
         )
 
-        assert "macd_cross" in result.text
-        assert "trend_follow" in result.text
+        assert "macd\_cross" in result.text
+        assert "trend\_follow" in result.text
 
 
 class TestPanic:
