@@ -636,7 +636,7 @@ class HandleTelegramCommand:
         return TelegramCommandResult(
             text=(
                 f"Strategy: {_escape_mdv2(strategy_name)}\n"
-                f"Select symbol ({len(symbols)} available):"
+                f"Select symbol \\({len(symbols)} available\\):"
             ),
             parse_mode="MarkdownV2",
             reply_markup={"inline_keyboard": keyboard_rows},
