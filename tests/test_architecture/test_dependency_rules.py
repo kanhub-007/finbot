@@ -61,7 +61,7 @@ class TestDomainLayerImports:
     """finbot/core/domain must not import infrastructure, adapters, or
     external heavy libraries."""
 
-    FORBIDDEN = {"finbar", "hyperliquid", "sqlalchemy", "fastapi"}
+    FORBIDDEN = {"finbar", "hyperliquid", "sqlalchemy", "fastapi", "numpy", "pandas"}
 
     @pytest.mark.parametrize(
         "file_path",
@@ -136,7 +136,7 @@ class TestApplicationLayerImports:
     """finbot/core/application must not import infrastructure, adapters, or
     external heavy libraries."""
 
-    FORBIDDEN = {"finbar", "hyperliquid", "sqlalchemy", "fastapi"}
+    FORBIDDEN = {"finbar", "hyperliquid", "sqlalchemy", "fastapi", "numpy", "pandas"}
 
     @pytest.mark.parametrize(
         "file_path",
