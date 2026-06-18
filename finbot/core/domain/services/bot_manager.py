@@ -321,6 +321,99 @@ class BotManager:
             return {"status": "rejected", "message": str(exc)}
         return {"status": "ok", "key": key, "value": value}
 
+    def submit_manual_order(self, side, size) -> dict[str, Any]:
+        """Submit a manual market order on the active symbol.
+
+        Guards (trading-control spec): requires an active symbol, no running
+        strategy, no open position, and passes the manual risk gates.
+        Returns a dict with ``status`` ("ok"/"rejected"/"error") and either
+        the order response or a ``message``.
+        """
+        from finbot.core.domain.entities.order_intent import OrderIntent
+        from finbot.core.domain.entities.order_type import OrderType
+
+        with self._lock:
+            if self._active_symbol is None:
+                return {
+                    "status": "rejected",
+                    "message": "No active symbol. Use /symbol first.",
+                }
+            if self._runtime is not None:
+                return {
+                    "status": "rejected",
+                    "message": "A strategy is running. Stop it first (/stop).",
+                }
+            if Decimal(str(size)) <= 0:
+                return {
+                    "status": "rejected",
+                    "message": "Size must be positive.",
+                }
+            symbol = self._active_symbol.symbol
+
+        # Position check (exchange is source of truth)
+        position = self._exchange.get_position(symbol)
+        if position.direction.value != "flat":
+            return {
+                "status": "rejected",
+                "message": (
+                    f"Position open on {symbol}. Close it first (/close)."
+                ),
+            }
+
+        intent = OrderIntent(
+            symbol=symbol,
+            side=side,
+            size=Decimal(str(size)),
+            order_type=OrderType.MARKET,
+            reduce_only=False,
+        )
+
+        # Risk gates
+        price = self._safe_price(symbol)
+        gate_error = self._run_manual_gates(intent, {"price": price})
+        if gate_error is not None:
+            return {"status": "rejected", "message": gate_error}
+
+        try:
+            response = self._exchange.submit_order(intent)
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+        return {"status": "ok", "response": response, "symbol": symbol}
+
+    def _safe_price(self, symbol: str) -> Decimal | None:
+        """Best-effort current price; None if unavailable."""
+        try:
+            return self._exchange.get_price(symbol)
+        except Exception:
+            return None
+
+    def _run_manual_gates(
+        self, intent, context: dict[str, Any]
+    ) -> str | None:
+        """Run the manual gate chain; return the first rejection reason or None."""
+        from finbot.core.domain.services.risk_gates.manual_max_position_gate import (
+            ManualMaxPositionGate,
+        )
+        from finbot.core.domain.services.risk_gates.manual_mode_gate import (
+            ManualModeGate,
+        )
+
+        mode = getattr(self._settings, "mode", "dry_run") if self._settings else "dry_run"
+        ack = (
+            getattr(self._settings, "live_trading_ack", False)
+            if self._settings
+            else False
+        )
+        gates = [
+            ManualModeGate(mode=mode, live_trading_ack=ack),
+            ManualMaxPositionGate(self._runtime_config),
+        ]
+        for gate in gates:
+            decision = gate.check(intent, context)
+            if not decision.accepted:
+                return decision.reason
+        return None
+
     def set_leverage(
         self, leverage: int, margin_mode: str = "isolated"
     ) -> dict[str, str]:

@@ -326,6 +326,128 @@ class TestRuntimeConfig:
         assert manager.get_bot_config().max_daily_loss_usd == Decimal("50")
 
 
+class TestSubmitManualOrder:
+    """Scenario 7: /long opens a long position (and /short mirrors it)."""
+
+    def test_submit_buy_places_market_order(self):
+        """submit_manual_order(BUY, 0.01) submits a market buy on the symbol."""
+        from finbot.core.domain.entities.order_side import OrderSide
+
+        exchange = FakeExchangeGateway()
+        exchange.price_to_report = Decimal("50000")
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+        manager.update_bot_config("max_position", "10000")
+
+        result = manager.submit_manual_order(OrderSide.BUY, Decimal("0.01"))
+
+        assert result["status"] == "ok"
+        assert len(exchange.submitted_intents) == 1
+        intent = exchange.submitted_intents[0]
+        assert intent.side == OrderSide.BUY
+        assert intent.size == Decimal("0.01")
+        assert intent.symbol == "BTC"
+
+    def test_submit_sell_places_market_order(self):
+        """submit_manual_order(SELL, 0.01) submits a market sell."""
+        from finbot.core.domain.entities.order_side import OrderSide
+
+        exchange = FakeExchangeGateway()
+        exchange.price_to_report = Decimal("50000")
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+        manager.update_bot_config("max_position", "10000")
+
+        manager.submit_manual_order(OrderSide.SELL, Decimal("0.01"))
+
+        assert exchange.submitted_intents[0].side == OrderSide.SELL
+
+    def test_submit_requires_active_symbol(self):
+        """No active symbol → rejected."""
+        from finbot.core.domain.entities.order_side import OrderSide
+
+        manager = _make_manager()
+
+        result = manager.submit_manual_order(OrderSide.BUY, Decimal("0.01"))
+
+        assert result["status"] == "rejected"
+        assert "symbol" in result["message"].lower()
+
+    def test_submit_blocked_when_strategy_running(self):
+        """Manual orders are hard-blocked while a strategy runs."""
+        from finbot.core.domain.entities.order_side import OrderSide
+        from tests.fakes import FakeRuntime
+
+        repo = InMemoryBotStateRepository()
+        runtime = FakeRuntime(repo=repo)
+        from finbot.core.domain.services.bot_manager import BotManager
+
+        manager = BotManager(
+            runtime_factory=lambda **kw: runtime,
+            repository=repo,
+            exchange=FakeExchangeGateway(),
+            startup_time=time.time(),
+        )
+        manager.activate_symbol("BTC")
+        manager.start(
+            strategy_path="tests/fixtures/strategies/amt_dip_buyer_final.yaml",
+            symbol="BTC", interval="1h", mode="dry_run", warmup_bars=0,
+        )
+
+        result = manager.submit_manual_order(OrderSide.BUY, Decimal("0.01"))
+
+        assert result["status"] == "rejected"
+        assert "stop" in result["message"].lower()
+
+    def test_submit_blocked_when_position_open(self):
+        """Existing position → rejected (close first)."""
+        from finbot.core.domain.entities.order_side import OrderSide
+        from finbot.core.domain.entities.position_direction import PositionDirection
+        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+
+        exchange = FakeExchangeGateway()
+        exchange._position = PositionSnapshot(
+            symbol="BTC", direction=PositionDirection.LONG, size=Decimal("0.01")
+        )
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.submit_manual_order(OrderSide.BUY, Decimal("0.01"))
+
+        assert result["status"] == "rejected"
+        assert "close" in result["message"].lower()
+        assert exchange.submitted_intents == []
+
+    def test_submit_blocked_by_max_position_gate(self):
+        """Notional over config limit → rejected with reason."""
+        from finbot.core.domain.entities.order_side import OrderSide
+
+        exchange = FakeExchangeGateway()
+        exchange.price_to_report = Decimal("50000")
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+        manager.update_bot_config("max_position", "100")  # 0.01*50000=500 > 100
+
+        result = manager.submit_manual_order(OrderSide.BUY, Decimal("0.01"))
+
+        assert result["status"] == "rejected"
+        assert "100" in result["message"]
+        assert exchange.submitted_intents == []
+
+    def test_submit_invalid_size_rejected(self):
+        """Size <= 0 → rejected."""
+        from finbot.core.domain.entities.order_side import OrderSide
+
+        exchange = FakeExchangeGateway()
+        manager = _make_manager(exchange=exchange)
+        manager.activate_symbol("BTC")
+
+        result = manager.submit_manual_order(OrderSide.BUY, Decimal("-0.01"))
+
+        assert result["status"] == "rejected"
+        assert "positive" in result["message"].lower() or "size" in result["message"].lower()
+
+
 class TestBotStartsIdle:
     """Scenario 1: Bot starts fully idle — no symbol, no strategy, no position."""
 
