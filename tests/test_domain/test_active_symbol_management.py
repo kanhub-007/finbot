@@ -710,3 +710,34 @@ class TestBotStartsIdle:
         """On startup, no strategy is running."""
         manager = _make_manager()
         assert manager.is_running() is False
+
+
+class TestConfigDefaultsFromEnv:
+    """Scenario 2 (Slice 2): .env provides startup defaults for BotConfig."""
+
+    def test_settings_seed_runtime_config(self):
+        """Settings max_position/daily_loss seed the RuntimeBotConfig."""
+        from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
+        from finbot.core.domain.services.bot_manager import BotManager
+
+        class FakeSettings:
+            mode = "dry_run"
+            live_trading_ack = False
+            max_position_usd = Decimal("500")
+            max_daily_loss_usd = Decimal("75")
+            max_open_orders = 5
+            stale_data_seconds = 60
+
+        repo = InMemoryBotStateRepository()
+        manager = BotManager(
+            runtime_factory=lambda **kw: None,
+            repository=repo,
+            settings=FakeSettings(),
+            startup_time=time.time(),
+        )
+
+        cfg = manager.get_bot_config()
+        assert cfg.max_position_usd == Decimal("500")
+        assert cfg.max_daily_loss_usd == Decimal("75")
+        assert cfg.max_open_orders == 5
+        assert cfg.stale_data_seconds == 60

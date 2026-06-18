@@ -124,7 +124,32 @@ class BotManager:
             self._restore_active_symbol()
         )
         # Mutable runtime config shared by strategy + manual gates.
-        self._runtime_config = RuntimeBotConfig()
+        # Seeded from settings (.env defaults) when available.
+        self._runtime_config = self._seed_runtime_config(settings)
+
+    @staticmethod
+    def _seed_runtime_config(settings: Any) -> RuntimeBotConfig:
+        """Build a RuntimeBotConfig from settings (.env defaults)."""
+        cfg = RuntimeBotConfig()
+        if settings is None:
+            return cfg
+        for key in RuntimeBotConfig.AVAILABLE_KEYS:
+            attr_map = {
+                "max_position": "max_position_usd",
+                "daily_loss": "max_daily_loss_usd",
+                "max_orders": "max_open_orders",
+                "stale_data": "stale_data_seconds",
+            }
+            attr = attr_map.get(key)
+            if attr is None:
+                continue
+            val = getattr(settings, attr, None)
+            if val is not None:
+                try:
+                    cfg.set(key, str(val))
+                except (KeyError, ValueError):
+                    pass
+        return cfg
 
     def _restore_active_symbol(self) -> ActiveSymbolState | None:
         """Load persisted active symbol on startup (best-effort)."""
