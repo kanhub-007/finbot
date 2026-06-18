@@ -416,7 +416,7 @@ class TradingControlMixin:
             if leverage < 1:
                 return {
                     "status": "rejected",
-                    "message": f"Leverage must be >= 1.",
+                    "message": "Leverage must be >= 1.",
                 }
 
             symbol = self._active_symbol.symbol
