@@ -6,6 +6,7 @@ from typing import Any
 from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+from finbot.core.domain.entities.wallet_balance import WalletBalance
 from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 
 
@@ -33,3 +34,25 @@ class DryRunExchangeGateway(ExchangeGateway):
     def cancel_by_cloid(self, symbol: str, cloid: str) -> dict[str, Any]:
         """Return a synthetic cancellation response."""
         return {"status": "dry_run", "symbol": symbol, "cloid": cloid}
+
+    def set_leverage(
+        self, symbol: str, leverage: int, margin_mode: str = "isolated"
+    ) -> dict[str, Any]:
+        """No-op in dry-run; records nothing on the exchange."""
+        return {"status": "dry_run", "symbol": symbol, "leverage": leverage}
+
+    def get_leverage(self, symbol: str) -> tuple[int, str] | None:
+        """Dry-run has no real exchange leverage; caller falls back to 1x."""
+        return None
+
+    def get_price(self, symbol: str) -> Decimal:
+        """Synthetic price for offline dry-run."""
+        return Decimal("100")
+
+    def get_balance(self) -> WalletBalance:
+        """Synthetic balance for dry-run."""
+        return WalletBalance(
+            wallet_value=Decimal("10000"),
+            margin_used=Decimal("0"),
+            available=Decimal("10000"),
+        )

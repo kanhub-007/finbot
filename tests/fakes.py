@@ -137,6 +137,24 @@ class InMemoryExchangeGateway(ExchangeGateway):
     def cancel_by_cloid(self, symbol: str, cloid: str) -> dict:
         return {"status": "fake_cancelled"}
 
+    def set_leverage(self, symbol, leverage, margin_mode="isolated"):
+        return {"status": "fake", "symbol": symbol, "leverage": leverage}
+
+    def get_leverage(self, symbol: str):
+        return None
+
+    def get_price(self, symbol: str):
+        return Decimal("100")
+
+    def get_balance(self):
+        from finbot.core.domain.entities.wallet_balance import WalletBalance
+
+        return WalletBalance(
+            wallet_value=Decimal("10000"),
+            margin_used=Decimal("0"),
+            available=Decimal("10000"),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Indicator calculator fake
@@ -478,6 +496,9 @@ class FakeExchangeGateway(InMemoryExchangeGateway):
         super().__init__()
         self.submitted_intents: list = []
         self.submitted_responses: list[dict] = []
+        # Leverage recording (trading-control spec)
+        self.set_leverage_calls: list[tuple] = []
+        self.leverage_to_report: tuple[int, str] | None = None
 
     def submit_order(self, intent) -> dict:
         self.submitted_order_count += 1
@@ -492,6 +513,13 @@ class FakeExchangeGateway(InMemoryExchangeGateway):
         }
         self.submitted_responses.append(resp)
         return resp
+
+    def set_leverage(self, symbol, leverage, margin_mode="isolated"):
+        self.set_leverage_calls.append((symbol, leverage, margin_mode))
+        return {"status": "ok", "symbol": symbol, "leverage": leverage}
+
+    def get_leverage(self, symbol: str):
+        return self.leverage_to_report
 
 
 # ---------------------------------------------------------------------------

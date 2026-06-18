@@ -26,6 +26,82 @@ def _make_manager(repo=None, exchange=None):
     )
 
 
+class TestActivateSymbol:
+    """Scenario 2: /symbol activates a symbol and reads exchange leverage."""
+
+    def test_activate_symbol_sets_active_symbol(self):
+        """activate_symbol('BTC') makes get_active_symbol() return BTC state."""
+        manager = _make_manager()
+        result = manager.activate_symbol("BTC")
+
+        assert result["status"] == "active"
+        assert result["symbol"] == "BTC"
+
+        active = manager.get_active_symbol()
+        assert active is not None
+        assert active.symbol == "BTC"
+
+    def test_activate_symbol_reads_leverage_does_not_set(self):
+        """Activating reads leverage from exchange; set_leverage is NOT called."""
+        exchange = FakeExchangeGateway()
+        exchange.leverage_to_report = (5, "isolated")
+        manager = _make_manager(exchange=exchange)
+
+        manager.activate_symbol("BTC")
+
+        # set_leverage must NOT be called on /symbol (spec: read-only)
+        assert exchange.set_leverage_calls == []
+        # The active state reflects the exchange-reported leverage
+        active = manager.get_active_symbol()
+        assert active is not None
+        assert active.leverage == 5
+        assert active.margin_mode == "isolated"
+
+    def test_activate_symbol_falls_back_to_1x_when_exchange_has_no_leverage(self):
+        """If exchange can't report leverage, default to 1x isolated."""
+        exchange = FakeExchangeGateway()
+        exchange.leverage_to_report = None  # simulate unreadable
+        manager = _make_manager(exchange=exchange)
+
+        manager.activate_symbol("BTC")
+
+        active = manager.get_active_symbol()
+        assert active is not None
+        assert active.leverage == 1
+        assert active.margin_mode == "isolated"
+
+    def test_activate_symbol_blocked_when_strategy_running(self):
+        """Switching symbol while a strategy runs is a hard block."""
+        from tests.fakes import FakeRuntime
+
+        repo = InMemoryBotStateRepository()
+        runtime = FakeRuntime(repo=repo)
+        factory = lambda **kw: runtime  # noqa: E731
+        from finbot.core.domain.services.bot_manager import BotManager
+
+        manager = BotManager(
+            runtime_factory=factory,
+            repository=repo,
+            exchange=FakeExchangeGateway(),
+            startup_time=time.time(),
+        )
+        manager.activate_symbol("BTC")
+        manager.start(
+            strategy_path="tests/fixtures/strategies/amt_dip_buyer_final.yaml",
+            symbol="BTC",
+            interval="1h",
+            mode="dry_run",
+            warmup_bars=0,
+        )
+
+        result = manager.activate_symbol("ETH")
+
+        assert result["status"] == "rejected"
+        assert "stop" in result["message"].lower()
+        # Active symbol unchanged
+        assert manager.get_active_symbol().symbol == "BTC"
+
+
 class TestBotStartsIdle:
     """Scenario 1: Bot starts fully idle — no symbol, no strategy, no position."""
 

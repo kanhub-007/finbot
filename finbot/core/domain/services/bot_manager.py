@@ -224,6 +224,48 @@ class BotManager:
         with self._lock:
             return self._active_symbol
 
+    def activate_symbol(self, symbol: str) -> dict[str, str]:
+        """Activate a trading symbol, reading leverage from the exchange.
+
+        Per the trading-control spec: this does NOT call set_leverage. It
+        reads the current exchange leverage (falling back to 1x isolated if
+        unavailable) and stores it in :class:`ActiveSymbolState`.
+
+        Returns a dict with ``status`` ("active" or "rejected") and either
+        ``symbol``/``leverage``/``margin_mode`` or ``message``.
+        """
+        with self._lock:
+            if self._runtime is not None:
+                return {
+                    "status": "rejected",
+                    "message": "A strategy is running. Stop it first (/stop).",
+                }
+
+            leverage, margin_mode = self._read_exchange_leverage(symbol)
+            self._active_symbol = ActiveSymbolState(
+                symbol=symbol,
+                leverage=leverage,
+                margin_mode=margin_mode,
+            )
+            return {
+                "status": "active",
+                "symbol": symbol,
+                "leverage": str(leverage),
+                "margin_mode": margin_mode,
+            }
+
+    def _read_exchange_leverage(self, symbol: str) -> tuple[int, str]:
+        """Read leverage from the exchange, falling back to 1x isolated."""
+        if self._exchange is None:
+            return 1, "isolated"
+        try:
+            reported = self._exchange.get_leverage(symbol)
+        except Exception:
+            reported = None
+        if reported is None:
+            return 1, "isolated"
+        return reported
+
     # -- public query methods (delegate to repo/exchange) --------------------
 
     # Implementation note (CQRS-lite): these read-only query methods

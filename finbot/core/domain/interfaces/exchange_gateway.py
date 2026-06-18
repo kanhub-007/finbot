@@ -1,10 +1,12 @@
 """Exchange execution interface."""
 
 from abc import ABC, abstractmethod
+from decimal import Decimal
 from typing import Any
 
 from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+from finbot.core.domain.entities.wallet_balance import WalletBalance
 
 
 class ExchangeGateway(ABC):
@@ -29,3 +31,32 @@ class ExchangeGateway(ABC):
     @abstractmethod
     def cancel_by_cloid(self, symbol: str, cloid: str) -> dict[str, Any]:
         """Cancel a single order by its client-assigned ID."""
+
+    # -- leverage / market data (trading-control spec) ---------------------
+
+    def set_leverage(
+        self, symbol: str, leverage: int, margin_mode: str = "isolated"
+    ) -> dict[str, Any]:
+        """Set leverage and margin mode for a symbol.
+
+        Implementations should call the exchange API. The base method raises
+        so subclasses are forced to opt in explicitly.
+        """
+        raise NotImplementedError
+
+    def get_leverage(self, symbol: str) -> tuple[int, str] | None:
+        """Read current leverage and margin mode for a symbol.
+
+        Returns ``(leverage, margin_mode)`` or ``None`` if the exchange does
+        not expose it (caller falls back to 1x isolated). Base method raises
+        so subclasses opt in explicitly.
+        """
+        raise NotImplementedError
+
+    def get_price(self, symbol: str) -> Decimal:
+        """Return the current mark/mid price for a symbol."""
+        raise NotImplementedError
+
+    def get_balance(self) -> WalletBalance:
+        """Return wallet value, margin used, and available margin."""
+        raise NotImplementedError
