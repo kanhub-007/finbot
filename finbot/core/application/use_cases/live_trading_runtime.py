@@ -72,6 +72,7 @@ from finbot.core.domain.interfaces.order_planner import OrderPlanner
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
 )
+from finbot.core.domain.interfaces.runtime_event_emitter import RuntimeEventEmitter
 from finbot.core.domain.interfaces.strategy_validator import (
     StrategyValidator,
 )
@@ -104,8 +105,8 @@ class LiveTradingRuntimeUseCase:
         enrichment_validator: EnrichmentValidator,
         bar_frame_converter: BarFrameConverter,
         mode: TradingMode,
-        submission_strategy: Any,
-        event_emitter: Any,
+        submission_strategy: OrderSubmissionStrategy,
+        event_emitter: RuntimeEventEmitter,
         warmup_bars: list[dict[str, Any]] | None = None,
         required_columns: set[str] | None = None,
         required_indicators: list[str] | None = None,
