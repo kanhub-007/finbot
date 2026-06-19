@@ -181,23 +181,69 @@ class SqliteMigrator(DatabaseMigrator):
 
     def __init__(self, db_path: str = "data/finbot.db") -> None:
         self._db_path = db_path
+        # Instance-level copies so tests (and future callers) can inject a
+        # controlled migration list. ``migrate`` reads ``self.MIGRATIONS``.
+        self.MIGRATIONS: list[tuple[int, str]] = list(MIGRATIONS)
+        self.LATEST_VERSION: int = LATEST_VERSION
 
     def migrate(self) -> int:
+        """Apply every pending migration atomically.
+
+        Each migration runs inside a single explicit transaction that also
+        inserts its row into ``schema_version``. ``executescript()`` is not
+        used because it issues an implicit COMMIT and runs outside any
+        transaction — a SQL failure halfway would leave the schema
+        half-applied. Instead the connection is put in manual transaction
+        mode (``isolation_level=None``) and the migration SQL is executed
+        statement-by-statement inside a ``BEGIN``/``COMMIT`` wrapper.
+
+        Returns the highest applied version.
+        """
         _ensure_directory(self._db_path)
         conn = sqlite3.connect(self._db_path)
         try:
             current = self._version_from_conn(conn)
-            for version, sql in MIGRATIONS:
+            # Manual transaction control so the version INSERT and the
+            # migration SQL share one atomic BEGIN/COMMIT.
+            conn.isolation_level = None
+            self._ensure_schema_version_table(conn)
+            for version, sql in self.MIGRATIONS:
                 if version > current:
-                    conn.executescript(sql)
-                    conn.execute(
-                        "INSERT OR REPLACE INTO schema_version (version) " "VALUES (?)",
-                        (version,),
-                    )
-                    conn.commit()
-            return max(current, LATEST_VERSION)
+                    self._apply_migration(conn, version, sql)
+                    current = version
+            return max(current, self.LATEST_VERSION)
         finally:
             conn.close()
+
+    @staticmethod
+    def _ensure_schema_version_table(conn: sqlite3.Connection) -> None:
+        """Create the ``schema_version`` bookkeeping table if absent.
+
+        Owned by the migrator (not by a migration) so synthetic migration
+        lists in tests and future migration orderings don't depend on a
+        specific migration creating it. ``CREATE TABLE IF NOT EXISTS`` is
+        idempotent with the historical v1 DDL.
+        """
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"
+        )
+
+    @staticmethod
+    def _apply_migration(conn: sqlite3.Connection, version: int, sql: str) -> None:
+        """Run one migration's SQL + version insert in one transaction."""
+        conn.execute("BEGIN")
+        try:
+            for statement in _split_sql_statements(sql):
+                if statement.strip():
+                    conn.execute(statement)
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_version (version) VALUES (?)",
+                (version,),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def current_version(self) -> int:
         if not os.path.exists(self._db_path):
@@ -227,3 +273,18 @@ def _ensure_directory(db_path: str) -> None:
     parent = os.path.dirname(db_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    """Split a migration script into individual ``;``-terminated statements.
+
+    Migrations in this module are plain DDL with no embedded semicolons
+    inside strings or triggers, so a simple ``;`` split (preserving each
+    statement with its trailing semicolon for ``conn.execute``) is safe and
+    keeps each statement atomic. Statements that are empty/whitespace-only
+    are kept as-is; callers skip them.
+    """
+    # ``conn.execute`` accepts a single statement (no trailing ';'). Split,
+    # drop the empty tail produced by a trailing newline, and strip ';'.
+    raw = [s.strip() for s in sql.split(";") if s.strip()]
+    return raw
