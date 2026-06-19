@@ -128,6 +128,11 @@ class BotManager:
         self._symbol._metadata_provider = value  # noqa: SLF001
         self._manual._metadata_provider = value  # noqa: SLF001
 
+    @property
+    def _runtime_factory(self):
+        """Forward to lifecycle collaborator (test compat)."""
+        return self._lifecycle._runtime_factory  # noqa: SLF001
+
     # -- lifecycle ----------------------------------------------------------
     def start(
         self,
