@@ -38,12 +38,16 @@ class BotLiveState:
     def update(self, **kwargs: object) -> None:
         """Thread-safe batch update of one or more fields.
 
-        Unknown field names are silently ignored.
+        Raises ``TypeError`` for unknown field names so typos fail loudly
+        at the call site rather than being silently dropped (M2).
         """
         with self._lock:
             for key, value in kwargs.items():
-                if hasattr(self, key) and not key.startswith("_"):
-                    setattr(self, key, value)
+                if not hasattr(self, key) or key.startswith("_"):
+                    raise TypeError(
+                        f"BotLiveState has no field {key!r}; update rejected"
+                    )
+                setattr(self, key, value)
 
     def snapshot(self) -> dict[str, object]:
         """Return a thread-safe copy of all public fields as a dict."""
