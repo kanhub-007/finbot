@@ -1,8 +1,31 @@
-"""SQLite bot state repository — persists all bot state to a local SQLite DB."""
+"""SQLite bot state repository — persists all bot state to a local SQLite DB.
+
+**Concurrency model (H10/M3 remediation).**
+A single ``sqlite3.Connection(check_same_thread=False)`` is shared by the
+runtime thread (candle-pipeline writes), the MCP status thread (read
+queries), and the Telegram thread. SQLite connection objects are **not**
+safe for concurrent cursor use, and only one transaction may be open on
+a connection at a time.
+
+Access is therefore serialised by ``self._write_lock`` (a reentrant
+mutex):
+
+* ``transaction()`` holds the lock across its entire ``yield`` so the
+  connection's transaction state (BEGIN/COMMIT/ROLLBACK) can never be
+  observed half-applied by another thread. Whole transactions are
+  serialised — this is the only correct model for a shared connection.
+* ``_execute`` / ``_query_one`` / ``_fetch_all`` acquire the lock
+  per-statement for callers outside an explicit ``transaction()``.
+
+The nested-re-entry flag is **per-thread** (``threading.local()``) so a
+``transaction()`` opened by thread A cannot cause thread B's direct
+``_execute`` to skip its commit (the M3 instance-flag bug).
+"""
 
 from __future__ import annotations
 
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from datetime import date as _date
@@ -54,13 +77,28 @@ class SqliteBotStateRepository(BotStateRepository):
     def __init__(self, db_path: str = "data/finbot.db") -> None:
         self._db_path = db_path
         self._conn: sqlite3.Connection | None = None
-        self._in_transaction = False
+        # Reentrant mutex serialising every connection access. Held across
+        # the whole ``transaction()`` yield (see class docstring).
+        self._write_lock = threading.RLock()
+        # Per-thread nested-transaction flag (replaces the instance-level
+        # bool that let one thread's transaction suppress another's commit).
+        self._tx_state = threading.local()
+
+    @property
+    def _in_transaction(self) -> bool:
+        """Whether the *current thread* is inside a ``transaction()`` block."""
+        return getattr(self._tx_state, "in_transaction", False)
+
+    @_in_transaction.setter
+    def _in_transaction(self, value: bool) -> None:
+        self._tx_state.in_transaction = value
 
     def close(self) -> None:
         """Close the underlying database connection."""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        with self._write_lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
 
     @contextmanager
     def transaction(self):
@@ -85,22 +123,27 @@ class SqliteBotStateRepository(BotStateRepository):
         already opened one without double-committing or deadlocking.
         """
         if self._in_transaction:
-            # Nested re-entry: behave as a no-op passthrough so callers can
-            # wrap a transaction around code that already opened one.
+            # Nested re-entry on the SAME thread: behave as a no-op
+            # passthrough so callers can wrap a transaction around code
+            # that already opened one. The outer block owns BEGIN/COMMIT.
             yield
             return
-        conn = self._connection
-        try:
-            self._in_transaction = True
-            conn.commit()  # flush any pending autocommit writes first
-            conn.execute("BEGIN")
-            yield
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            self._in_transaction = False
+        # Hold the write lock across the whole block so no other thread
+        # can touch the connection while this thread's transaction is open.
+        # RLock lets the inner _execute/_query_one re-acquire freely.
+        with self._write_lock:
+            conn = self._connection
+            try:
+                self._in_transaction = True
+                conn.commit()  # flush any pending autocommit writes first
+                conn.execute("BEGIN")
+                yield
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                self._in_transaction = False
 
     # -- bot run lifecycle --------------------------------------------------
 
@@ -433,16 +476,16 @@ class SqliteBotStateRepository(BotStateRepository):
             params = (mode_filter,)
         sql += "ORDER BY started_at DESC LIMIT ?"
         params = params + (limit,)
-        rows = self._connection.execute(sql, params).fetchall()
+        rows = self._fetch_all(sql, params)
         return [_bot_run_from_row(r) for r in rows]
 
     def get_signals_for_run(self, run_id: str) -> list[ProcessedSignal]:
-        rows = self._connection.execute(
+        rows = self._fetch_all(
             "SELECT signal_key, bot_run_id, signal_action, bar_timestamp, "
             "created_at FROM processed_signals WHERE bot_run_id = ? "
             "ORDER BY created_at",
             (run_id,),
-        ).fetchall()
+        )
         return [
             ProcessedSignal(
                 signal_key=r[0],
@@ -455,12 +498,12 @@ class SqliteBotStateRepository(BotStateRepository):
         ]
 
     def get_orders_for_run(self, run_id: str) -> list[OrderResponseRecord]:
-        rows = self._connection.execute(
+        rows = self._fetch_all(
             "SELECT response_id, intent_id, bot_run_id, response_json, "
             "status, created_at FROM order_responses WHERE bot_run_id = ? "
             "ORDER BY created_at",
             (run_id,),
-        ).fetchall()
+        )
         return [
             OrderResponseRecord(
                 response_id=r[0],
@@ -474,12 +517,12 @@ class SqliteBotStateRepository(BotStateRepository):
         ]
 
     def get_fills_for_run(self, run_id: str) -> list[FillRecord]:
-        rows = self._connection.execute(
+        rows = self._fetch_all(
             "SELECT fill_id, bot_run_id, order_id, symbol, side, size, price, "
             "fee, filled_at FROM fills WHERE bot_run_id = ? "
             "ORDER BY filled_at",
             (run_id,),
-        ).fetchall()
+        )
         return [_fill_from_row(r) for r in rows]
 
     def get_run_counts(self, run_ids: list[str]) -> dict[str, RunCounts]:
@@ -503,23 +546,23 @@ class SqliteBotStateRepository(BotStateRepository):
             ("fills", 2),
         )
         for table, idx in per_table:
-            rows = self._connection.execute(
+            rows = self._fetch_all(
                 f"SELECT bot_run_id, COUNT(*) FROM {table} "
                 f"WHERE bot_run_id IN ({placeholders}) GROUP BY bot_run_id",
                 params,
-            ).fetchall()
+            )
             for rid, n in rows:
                 if rid in counts:
                     counts[rid][idx] = int(n)
         return {rid: RunCounts(*c) for rid, c in counts.items()}
 
     def get_risk_events_for_run(self, run_id: str) -> list[RiskEventRecord]:
-        rows = self._connection.execute(
+        rows = self._fetch_all(
             "SELECT event_id, bot_run_id, event_type, signal_key, decision, "
             "reason, created_at FROM risk_events WHERE bot_run_id = ? "
             "ORDER BY created_at",
             (run_id,),
-        ).fetchall()
+        )
         return [_risk_event_from_row(r) for r in rows]
 
     def get_audit_log(
@@ -535,7 +578,7 @@ class SqliteBotStateRepository(BotStateRepository):
             params = (event_type,)
         sql += "ORDER BY created_at DESC LIMIT ?"
         params = params + (limit,)
-        rows = self._connection.execute(sql, params).fetchall()
+        rows = self._fetch_all(sql, params)
         return [_audit_from_row(r) for r in rows]
 
     def save_order_lifecycle(self, lifecycle: OrderLifecycle) -> None:
@@ -602,7 +645,7 @@ class SqliteBotStateRepository(BotStateRepository):
             sql += " AND symbol = ?"
             params = states + (symbol,)
         sql += " ORDER BY created_at"
-        rows = self._connection.execute(sql, params).fetchall()
+        rows = self._fetch_all(sql, params)
         return [_lifecycle_from_row(r) for r in rows]
 
     # -- trades ---------------------------------------------------------------
@@ -665,25 +708,25 @@ class SqliteBotStateRepository(BotStateRepository):
         return _trade_from_row(row) if row else None
 
     def list_open_trades(self) -> list[Trade]:
-        rows = self._connection.execute(
+        rows = self._fetch_all(
             f"SELECT {_TRADE_COLS} FROM trades "
             "WHERE status='open' ORDER BY opened_at DESC"
-        ).fetchall()
+        )
         return [_trade_from_row(r) for r in rows]
 
     def list_closed_trades(self, *, bot_run_id: str | None = None) -> list[Trade]:
         if bot_run_id is not None:
-            rows = self._connection.execute(
+            rows = self._fetch_all(
                 f"SELECT {_TRADE_COLS} FROM trades "
                 "WHERE status='closed' AND bot_run_id=? "
                 "ORDER BY closed_at DESC",
                 (bot_run_id,),
-            ).fetchall()
+            )
         else:
-            rows = self._connection.execute(
+            rows = self._fetch_all(
                 f"SELECT {_TRADE_COLS} FROM trades "
                 "WHERE status='closed' ORDER BY closed_at DESC"
-            ).fetchall()
+            )
         return [_trade_from_row(r) for r in rows]
 
     def realized_loss_on(self, day: _date) -> Decimal:
@@ -696,11 +739,11 @@ class SqliteBotStateRepository(BotStateRepository):
         day_end = _to_utc_text(
             datetime(day.year, day.month, day.day, 23, 59, 59, 999999, tzinfo=UTC)
         )
-        rows = self._connection.execute(
+        rows = self._fetch_all(
             "SELECT realized_pnl FROM trades "
             "WHERE status='closed' AND closed_at >= ? AND closed_at <= ?",
             (day_start, day_end),
-        ).fetchall()
+        )
         total = Decimal("0")
         for (pnl_text,) in rows:
             pnl = Decimal(str(pnl_text))
@@ -718,12 +761,23 @@ class SqliteBotStateRepository(BotStateRepository):
         return self._conn
 
     def _execute(self, sql: str, params: tuple = ()) -> None:
-        self._connection.execute(sql, params)
-        if not self._in_transaction:
-            self._connection.commit()
+        with self._write_lock:
+            self._connection.execute(sql, params)
+            if not self._in_transaction:
+                self._connection.commit()
 
     def _query_one(self, sql: str, params: tuple = ()) -> tuple | None:
-        return self._connection.execute(sql, params).fetchone()
+        with self._write_lock:
+            return self._connection.execute(sql, params).fetchone()
+
+    def _fetch_all(self, sql: str, params: tuple = ()) -> list[tuple]:
+        """Execute a read query under the write lock and fetch all rows.
+
+        Every read must take the lock: SQLite connections are not safe for
+        concurrent cursor use even for reads while another thread writes.
+        """
+        with self._write_lock:
+            return self._connection.execute(sql, params).fetchall()
 
 
 def _to_utc_text(dt: datetime) -> str:
