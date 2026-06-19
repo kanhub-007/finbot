@@ -42,7 +42,6 @@ _MAX_CLASS_LINES = 150
 # Files over 500 lines, exempt until their Slice-2 scenario decomposes them.
 # Removed as S7–S10 land. The file allowlist matches the spec exactly.
 _FILE_ALLOWLIST: dict[str, str] = {
-    "finbot/core/application/use_cases/handle_telegram_command.py": "S8",
     "finbot/infrastructure/repositories/sqlite_bot_state_repository.py": "S10",
     "finbot/core/application/use_cases/live_trading_runtime.py": "S9",
 }
@@ -51,8 +50,8 @@ _FILE_ALLOWLIST: dict[str, str] = {
 # decomposes the class; PRE-EXISTING entries are out of this spec's scope.
 _CLASS_ALLOWLIST: dict[str, str] = {
     # -- Slice 2 in-scope (removed as S8-S10 land) --
-    "finbot/core/application/use_cases/handle_telegram_command.py": "S8",
     "finbot/core/domain/services/bot_manager/_manager.py": "FACADE",  # 38 one-line forwards
+    "finbot/core/application/use_cases/handle_telegram_command.py": "FACADE",  # 42 one-line delegations + routing
     "finbot/core/domain/services/bot_manager/bot_lifecycle_service.py": "S7",
     "finbot/core/domain/services/bot_manager/manual_order_service.py": "S7",
     "finbot/core/domain/services/bot_manager/symbol_session_service.py": "S7",
