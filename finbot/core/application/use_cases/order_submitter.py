@@ -2,8 +2,16 @@
 
 Extracted from :class:`LiveTradingRuntimeUseCase` so the candle pipeline
 stays a thin orchestrator.  Owns the post-planning side effects for a
-testnet/live order: precision normalization, exchange submission,
-response persistence, and post-submit reconciliation recording.
+testnet/live order: precision normalization, exchange submission, and
+response persistence.
+
+Audit note (H7 remediation): this class no longer writes a
+``ReconciliationRecord`` per order. The ``reconciliations`` table is the
+operator-facing drift signal and is populated only by
+``LiveTradingRuntimeUseCase.reconcile_on_startup``; a per-order
+placeholder with ``position_matches=False`` made every live order look
+like drift. The order-response row already records that a submission
+happened.
 """
 
 from __future__ import annotations
@@ -16,9 +24,6 @@ from typing import Any
 from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_response_record import (
     OrderResponseRecord,
-)
-from finbot.core.domain.entities.reconciliation_record import (
-    ReconciliationRecord,
 )
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
@@ -43,7 +48,7 @@ class OrderSubmitter:
         Exchange-precision normalizer.  When ``None`` the submitter is
         disabled (returns ``False``) — matching the prior behaviour.
     repo:
-        Repository for persisting the order response and reconciliation.
+        Repository for persisting the order response.
     """
 
     def __init__(
@@ -80,7 +85,6 @@ class OrderSubmitter:
 
         response = self._exchange.submit_order(normalized)
         self._persist_response(intent_id, bot_run_id, response)
-        self._record_reconciliation(intent_id, bot_run_id)
         return True
 
     # -- internal -----------------------------------------------------------
@@ -95,16 +99,5 @@ class OrderSubmitter:
                 bot_run_id=bot_run_id,
                 response_json=json.dumps(response, default=str),
                 status=status,
-            )
-        )
-
-    def _record_reconciliation(self, intent_id: str, bot_run_id: str) -> None:
-        # Placeholder until actual exchange-state comparison is implemented.
-        self._repo.record_reconciliation(
-            ReconciliationRecord(
-                bot_run_id=bot_run_id,
-                position_matches=False,
-                open_orders_match=False,
-                details=f"post-submit for {intent_id} (not yet reconciled)",
             )
         )

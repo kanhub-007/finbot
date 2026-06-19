@@ -199,8 +199,13 @@ def test_unknown_symbol_metadata_rejected_before_submit() -> None:
     assert exchange.submitted_order_count == 0
 
 
-def test_reconciliation_record_persisted_after_testnet_submit() -> None:
-    """Reconciliation record is saved after a testnet order."""
+def test_no_reconciliation_record_persisted_after_testnet_submit() -> None:
+    """No reconciliation row is written per order (H7).
+
+    The ``reconciliations`` table is the operator-facing drift signal and
+    is populated only by ``reconcile_on_startup``; a per-order placeholder
+    would make every live order look like drift.
+    """
     repo = StubBotStateRepository()
     exchange = FakeExchangeGateway()
 
@@ -213,7 +218,5 @@ def test_reconciliation_record_persisted_after_testnet_submit() -> None:
     result = runtime.process_closed_candle(new_closed_candle())
 
     assert result.submitted is True
-    # Reconciliation should be recorded (placeholder, not yet fully reconciled)
-    rec = repo.last_reconciliation()
-    assert rec is not None
-    assert isinstance(rec.position_matches, bool)
+    # No per-order reconciliation pollution.
+    assert repo.last_reconciliation() is None
