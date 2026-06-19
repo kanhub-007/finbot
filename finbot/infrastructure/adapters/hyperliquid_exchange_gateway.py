@@ -304,7 +304,18 @@ def _execute_order(
     exchange: Exchange,
     intent: OrderIntent,
 ) -> dict[str, Any]:
-    """Map an OrderIntent to the appropriate SDK call."""
+    """Map an OrderIntent to the appropriate Hyperliquid SDK call.
+
+    Precision boundary (M6): the SDK's ``float_to_wire`` runs
+    ``f"{x:.8f}"`` and rejects values whose 8-decimal rounding loses more
+    than ``1e-12``, so it accepts only ``float`` (strings/Decimals raise).
+    Size/price precision is therefore enforced upstream by the
+    ``OrderNormalizer`` (rounds to ``sz_decimals``/``price_tick``) and by
+    ``float_to_wire`` itself. This function converts ``Decimal`` → ``float``
+    only at the SDK boundary and refuses to silently submit a LIMIT order
+    that lacks a price (the prior ``else 0.0`` fallback would have placed a
+    ``$0`` limit order).
+    """
     is_buy = intent.side == OrderSide.BUY
 
     if intent.reduce_only:
@@ -318,7 +329,7 @@ def _execute_order(
             coin=intent.symbol,
             is_buy=is_buy,
             sz=float(intent.size),
-            limit_px=(float(intent.limit_price) if intent.limit_price else 0.0),
+            limit_px=_limit_px_or_raise(intent.limit_price),
             order_type={"limit": {"tif": "Gtc"}},
             reduce_only=True,
             cloid=intent.cloid,
@@ -338,10 +349,22 @@ def _execute_order(
         "coin": intent.symbol,
         "is_buy": is_buy,
         "sz": float(intent.size),
-        "limit_px": (float(intent.limit_price) if intent.limit_price else 0.0),
+        "limit_px": _limit_px_or_raise(intent.limit_price),
         "order_type": {"limit": {"tif": "Gtc"}},
         "reduce_only": intent.reduce_only,
     }
     if intent.cloid:
         payload["cloid"] = intent.cloid
     return exchange.order(**payload)  # type: ignore[no-any-return]
+
+
+def _limit_px_or_raise(price: Decimal | None) -> float:
+    """Convert a LIMIT order price to float, raising on a missing price.
+
+    A LIMIT order without a price is malformed (the normalizer always sets
+    one for live orders); silently falling back to ``0.0`` would place a
+    ``$0`` limit order.
+    """
+    if price is None:
+        raise ValueError("LIMIT order requires a limit_price")
+    return float(price)
