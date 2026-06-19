@@ -88,6 +88,8 @@ class OrderStateMachine:
         lifecycle: OrderLifecycle,
         to_state: OrderState,
         reason: str = "",
+        *,
+        fill_size: Decimal | None = None,
     ) -> None:
         """Move *lifecycle* to *to_state*, raising on invalid transitions.
 
@@ -100,7 +102,7 @@ class OrderStateMachine:
             # Allow same-state transitions for partial fills
             # since each one carries a new fill size in the reason.
             if to_state == OrderState.PARTIALLY_FILLED:
-                cls._update_sizes(lifecycle, to_state, reason)
+                cls._update_sizes(lifecycle, to_state, reason, fill_size=fill_size)
                 return
             # All other same-state transitions are true idempotent no-ops.
             return
@@ -126,7 +128,7 @@ class OrderStateMachine:
 
         lifecycle.record_transition(current, to_state, reason)
         lifecycle.state = to_state
-        cls._update_sizes(lifecycle, to_state, reason)
+        cls._update_sizes(lifecycle, to_state, reason, fill_size=fill_size)
 
     # -- internal -----------------------------------------------------------
 
@@ -136,17 +138,23 @@ class OrderStateMachine:
         lifecycle: OrderLifecycle,
         to_state: OrderState,
         reason: str,
+        fill_size: Decimal | None = None,
     ) -> None:
-        if to_state == OrderState.PARTIALLY_FILLED and reason:
-            try:
-                filled = Decimal(reason)
-                lifecycle.filled_size += filled
-                lifecycle.remaining_size = max(
-                    Decimal("0"),
-                    lifecycle.original_size - lifecycle.filled_size,
-                )
-            except Exception:
-                raise InvalidTransitionError(f"Invalid fill size: {reason}") from None
+        if to_state == OrderState.PARTIALLY_FILLED:
+            size = fill_size if fill_size is not None else _parse_fill_size(reason)
+            lifecycle.filled_size += size
+            lifecycle.remaining_size = max(
+                Decimal("0"),
+                lifecycle.original_size - lifecycle.filled_size,
+            )
         elif to_state == OrderState.FILLED:
             lifecycle.filled_size = lifecycle.original_size
             lifecycle.remaining_size = Decimal("0")
+
+
+def _parse_fill_size(reason: str) -> Decimal:
+    """Parse a fill size from the reason string (backward compat)."""
+    try:
+        return Decimal(reason)
+    except Exception:
+        raise InvalidTransitionError(f"Invalid fill size: {reason}") from None

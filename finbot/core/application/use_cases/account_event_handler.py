@@ -176,7 +176,9 @@ class AccountEventHandler:
             else OrderState.PARTIALLY_FILLED
         )
         try:
-            OrderStateMachine.transition(lifecycle, target, str(size))
+            OrderStateMachine.transition(
+                lifecycle, target, f"fill {size}", fill_size=size
+            )
         except Exception as e:  # noqa: BLE001 - log and continue
             logger.warning("Fill transition failed for %s: %s", order_id, e)
             return False
