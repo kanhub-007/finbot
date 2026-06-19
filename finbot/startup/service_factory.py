@@ -45,6 +45,8 @@ def hyperliquid_base_url(settings: Settings) -> str:
 
 def create_bot_config(settings: Settings) -> BotConfig:
     """Create a domain bot configuration from environment settings."""
+    from finbot.core.domain.entities.private_key import PrivateKey
+
     return BotConfig(
         mode=TradingMode(settings.mode),
         live_trading_ack=settings.live_trading_ack,
@@ -52,7 +54,7 @@ def create_bot_config(settings: Settings) -> BotConfig:
         max_daily_loss_usd=settings.max_daily_loss_usd,
         max_open_orders=settings.max_open_orders,
         stale_data_seconds=settings.stale_data_seconds,
-        private_key=settings.hyperliquid_private_key.get_secret_value(),
+        private_key=PrivateKey(settings.hyperliquid_private_key.get_secret_value()),
         db_path=settings.database_path,
     )
 

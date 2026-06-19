@@ -195,7 +195,7 @@ class LiveTradingRuntimeUseCase:
         check = check_live_mode(
             mode=config.mode.value,
             live_trading_ack=config.live_trading_ack,
-            private_key=config.private_key,
+            private_key=config.private_key.raw,
             max_position_usd=float(config.max_position_usd),
             database_path=config.db_path,
         )

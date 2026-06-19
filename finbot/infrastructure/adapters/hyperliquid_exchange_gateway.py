@@ -16,6 +16,7 @@ from finbot.core.domain.entities.position_direction import (
     PositionDirection,
 )
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
+from finbot.core.domain.entities.private_key import PrivateKey
 from finbot.core.domain.entities.wallet_balance import WalletBalance
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
@@ -38,7 +39,10 @@ class HyperliquidExchangeGateway(ExchangeGateway):
     Parameters
     ----------
     private_key:
-        Wallet private key for signing orders.
+        Wallet private key for signing orders. Accepts a :class:`PrivateKey`
+        value object (preferred) or a raw ``str`` (coerced) for backward
+        compatibility. Stored as ``PrivateKey`` so ``repr(gateway)`` never
+        leaks the key (M5).
     base_url:
         Hyperliquid API base URL (mainnet or testnet).
     account_address:
@@ -51,15 +55,16 @@ class HyperliquidExchangeGateway(ExchangeGateway):
 
     def __init__(
         self,
-        private_key: str,
+        private_key: PrivateKey | str,
         base_url: str = "https://api.hyperliquid.xyz",
         account_address: str = "",
         vault_address: str = "",
         repo: BotStateRepository | None = None,
         retry_policy: RetryPolicy | None = None,
     ) -> None:
-        validate_private_key(private_key)
-        self._private_key = private_key
+        key = PrivateKey._coerce(private_key)
+        validate_private_key(key.raw)
+        self._private_key: PrivateKey = key
         self._base_url = base_url
         self._account_address = account_address or None
         self._vault_address = vault_address or None
@@ -264,7 +269,7 @@ class HyperliquidExchangeGateway(ExchangeGateway):
             from eth_account import Account
             from hyperliquid.exchange import Exchange
 
-            wallet = Account.from_key(self._private_key)
+            wallet = Account.from_key(self._private_key.raw)
             self._exchange = Exchange(
                 wallet=wallet,
                 base_url=self._base_url,
