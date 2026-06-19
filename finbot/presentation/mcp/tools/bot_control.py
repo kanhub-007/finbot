@@ -11,11 +11,15 @@ from finbot.core.domain.services.mode_url_guard import (
 )
 
 
-def register_bot_control_tools(mcp: FastMCP, bot_manager: Any) -> None:
+def register_bot_control_tools(
+    mcp: FastMCP, bot_manager: Any, settings: Any = None
+) -> None:
     """Register start_bot, stop_bot, and get_bot_status MCP tools.
 
     ``bot_manager`` is captured in each tool closure (S8 / H4) — tools no
-    longer read a private attribute off the FastMCP instance.
+    longer read a private attribute off the FastMCP instance. ``settings``
+    is captured once (S13 / H9) so the tool does not re-instantiate
+    ``Settings()`` per call.
     """
 
     @mcp.tool(
@@ -40,9 +44,10 @@ def register_bot_control_tools(mcp: FastMCP, bot_manager: Any) -> None:
         # C4: refuse mode/URL combinations that would route orders to the
         # wrong environment before touching the BotManager.  Mirrors the
         # CLI guard in cli/main.py:_cmd_run.
+        _settings = settings or Settings()
         reasons = check_mode_url_consistency(
             mode=mode,
-            hyperliquid_testnet=Settings().hyperliquid_testnet,
+            hyperliquid_testnet=_settings.hyperliquid_testnet,
         )
         if reasons:
             return json.dumps(

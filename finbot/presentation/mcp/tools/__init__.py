@@ -20,22 +20,11 @@ def register_tools(
     mcp: FastMCP,
     bot_manager: Any,
     *,
+    settings: Any | None = None,
     validate_strategy_use_case: Any | None = None,
 ) -> None:
-    """Register all finbot MCP tools on the given server instance.
-
-    Parameters
-    ----------
-    mcp:
-        FastMCP server tools are registered on.
-    bot_manager:
-        Passed into every tool group so each tool closes over it (H4).
-    validate_strategy_use_case:
-        Optional pre-built use case so ``validate_strategy`` doesn't
-        rebuild it per call (M2). When ``None``, the util tool falls
-        back to constructing one per call (legacy behaviour).
-    """
-    register_bot_control_tools(mcp, bot_manager)
+    """Register all finbot MCP tools on the given server instance."""
+    register_bot_control_tools(mcp, bot_manager, settings=settings)
     register_bot_history_tools(mcp, bot_manager)
     register_safety_tools(mcp, bot_manager)
     register_util_tools(

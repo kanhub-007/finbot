@@ -166,6 +166,7 @@ def create_server() -> FastMCP:
     register_tools(
         server,
         bot_manager,
+        settings=settings,
         validate_strategy_use_case=create_validate_strategy_use_case(),
     )
 
