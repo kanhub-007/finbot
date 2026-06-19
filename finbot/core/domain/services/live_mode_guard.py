@@ -14,7 +14,7 @@ class LiveModeCheckResult:
     """Outcome of a live-mode eligibility check."""
 
     allowed: bool
-    reasons: list[str] = field(default_factory=list)
+    reasons: tuple[str, ...] = ()
 
 
 def check_live_mode(
@@ -32,7 +32,7 @@ def check_live_mode(
     if mode != "live":
         return LiveModeCheckResult(
             allowed=False,
-            reasons=["FINBOT_MODE must be 'live'"],
+            reasons=("FINBOT_MODE must be 'live'",),
         )
 
     reasons: list[str] = []
@@ -57,6 +57,6 @@ def check_live_mode(
         )
 
     if reasons:
-        return LiveModeCheckResult(allowed=False, reasons=reasons)
+        return LiveModeCheckResult(allowed=False, reasons=tuple(reasons))
 
     return LiveModeCheckResult(allowed=True)
