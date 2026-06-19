@@ -34,6 +34,9 @@ from tests.fakes import (
 
 
 def _make_runtime(repo=None):
+    from finbot.core.application.use_cases.account_event_handler import (
+        AccountEventHandler,
+    )
     from finbot.core.application.use_cases.live_trading_runtime import (
         LiveTradingRuntimeUseCase,
     )
@@ -55,6 +58,7 @@ def _make_runtime(repo=None):
         warmup_bars=closed_warmup_bars(100),
         required_columns={"atr"},
         order_planner=OrderPlanner(gates=[ModeGate(), DuplicateSignalGate(repo)]),
+        account_event_handler=AccountEventHandler(repo),
     )
 
 

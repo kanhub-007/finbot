@@ -132,30 +132,36 @@ class AccountEventHandler:
             return {"status": "duplicate", "reason": f"fill {fill_id} already recorded"}
 
         size = Decimal(str(event.get("size", "0")))
-        # Apply the lifecycle transition, record the fill, and update the
-        # Trade ledger atomically so a failure cannot double-count the fill
-        # size on retry (ADR-6).
         fill = self._build_fill_record(
             order_id, event, bot_run_id, symbol, fill_id, size
         )
-        tx = getattr(self._repo, "transaction", None)
-        if tx is not None:
-            with tx():
-                if not self._apply_fill_transition(order_id, size):
-                    return {"status": "transition_rejected"}
-                # Apply to the Trade ledger first so its internal
-                # idempotency checks see the fill as NOT yet recorded
-                # (has_fill returns False for a new fill).
-                self._trade_ledger.apply_fill(fill)
-                self._repo.record_fill(fill)
+        result = self._apply_fill_within_tx(order_id, fill, size)
+        if result["status"] == "processed":
             self._notify_fill(fill)
-            return {"status": "processed"}
-        # In-memory repos have no fsync cost; apply directly.
+        return result
+
+    def _apply_fill_within_tx(
+        self, order_id: str, fill: FillRecord, size: Decimal
+    ) -> dict[str, Any]:
+        """Apply transition + ledger + fill record (M13 de-dup).
+
+        Uses a repo transaction if available; otherwise applies directly.
+        Both paths share the same three operations via _apply_fill_effects.
+        """
+        tx = getattr(self._repo, "transaction", None)
+        if tx is None:
+            return self._apply_fill_effects(order_id, fill, size)
+        with tx():
+            return self._apply_fill_effects(order_id, fill, size)
+
+    def _apply_fill_effects(
+        self, order_id: str, fill: FillRecord, size: Decimal
+    ) -> dict[str, Any]:
+        """Transition + ledger + record (shared by txn/non-txn paths)."""
         if not self._apply_fill_transition(order_id, size):
             return {"status": "transition_rejected"}
         self._trade_ledger.apply_fill(fill)
         self._repo.record_fill(fill)
-        self._notify_fill(fill)
         return {"status": "processed"}
 
     def _apply_fill_transition(self, order_id: str, size: Decimal) -> bool:
@@ -217,7 +223,7 @@ class AccountEventHandler:
             if trade and trade.status == "closed":
                 pnl_str = str(trade.realized_pnl)
 
-            from datetime import datetime, timezone
+            from datetime import UTC, datetime
 
             from finbot.core.domain.events.trade_executed import TradeExecuted
 
@@ -229,7 +235,7 @@ class AccountEventHandler:
                 price=str(fill.price),
                 pnl=pnl_str,
                 order_id=fill.order_id,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
             )
             self._notification_sender.notify_trade(event)
         except Exception:

@@ -465,12 +465,14 @@ class LiveTradingRuntimeUseCase:
     def process_account_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """Process an account websocket event (order update, fill, etc.).
 
-        Delegates to :class:`AccountEventHandler`, lazily constructed from
-        the state repository so callers that never receive account events
-        pay no setup cost.
+        Delegates to the injected :class:`AccountEventHandler`. The handler
+        is a required constructor dependency (H8) — it is no longer lazily
+        constructed so a fake can be injected for testing.
         """
         if self._account_handler is None:
-            self._account_handler = AccountEventHandler(self._repo, self._trade_ledger)
+            raise RuntimeError(
+                "No AccountEventHandler injected — cannot process account events"
+            )
         return self._account_handler.handle(
             event,
             bot_run_id=self._bot_run_id,
