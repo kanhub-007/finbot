@@ -7,9 +7,9 @@ from typing import Any
 # Hex-encoded private key pattern (with or without 0x prefix).
 _PK_RE = re.compile(r"(?:0x)?[0-9a-fA-F]{64}", re.IGNORECASE)
 
-# Sentinel value patterns that should never appear in logs.
-_SENTINEL_RE = re.compile(r"secret|private.?key|mnemonic|passphrase", re.IGNORECASE)
-
+_SENTINEL_RE = re.compile(
+    r"\b(secret|private.?key|mnemonic|passphrase)\b", re.IGNORECASE
+)
 # Values to replace matched patterns with.
 _REDACTED = "***REDACTED***"
 
