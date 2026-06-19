@@ -37,7 +37,7 @@ from finbot.core.domain.services.order_normalizer import (
 logger = logging.getLogger(__name__)
 
 
-class OrderSubmitter:
+class LiveOrderExecutor:
     """Normalize an intent, submit it, and persist the exchange response.
 
     Parameters

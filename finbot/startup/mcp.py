@@ -14,6 +14,7 @@ from fastmcp import FastMCP
 
 from finbot.config.settings import Settings
 from finbot.core.domain.services.bot_manager import BotManager
+from finbot.startup.mcp_server import FinbotMcpServer
 from finbot.startup.service_factory import (
     create_bot_config,
     create_bot_state_repository,
@@ -141,16 +142,13 @@ def create_server() -> FastMCP:
         ),
     )
 
-    # Tools capture bot_manager via closure (S8 / H4). The manager is also
-    # exposed as a public attribute so composition-root tests can drive the
-    # runtime factory without re-deriving it.
-    server.bot_manager = bot_manager  # type: ignore[attr-defined]
+    # bot_manager is captured in the FinbotMcpServer wrapper (below).
 
     # Wire Telegram if enabled
     if telegram is not None:
         telegram.attach_bot_manager(bot_manager)
         telegram.start_in_background()
-        server._finbot_telegram = telegram  # type: ignore[attr-defined]
+        # telegram is captured in the FinbotMcpServer wrapper (below).
         logger.info(
             "Telegram bot started (allowed users: %d)",
             len(settings.telegram_allowed_user_ids),
@@ -175,7 +173,7 @@ def create_server() -> FastMCP:
     if config["transport"] == "http":
         logger.info("HTTP transport: %s:%s", config["host"], config["port"])
 
-    return server
+    return FinbotMcpServer(server=server, bot_manager=bot_manager, telegram=telegram)
 
 
 def get_transport_config() -> dict:

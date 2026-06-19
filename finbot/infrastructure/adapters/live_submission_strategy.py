@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from finbot.core.application.use_cases.order_submitter import OrderSubmitter
+from finbot.core.application.use_cases.live_order_executor import LiveOrderExecutor
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
@@ -19,7 +19,7 @@ from finbot.core.domain.interfaces.order_submission_strategy import (
 class LiveSubmissionStrategy(OrderSubmissionStrategy):
     """Submit real orders to the exchange gateway for testnet/live modes.
 
-    Records the order intent, then delegates to OrderSubmitter which
+    Records the order intent, then delegates to LiveOrderExecutor which
     handles normalization, exchange submission, and response persistence.
     """
 
@@ -29,7 +29,7 @@ class LiveSubmissionStrategy(OrderSubmissionStrategy):
         order_normalizer: OrderNormalizer | None,
         repo: BotStateRepository,
     ) -> None:
-        self._submitter = OrderSubmitter(
+        self._submitter = LiveOrderExecutor(
             exchange_gateway, order_normalizer, repo
         )
         self._repo = repo

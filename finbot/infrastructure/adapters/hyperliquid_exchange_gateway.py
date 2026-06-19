@@ -162,7 +162,7 @@ class HyperliquidExchangeGateway(ExchangeGateway):
                 intent.symbol, {"coin": intent.symbol, "side": intent.side.value}
             )
         # Persistence (intent + response) is the application layer's
-        # responsibility (OrderSubmitter / the runtime) — recording here too
+        # responsibility (LiveOrderExecutor / the runtime) — recording here too
         # would duplicate every intent and response row.
         return result
 
