@@ -12,7 +12,7 @@ from tests.fakes import (
     InMemoryBarFrameConverter,
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
-    StubBotStateRepository,
+    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_dry_run_submission_strategy,
@@ -29,7 +29,7 @@ def _make_runtime(**overrides):
         LiveTradingRuntimeUseCase,
     )
 
-    repo = overrides.get("state_repository") or StubBotStateRepository()
+    repo = overrides.get("state_repository") or FakeBotStateRepository()
     exchange = overrides.get("exchange_gateway") or InMemoryExchangeGateway()
     kwargs = dict(
         exchange_gateway=exchange,

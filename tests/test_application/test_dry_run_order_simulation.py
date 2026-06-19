@@ -24,7 +24,7 @@ from tests.fakes import (
     InMemoryBarFrameConverter,
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
-    StubBotStateRepository,
+    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_dry_run_submission_strategy,
@@ -88,7 +88,7 @@ def _make_runtime(**overrides):
         LiveTradingRuntimeUseCase,
     )
 
-    repo = overrides.get("state_repository") or StubBotStateRepository()
+    repo = overrides.get("state_repository") or FakeBotStateRepository()
     max_pos = overrides.get("_max_position", Decimal("100000"))
 
     kwargs = dict(
@@ -136,7 +136,7 @@ def _make_runtime(**overrides):
 def test_dry_run_accepts_signal_and_increments_position() -> None:
     """Dry-run: accepted signal creates order intent and updates position."""
     exchange = TrackingDryRunExchange("BTC")
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(exchange_gateway=exchange, state_repository=repo)
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
@@ -153,7 +153,7 @@ def test_dry_run_accepts_signal_and_increments_position() -> None:
 
 def test_dry_run_duplicate_signal_is_rejected() -> None:
     """Replaying same signal after restart is rejected as duplicate."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     exchange = TrackingDryRunExchange("BTC")
 
     first_runtime = _make_runtime(state_repository=repo, exchange_gateway=exchange)
@@ -175,7 +175,7 @@ def test_dry_run_duplicate_signal_is_rejected() -> None:
 
 def test_max_position_exceeded_rejects_entry() -> None:
     """Max position exceeded -> risk rejected, no intent saved."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(state_repository=repo, _max_position=Decimal("1"))
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 
@@ -187,7 +187,7 @@ def test_max_position_exceeded_rejects_entry() -> None:
 
 def test_hold_signal_creates_no_order_intent() -> None:
     """HOLD signal creates no order intent."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(
         state_repository=repo,
         strategy_evaluator=FakeStrategyEvaluator(
@@ -210,7 +210,7 @@ def test_hold_signal_creates_no_order_intent() -> None:
 
 def test_processed_signal_key_is_persisted() -> None:
     """After a successful signal, the signal key is marked as processed."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(state_repository=repo)
     runtime._start_session("test-strategy", "test-hash", "BTC", "1h")
 

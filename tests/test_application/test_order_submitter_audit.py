@@ -19,7 +19,7 @@ from finbot.core.application.use_cases.live_order_executor import LiveOrderExecu
 from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_side import OrderSide
 from finbot.core.domain.entities.order_type import OrderType
-from tests.fakes import InMemoryExchangeGateway, StubBotStateRepository
+from tests.fakes import InMemoryExchangeGateway, FakeBotStateRepository
 
 
 class _PassthroughNormalizer:
@@ -42,7 +42,7 @@ def _intent(cloid: str = "c-1") -> OrderIntent:
 class TestLiveOrderExecutorNoReconciliationPollution:
     def test_submit_writes_no_reconciliation_record(self) -> None:
         """A single live submit must not write a reconciliation row."""
-        repo = StubBotStateRepository()
+        repo = FakeBotStateRepository()
         exchange = InMemoryExchangeGateway()
         submitter = LiveOrderExecutor(exchange, _PassthroughNormalizer(), repo)
 
@@ -55,7 +55,7 @@ class TestLiveOrderExecutorNoReconciliationPollution:
 
     def test_ten_submits_leave_zero_reconciliation_rows(self) -> None:
         """Repeated submits must not accumulate reconciliation noise."""
-        repo = StubBotStateRepository()
+        repo = FakeBotStateRepository()
         exchange = InMemoryExchangeGateway()
         submitter = LiveOrderExecutor(exchange, _PassthroughNormalizer(), repo)
 
@@ -69,7 +69,7 @@ class TestLiveOrderExecutorNoReconciliationPollution:
 
     def test_submit_without_normalizer_writes_no_reconciliation(self) -> None:
         """The disabled-submission path (no normalizer) also writes none."""
-        repo = StubBotStateRepository()
+        repo = FakeBotStateRepository()
         exchange = InMemoryExchangeGateway()
         submitter = LiveOrderExecutor(exchange, normalizer=None, repo=repo)
 

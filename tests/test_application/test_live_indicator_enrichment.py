@@ -35,7 +35,7 @@ from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
 )
 from tests.fakes import (
     InMemoryExchangeGateway,
-    StubBotStateRepository,
+    FakeBotStateRepository,
     closed_warmup_bars,
     make_dry_run_submission_strategy,
     make_event_emitter,
@@ -89,13 +89,13 @@ def test_real_calculator_composes_intermediate_indicators() -> None:
     runtime = LiveTradingRuntimeUseCase(
         exchange_gateway=InMemoryExchangeGateway(),
         strategy_evaluator=recording,
-        state_repository=StubBotStateRepository(),
+        state_repository=FakeBotStateRepository(),
         indicator_calculator=SharedRuntimeIndicatorCalculator(),
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=PandasBarFrameConverter(),
         mode=TradingMode.DRY_RUN,
         submission_strategy=make_dry_run_submission_strategy(
-            StubBotStateRepository()
+            FakeBotStateRepository()
         ),
         event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(120),

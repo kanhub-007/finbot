@@ -24,7 +24,7 @@ from finbot.core.domain.services.bot_manager.runtime_config_service import (
 from finbot.core.domain.services.bot_manager.symbol_session_service import (
     SymbolSessionService,
 )
-from tests.fakes import FakeExchangeGateway, StubBotStateRepository
+from tests.fakes import FakeExchangeGateway, FakeBotStateRepository
 
 
 class TestBotManagerLock:
@@ -43,7 +43,7 @@ class TestSymbolSessionService:
             lock=BotManagerLock(),
             exchange=exchange or FakeExchangeGateway(),
             metadata_provider=None,
-            repo=StubBotStateRepository(),
+            repo=FakeBotStateRepository(),
         )
 
     def test_get_active_symbol_returns_none_when_idle(self) -> None:
@@ -77,7 +77,7 @@ class TestSymbolSessionService:
             lock=BotManagerLock(),
             exchange=None,
             metadata_provider=None,
-            repo=StubBotStateRepository(),
+            repo=FakeBotStateRepository(),
         )
         assert svc.get_active_position() is None
         assert svc.list_active_orders() is None
@@ -135,7 +135,7 @@ class TestRuntimeConfigService:
 
 class TestBotQueryService:
     def _make(self) -> BotQueryService:
-        return BotQueryService(repo=StubBotStateRepository())
+        return BotQueryService(repo=FakeBotStateRepository())
 
     def test_list_bot_runs_empty(self) -> None:
         svc = self._make()

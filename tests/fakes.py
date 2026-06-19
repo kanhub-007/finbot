@@ -252,7 +252,7 @@ class FakeStrategyEvaluator(StrategyEvaluator):
 # ---------------------------------------------------------------------------
 
 
-class StubBotStateRepository(BotStateRepository):
+class FakeBotStateRepository(BotStateRepository):
     """Minimal state repository stub — tracks state without persistence."""
 
     def __init__(self) -> None:

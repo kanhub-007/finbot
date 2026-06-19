@@ -21,7 +21,7 @@ from tests.fakes import (
     InMemoryBarFrameConverter,
     InMemoryIndicatorEngine,
     InMemoryMarketMetadataProvider,
-    StubBotStateRepository,
+    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_event_emitter,
@@ -48,7 +48,7 @@ def _make_runtime(**overrides):
         LiveTradingRuntimeUseCase,
     )
 
-    repo = overrides.get("state_repository") or StubBotStateRepository()
+    repo = overrides.get("state_repository") or FakeBotStateRepository()
     exchange = overrides.get("exchange_gateway") or FakeExchangeGateway()
     metadata_provider = overrides.get(
         "metadata_provider", InMemoryMarketMetadataProvider.for_btc()
@@ -106,7 +106,7 @@ def _make_runtime(**overrides):
 
 def test_testnet_submits_normalized_intent_with_cloid() -> None:
     """Testnet mode normalizes, generates cloid, submits, persists response."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     exchange = FakeExchangeGateway()
     metadata = InMemoryMarketMetadataProvider.for_btc()
 
@@ -138,7 +138,7 @@ def test_testnet_submits_normalized_intent_with_cloid() -> None:
 
 def test_testnet_normalized_intent_has_correct_precision() -> None:
     """Normalized intent uses exchange-safe size and price precision."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     exchange = FakeExchangeGateway()
 
     runtime = _make_runtime(
@@ -160,7 +160,7 @@ def test_testnet_normalized_intent_has_correct_precision() -> None:
 
 def test_missing_cloid_blocks_testnet_submission() -> None:
     """Without cloid generator, testnet should not submit."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     exchange = FakeExchangeGateway()
 
     runtime = _make_runtime(
@@ -179,7 +179,7 @@ def test_missing_cloid_blocks_testnet_submission() -> None:
 
 def test_unknown_symbol_metadata_rejected_before_submit() -> None:
     """Unknown symbol metadata should reject the order."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     exchange = FakeExchangeGateway()
     empty_metadata = InMemoryMarketMetadataProvider({})
 
@@ -206,7 +206,7 @@ def test_no_reconciliation_record_persisted_after_testnet_submit() -> None:
     is populated only by ``reconcile_on_startup``; a per-order placeholder
     would make every live order look like drift.
     """
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     exchange = FakeExchangeGateway()
 
     runtime = _make_runtime(

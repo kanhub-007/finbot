@@ -21,7 +21,7 @@ from tests.fakes import (
     InMemoryBarFrameConverter,
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
-    StubBotStateRepository,
+    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_dry_run_submission_strategy,
@@ -41,7 +41,7 @@ def _make_runtime(repo=None):
         LiveTradingRuntimeUseCase,
     )
 
-    repo = repo or StubBotStateRepository()
+    repo = repo or FakeBotStateRepository()
     exchange = InMemoryExchangeGateway()
     return LiveTradingRuntimeUseCase(
         exchange_gateway=exchange,
@@ -97,7 +97,7 @@ def _start_session_with_intent(runtime, repo, intent_id="test-intent-1"):
 
 def test_accepted_update_moves_lifecycle_to_accepted() -> None:
     """Accepted order update moves lifecycle from SUBMITTED to ACCEPTED."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(repo)
     _start_session_with_intent(runtime, repo, "intent-1")
 
@@ -117,7 +117,7 @@ def test_accepted_update_moves_lifecycle_to_accepted() -> None:
 
 def test_open_update_moves_lifecycle_to_open() -> None:
     """Open order update moves lifecycle from ACCEPTED to OPEN."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(repo)
     _start_session_with_intent(runtime, repo, "intent-2")
     repo._lifecycles["intent-2"].state = OrderState.ACCEPTED
@@ -135,7 +135,7 @@ def test_open_update_moves_lifecycle_to_open() -> None:
 
 def test_partial_fill_persists_fill_and_updates_remaining_size() -> None:
     """Partial fill persists FillRecord and updates lifecycle remaining size."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(repo)
     _start_session_with_intent(runtime, repo, "intent-3")
     repo._lifecycles["intent-3"].state = OrderState.OPEN
@@ -160,7 +160,7 @@ def test_partial_fill_persists_fill_and_updates_remaining_size() -> None:
 
 def test_duplicate_fill_is_idempotent() -> None:
     """Duplicate fill with same fill_id does not create duplicate records."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(repo)
     _start_session_with_intent(runtime, repo, "intent-4")
     repo._lifecycles["intent-4"].state = OrderState.OPEN
@@ -184,7 +184,7 @@ def test_duplicate_fill_is_idempotent() -> None:
 
 def test_full_fill_moves_lifecycle_to_filled() -> None:
     """Full fill moves lifecycle to FILLED."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(repo)
     _start_session_with_intent(runtime, repo, "intent-5")
     repo._lifecycles["intent-5"].state = OrderState.OPEN
@@ -206,7 +206,7 @@ def test_full_fill_moves_lifecycle_to_filled() -> None:
 
 def test_rejected_update_marks_lifecycle_rejected() -> None:
     """Rejected order update marks lifecycle as REJECTED."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(repo)
     _start_session_with_intent(runtime, repo, "intent-6")
 
@@ -223,7 +223,7 @@ def test_rejected_update_marks_lifecycle_rejected() -> None:
 
 def test_cancelled_update_marks_lifecycle_cancelled() -> None:
     """Cancelled order update marks lifecycle as CANCELLED."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(repo)
     _start_session_with_intent(runtime, repo, "intent-7")
     repo._lifecycles["intent-7"].state = OrderState.OPEN
@@ -243,7 +243,7 @@ def test_cancelled_update_marks_lifecycle_cancelled() -> None:
 
 def test_unknown_order_update_blocks_new_orders() -> None:
     """Unknown order ID moves to UNKNOWN_RECONCILE_REQUIRED."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(repo)
     _start_session_with_intent(runtime, repo, "intent-8")
     repo._lifecycles["intent-8"].state = OrderState.SUBMITTED
@@ -267,7 +267,7 @@ def test_fill_opens_trade_atomically() -> None:
     record and Trade update happen atomically but apply_fill must run
     before record_fill.
     """
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _make_runtime(repo)
     _start_session_with_intent(runtime, repo, "intent-9")
     repo._lifecycles["intent-9"].state = OrderState.OPEN

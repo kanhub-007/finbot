@@ -11,7 +11,7 @@ from tests.fakes import (
     InMemoryBarFrameConverter,
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
-    StubBotStateRepository,
+    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_dry_run_submission_strategy,
@@ -39,7 +39,7 @@ def _create_runtime(
         LiveTradingRuntimeUseCase,
     )
 
-    _repo = repo or StubBotStateRepository()
+    _repo = repo or FakeBotStateRepository()
     _exchange = exchange or InMemoryExchangeGateway()
     return LiveTradingRuntimeUseCase(
         exchange_gateway=_exchange,
@@ -65,7 +65,7 @@ def _create_runtime(
 
 def test_invalid_enriched_candle_blocked_before_evaluation() -> None:
     """Missing/non-finite enriched columns block strategy evaluation."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     evaluator = FakeStrategyEvaluator(
         signal=SignalDecision(
             action=SignalAction.LONG_ENTRY,
@@ -98,7 +98,7 @@ def test_invalid_enriched_candle_blocked_before_evaluation() -> None:
 
 def test_optional_nan_does_not_block_evaluation() -> None:
     """Optional/non-required NaN column does not block evaluation."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _create_runtime(
         repo=repo,
         evaluator=FakeStrategyEvaluator(
@@ -125,7 +125,7 @@ def test_optional_nan_does_not_block_evaluation() -> None:
 
 def test_validation_rejection_persisted_as_risk_event() -> None:
     """Validation rejection is persisted as an audit/risk event."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _create_runtime(
         repo=repo,
         indicator_engine=InMemoryIndicatorEngine(
@@ -151,7 +151,7 @@ def test_validation_rejection_persisted_as_risk_event() -> None:
 
 def test_latest_bar_includes_required_columns_after_enrichment() -> None:
     """Enriched latest bar contains all required indicator columns."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     evaluator = FakeStrategyEvaluator(
         signal=SignalDecision(
             action=SignalAction.LONG_ENTRY,
@@ -237,7 +237,7 @@ def test_yaml_strategy_loaded_into_real_evaluator() -> None:
         strategy_hash=strategy_hash,
     )
 
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _create_runtime(
         repo=repo,
         evaluator=real_evaluator,
@@ -302,7 +302,7 @@ class TestPackageSignalBoundary:
     def test_triggering_candle_persists_signal_without_submitting(self) -> None:
         evaluator, required_columns = self._package_evaluator_and_columns()
         exchange = InMemoryExchangeGateway()
-        repo = StubBotStateRepository()
+        repo = FakeBotStateRepository()
         runtime = _create_runtime(
             repo=repo,
             exchange=exchange,
@@ -481,7 +481,7 @@ class TestBothTargetFixturesStartInDryRun:
 def test_dry_run_processes_candle_without_submitting() -> None:
     """Dry-run enriches, evaluates, persists, but never submits."""
     exchange = InMemoryExchangeGateway()
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _create_runtime(
         repo=repo,
         exchange=exchange,
@@ -518,7 +518,7 @@ def test_dry_run_processes_candle_without_submitting() -> None:
 
 def test_dry_run_stop_ends_session() -> None:
     """Stopping the runtime persists the end marker."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     runtime = _create_runtime(repo=repo)
 
     runtime.start("test-strategy.yaml", "BTC", "1h", "test-hash")

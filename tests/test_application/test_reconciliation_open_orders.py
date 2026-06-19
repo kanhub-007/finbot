@@ -39,7 +39,7 @@ from tests.fakes import (
     FakeStrategyEvaluator,
     InMemoryBarFrameConverter,
     InMemoryIndicatorEngine,
-    StubBotStateRepository,
+    FakeBotStateRepository,
     closed_warmup_bars,
     make_dry_run_submission_strategy,
 )
@@ -47,10 +47,10 @@ from tests.fakes import (
 
 def _make_runtime(
     *,
-    repo: StubBotStateRepository | None = None,
+    repo: FakeBotStateRepository | None = None,
     exchange: FakeExchangeGateway | None = None,
 ) -> LiveTradingRuntimeUseCase:
-    repo = repo or StubBotStateRepository()
+    repo = repo or FakeBotStateRepository()
     exchange = exchange or FakeExchangeGateway()
     return LiveTradingRuntimeUseCase(
         exchange_gateway=exchange,
@@ -82,7 +82,7 @@ class TestReconcilePersistsOpenOrders:
     """C6: exchange open orders are persisted as OPEN lifecycles on startup."""
 
     def test_exchange_orders_with_empty_db_persists_lifecycles(self):
-        repo = StubBotStateRepository()
+        repo = FakeBotStateRepository()
         exchange = _exchange_with_orders(
             {"oid": "A", "coin": "BTC", "side": "B", "sz": "0.1"},
             {"oid": "B", "coin": "BTC", "side": "S", "sz": "0.2"},
@@ -104,7 +104,7 @@ class TestReconcilePersistsOpenOrders:
     def test_exchange_orders_with_empty_db_reports_mismatch(self):
         """When the DB has no lifecycle for an exchange oid, the reconciliation
         record must report ``open_orders_match=False`` (not the hardcoded True)."""
-        repo = StubBotStateRepository()
+        repo = FakeBotStateRepository()
         exchange = _exchange_with_orders(
             {"oid": "X", "coin": "BTC", "side": "B", "sz": "0.1"},
         )
@@ -119,7 +119,7 @@ class TestReconcilePersistsOpenOrders:
 
     def test_all_orders_known_in_db_reports_match(self):
         """When every exchange oid already has a DB lifecycle, match is True."""
-        repo = StubBotStateRepository()
+        repo = FakeBotStateRepository()
         # Pre-seed the DB with both lifecycles the exchange will report.
         repo.save_order_lifecycle(
             OrderLifecycle(
@@ -140,7 +140,7 @@ class TestReconcilePersistsOpenOrders:
 
         assert rec.open_orders_match is True
         """When every exchange oid already has a DB lifecycle, match is True."""
-        repo = StubBotStateRepository()
+        repo = FakeBotStateRepository()
         # Pre-seed the DB with both lifecycles the exchange will report.
         repo.save_order_lifecycle(
             OrderLifecycle(
@@ -163,7 +163,7 @@ class TestReconcilePersistsOpenOrders:
 
     def test_stale_db_lifecycle_not_on_exchange_reports_mismatch(self):
         """An oid in the DB but not on the exchange is also a mismatch."""
-        repo = StubBotStateRepository()
+        repo = FakeBotStateRepository()
         repo.save_order_lifecycle(
             OrderLifecycle(
                 order_id="STALE",
@@ -186,7 +186,7 @@ class TestReconcilePersistsOpenOrders:
 
     def test_no_exchange_orders_and_empty_db_reports_match(self):
         """Both sides empty is a match (the common clean-restart case)."""
-        repo = StubBotStateRepository()
+        repo = FakeBotStateRepository()
         exchange = _exchange_with_orders()
         runtime = _make_runtime(repo=repo, exchange=exchange)
         runtime._start_session("strat", "hash", "BTC", "1h")
@@ -198,7 +198,7 @@ class TestReconcilePersistsOpenOrders:
     def test_existing_lifecycle_is_not_overwritten(self):
         """If a lifecycle already exists with transition history, reconcile
         must not replace it with a fresh stub (would lose history)."""
-        repo = StubBotStateRepository()
+        repo = FakeBotStateRepository()
         existing = OrderLifecycle(
             order_id="A",
             symbol="BTC",

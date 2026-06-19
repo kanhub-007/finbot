@@ -12,7 +12,7 @@ from tests.fakes import (
     InMemoryBarFrameConverter,
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
-    StubBotStateRepository,
+    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_dry_run_submission_strategy,
@@ -62,7 +62,7 @@ class CapturingBotLoop(FakeBotLoop):
 
 def test_bot_loop_run_forever_processes_candles() -> None:
     """run_forever() starts the bot loop which calls process_closed_candle."""
-    repo = StubBotStateRepository()
+    repo = FakeBotStateRepository()
     bot_loop = CapturingBotLoop()
 
     from finbot.core.application.use_cases.live_trading_runtime import (
@@ -127,13 +127,13 @@ def test_run_forever_raises_without_bot_loop() -> None:
     runtime = LiveTradingRuntimeUseCase(
         exchange_gateway=InMemoryExchangeGateway(),
         strategy_evaluator=FakeStrategyEvaluator(),
-        state_repository=StubBotStateRepository(),
+        state_repository=FakeBotStateRepository(),
         indicator_calculator=InMemoryIndicatorEngine(),
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=TradingMode.DRY_RUN,
         submission_strategy=make_dry_run_submission_strategy(
-            StubBotStateRepository()
+            FakeBotStateRepository()
         ),
         event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(100),
