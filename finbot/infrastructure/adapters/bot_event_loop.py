@@ -157,9 +157,6 @@ class BotEventLoop(BotLoop):
         to 1 second for the next poll.
         """
         self._running = False
-        from finbot.core.domain.entities.bot_event import BotEvent
-        from finbot.core.domain.entities.bot_event_type import BotEventType
-
         self._queue.enqueue(BotEvent(type=BotEventType.SHUTDOWN, data={}))
 
     # -- internal -----------------------------------------------------------
