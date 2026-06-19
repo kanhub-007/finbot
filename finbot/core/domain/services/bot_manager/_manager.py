@@ -1,175 +1,134 @@
-"""Manages a single bot instance lifecycle with thread-safe state.
+"""BotManager — facade delegating to focused collaborator services (S7).
 
-The BotManager is a domain service: it depends only on domain interfaces
-and the stdlib.  The concrete ``LiveTradingRuntimeUseCase`` is injected
-via a factory callable so BotManager stays unaware of how the runtime is
-constructed (composition root handles that).
+Decomposed from the former ``BotManager`` + ``TradingControlMixin``
+(~1300 lines) into six collaborators, each with a single responsibility:
+
+* :class:`BotLifecycleService`  — start/stop/status, runtime thread
+* :class:`ManualOrderService`   — manual orders, cancel, clear, close
+* :class:`SymbolSessionService` — active symbol, leverage, price, position
+* :class:`RuntimeConfigService` — runtime config, profiles, default size
+* :class:`RiskOrderService`     — SL/TP attach/clear
+* :class:`BotQueryService`      — read-only history queries
+
+BotManager is a thin facade that constructs the collaborators from a
+shared :class:`BotManagerState` + :class:`BotManagerLock` and forwards
+every public method. It preserves the original public API so all
+existing callers (MCP tools, Telegram handler, tests) work unchanged.
 """
 
 from __future__ import annotations
 
-import logging
-import threading
-import time
-from decimal import Decimal
-from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
-from finbot.core.domain.dto.run_counts import RunCounts
-from finbot.core.domain.entities.active_symbol_state import ActiveSymbolState
-from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
-from finbot.core.domain.entities.bot_run import BotRun
-from finbot.core.domain.entities.fill_record import FillRecord
-from finbot.core.domain.entities.order_response_record import (
-    OrderResponseRecord,
-)
-from finbot.core.domain.entities.processed_signal import ProcessedSignal
-from finbot.core.domain.entities.risk_event_record import RiskEventRecord
-from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
-from finbot.core.domain.entities.strategy_execution_config import (
-    StrategyExecutionConfig,
-)
 from finbot.core.domain.entities.wallet_balance import WalletBalance
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
-from finbot.core.domain.services.bot_live_state import BotLiveState
-from finbot.core.domain.services.bot_manager._trading_control import (
-    TradingControlMixin,
+from finbot.core.domain.services.bot_manager.bot_lifecycle_service import (
+    BotLifecycleService,
+)
+from finbot.core.domain.services.bot_manager.bot_manager_lock import (
+    BotManagerLock,
+)
+from finbot.core.domain.services.bot_manager.bot_manager_state import (
+    BotManagerState,
+)
+from finbot.core.domain.services.bot_manager.bot_query_service import (
+    BotQueryService,
+)
+from finbot.core.domain.services.bot_manager.manual_order_service import (
+    ManualOrderService,
+)
+from finbot.core.domain.services.bot_manager.risk_order_service import (
+    RiskOrderService,
+)
+from finbot.core.domain.services.bot_manager.runtime_config_service import (
+    RuntimeConfigService,
+)
+from finbot.core.domain.services.bot_manager.symbol_session_service import (
+    SymbolSessionService,
 )
 
-logger = logging.getLogger(__name__)
+_ATTR_MAP = {
+    "max_position": "max_position_usd",
+    "daily_loss": "max_daily_loss_usd",
+    "max_orders": "max_open_orders",
+    "stale_data": "stale_data_seconds",
+}
 
 
-# ---------------------------------------------------------------------------
-# Protocols for dependency injection (domain-safe — no framework imports)
-# ---------------------------------------------------------------------------
+class BotManager:
+    """Facade for the six bot-management collaborators.
 
-
-class RuntimeFactory(Protocol):
-    """Callable that creates a trading runtime use case."""
-
-    def __call__(
-        self,
-        strategy_path: str,
-        symbol: str,
-        interval: str,
-        mode: str,
-        live_data: bool = True,
-        warmup_bars: int = 100,
-    ) -> Any: ...
-
-
-class LiveStateAware(Protocol):
-    """A runtime that accepts a BotLiveState for status updates."""
-
-    def set_live_state(self, state: BotLiveState) -> None: ...
-
-
-class BotConfigFactory(Protocol):
-    """Callable that creates a BotConfig from settings (wired by startup)."""
-
-    def __call__(self, settings: Any) -> Any: ...
-
-
-class ExchangeCancel(Protocol):
-    """Minimal exchange interface for panic cancellation."""
-
-    def cancel_all(self, symbol: str) -> dict[str, object]: ...
-
-    def get_position(self, symbol: str) -> Any: ...
-
-    def submit_order(self, intent: Any) -> dict[str, object]: ...
-
-
-# ---------------------------------------------------------------------------
-# BotManager
-# ---------------------------------------------------------------------------
-
-
-class BotManager(TradingControlMixin):
-    """Owns the lifecycle of a single bot runtime instance.
-
-    Only one bot can run at a time.  ``start()`` spawns a daemon
-    thread for the runtime; ``stop()`` signals the runtime and joins
-    the thread.  ``get_status()`` is safe to call from any thread.
-
-    Public query methods (``list_bot_runs``, ``get_signals_for_run``,
-    etc.) delegate to the injected repository so MCP tools never
-    access internal attributes directly.
+    Constructed by the composition root (``startup/mcp.py``). All public
+    methods forward to the relevant collaborator.
     """
 
     def __init__(
         self,
         *,
-        runtime_factory: RuntimeFactory,
+        runtime_factory: Any,
         repository: BotStateRepository,
-        exchange: ExchangeCancel | None = None,
+        exchange: Any | None = None,
         settings: Any | None = None,
-        create_bot_config: BotConfigFactory | None = None,
+        create_bot_config: Any | None = None,
         startup_time: float | None = None,
         metadata_provider: Any | None = None,
         config_writer: Any | None = None,
     ) -> None:
-        self._runtime_factory = runtime_factory
-        self._repo = repository
-        self._exchange = exchange
-        self._settings = settings
-        self._create_bot_config = create_bot_config
-        self._startup_time = startup_time or time.time()
-        self._metadata_provider = metadata_provider
-        self._config_writer = config_writer
-        self._state = BotLiveState()
-        self._runtime: Any | None = None
-        self._thread: threading.Thread | None = None
-        self._lock = threading.Lock()
-        # Active symbol state (None = fully idle). See trading-control spec.
-        # Restored from the repository so leverage survives restarts.
-        self._active_symbol: ActiveSymbolState | None = (
-            self._restore_active_symbol()
+        self._lock = BotManagerLock()
+        self._state = BotManagerState()
+        self._state.runtime_config = _seed_runtime_config(settings)
+        self._state.active_symbol = _restore_active_symbol(repository)
+        self._lifecycle = BotLifecycleService(
+            self._state,
+            self._lock,
+            repository,
+            exchange,
+            runtime_factory,
+            settings,
+            create_bot_config,
+            startup_time,
         )
-        # Mutable runtime config shared by strategy + manual gates.
-        # Seeded from settings (.env defaults) when available.
-        self._runtime_config = self._seed_runtime_config(settings)
-        # Default order size for /long /short without explicit size (Slice 2).
-        self._default_size: Decimal | None = None
-        # Named config profiles (Slice 3). name -> snapshot dict.
-        self._config_profiles: dict[str, Any] = {}
+        self._queries = BotQueryService(repository)
+        self._symbol = SymbolSessionService(
+            self._state, self._lock, exchange, metadata_provider, repository
+        )
+        self._config = RuntimeConfigService(self._state, self._lock, config_writer)
+        self._risk_orders = RiskOrderService(self._state, self._lock, exchange)
+        self._manual = ManualOrderService(
+            self._state,
+            self._lock,
+            exchange,
+            self._risk_orders,
+            metadata_provider=metadata_provider,
+            mode=getattr(settings, "mode", "dry_run") if settings else "dry_run",
+            live_trading_ack=(
+                getattr(settings, "live_trading_ack", False) if settings else False
+            ),
+        )
+        self._lifecycle._set_leverage_fn = self._symbol.set_leverage  # noqa: SLF001
 
-    @staticmethod
-    def _seed_runtime_config(settings: Any) -> RuntimeBotConfig:
-        """Build a RuntimeBotConfig from settings (.env defaults)."""
-        cfg = RuntimeBotConfig()
-        if settings is None:
-            return cfg
-        for key in RuntimeBotConfig.AVAILABLE_KEYS:
-            attr_map = {
-                "max_position": "max_position_usd",
-                "daily_loss": "max_daily_loss_usd",
-                "max_orders": "max_open_orders",
-                "stale_data": "stale_data_seconds",
-            }
-            attr = attr_map.get(key)
-            if attr is None:
-                continue
-            val = getattr(settings, attr, None)
-            if val is not None:
-                try:
-                    cfg.set(key, str(val))
-                except (KeyError, ValueError):
-                    pass
-        return cfg
+    @property
+    def live_state(self):
+        """The live status snapshot (for MCP tools)."""
+        return self._lifecycle.live_state
 
-    def _restore_active_symbol(self) -> ActiveSymbolState | None:
-        """Load persisted active symbol on startup (best-effort)."""
-        try:
-            return self._repo.load_active_symbol()
-        except Exception:
-            logger.warning("Could not restore active symbol state")
-            return None
+    @property
+    def has_exchange(self) -> bool:
+        return self._symbol.has_exchange
 
-    # -- public lifecycle ----------------------------------------------------
+    @property
+    def _metadata_provider(self):
+        """Forward to symbol-session + manual-order collaborators (test compat)."""
+        return self._symbol._metadata_provider  # noqa: SLF001
 
+    @_metadata_provider.setter
+    def _metadata_provider(self, value):
+        self._symbol._metadata_provider = value  # noqa: SLF001
+        self._manual._metadata_provider = value  # noqa: SLF001
+
+    # -- lifecycle ----------------------------------------------------------
     def start(
         self,
         strategy_path: str,
@@ -178,142 +137,166 @@ class BotManager(TradingControlMixin):
         mode: str,
         warmup_bars: int = 100,
         live_trading_ack: bool = False,
-        execution_config: StrategyExecutionConfig | None = None,
+        execution_config: Any | None = None,
     ) -> dict[str, str]:
-        """Start a bot in a background thread.
-
-        When ``execution_config`` is supplied (parsed from the strategy's
-        optional ``execution`` block), leverage is synced to the exchange
-        before the runtime starts.
-
-        Returns a dict with ``status`` ("running" or "rejected") and
-        ``bot_run_id`` (set on success) or ``message`` (on rejection).
-        """
-        # Sync leverage from strategy execution block (Slice 2). Done OUTSIDE
-        # the lock because set_leverage acquires it and Lock is non-reentrant.
-        if execution_config is not None:
-            lev_result = self.set_leverage(
-                execution_config.leverage,
-                execution_config.margin_mode,
-            )
-            if lev_result.get("status") == "rejected":
-                return lev_result
-
-        # Reject if there's an open position on the symbol (design decision #2):
-        # a strategy would adopt the manual position and may immediately exit
-        # it. User must /close first.
-        if self._exchange is not None:
-            try:
-                pos = self._exchange.get_position(symbol)
-                if pos is not None and pos.direction.value != "flat":
-                    return {
-                        "status": "rejected",
-                        "message": (
-                            f"Open position on {symbol}. "
-                            "Close it first (/close)."
-                        ),
-                    }
-            except Exception:
-                pass
-
-        with self._lock:
-            error = self._guard_no_conflict()
-            if error:
-                return error
-
-            error = self._validate_start_inputs(strategy_path, mode)
-            if error:
-                return error
-
-            runtime, error = self._construct_runtime(
-                strategy_path, symbol, interval, mode, warmup_bars
-            )
-            if error:
-                return error
-
-            bot_run_id, error = self._start_session(
-                runtime, strategy_path, symbol, interval, mode, live_trading_ack
-            )
-            if error:
-                return error
-
-            self._activate_runtime(
-                runtime, strategy_path, symbol, interval, mode, bot_run_id
-            )
-            return {"status": "running", "bot_run_id": bot_run_id}
+        return self._lifecycle.start(
+            strategy_path,
+            symbol,
+            interval,
+            mode,
+            warmup_bars,
+            live_trading_ack,
+            execution_config,
+        )
 
     def stop(self) -> dict[str, str]:
-        """Stop the running bot and join its thread.
-
-        Safe to call when no bot is running — returns
-        ``{"status": "no_bot_running"}``.
-        """
-        runtime: Any | None = None
-        with self._lock:
-            if self._runtime is None:
-                return {"status": "no_bot_running", "bot_run_id": ""}
-            runtime = self._runtime
-            self._runtime = None
-            self._state.update(running=False)
-
-        runtime.stop()
-        if self._thread is not None:
-            self._thread.join(timeout=5.0)
-            self._thread = None
-
-        return {"status": "stopped", "bot_run_id": self._state.bot_run_id}
+        return self._lifecycle.stop()
 
     def get_status(self) -> dict[str, object]:
-        """Return a live status snapshot.
-
-        When no bot is running, includes ``last_run`` with the most
-        recently completed ``BotRun`` summary (or ``None`` if there
-        is no history).
-        """
-        with self._lock:
-            is_running = self._runtime is not None
-
-        status = self._state.snapshot()
-        status["is_running"] = is_running
-        status["uptime_seconds"] = time.time() - self._startup_time
-
-        status["total_signals"] = max(
-            int(status.get("total_signals", 0)), self._repo.count_signals()
-        )
-        status["total_orders"] = max(
-            int(status.get("total_orders", 0)), self._repo.count_orders()
-        )
-        status["total_fills"] = max(
-            int(status.get("total_fills", 0)), self._repo.count_fills()
-        )
-
-        if not is_running:
-            last_run = self._repo.get_latest_bot_run()
-            if last_run:
-                status["last_run"] = _serialize_bot_run(last_run)
-            else:
-                status["last_run"] = None
-
-        return status
+        return self._lifecycle.get_status()
 
     def is_running(self) -> bool:
-        """Return True if a bot is currently running."""
-        with self._lock:
-            return self._runtime is not None
-    # Trading-control methods are mixed in from TradingControlMixin.
+        return self._lifecycle.is_running()
+
+    # -- symbol session -----------------------------------------------------
+    def get_active_symbol(self):
+        return self._symbol.get_active_symbol()
+
+    def activate_symbol(self, symbol: str):
+        return self._symbol.activate_symbol(symbol)
+
+    def get_active_price(self):
+        return self._symbol.get_active_price()
+
+    def get_active_position(self):
+        return self._symbol.get_active_position()
+
+    def list_active_orders(self):
+        return self._symbol.list_active_orders()
+
+    def get_balance(self) -> WalletBalance | None:
+        return self._symbol.get_balance()
+
+    def set_leverage(self, leverage: int, margin_mode: str = "isolated"):
+        return self._symbol.set_leverage(leverage, margin_mode)
+
+    # -- config -------------------------------------------------------------
+    def get_bot_config(self):
+        return self._config.get_bot_config()
+
+    def update_bot_config(self, key: str, value: str):
+        return self._config.update_bot_config(key, value)
+
+    def save_config_to_env(self):
+        return self._config.save_config_to_env()
+
+    def set_default_size(self, size):
+        return self._config.set_default_size(size)
+
+    def get_default_size(self):
+        return self._config.get_default_size()
+
+    def clear_default_size(self) -> None:
+        return self._config.clear_default_size()
+
+    def save_config_profile(self, name: str):
+        return self._config.save_config_profile(name)
+
+    def load_config_profile(self, name: str):
+        return self._config.load_config_profile(name)
+
+    def list_config_profiles(self):
+        return self._config.list_config_profiles()
+
+    # -- manual orders ------------------------------------------------------
+    def submit_manual_order(self, side, size=None):
+        return self._manual.submit_manual_order(side, size)
+
+    def submit_manual_order_with_brackets(
+        self, side, size, sl_price=None, tp_price=None
+    ):
+        return self._manual.submit_manual_order_with_brackets(
+            side, size, sl_price, tp_price
+        )
+
+    def cancel_order(self, order_id: str):
+        return self._manual.cancel_order(order_id)
+
+    def cancel_all_orders(self, symbol: str):
+        return self._manual.cancel_all_orders(symbol)
+
+    def close_position(self, symbol: str):
+        return self._manual.close_position(symbol)
+
+    def close_active_position(self):
+        return self._manual.close_active_position()
+
+    def clear_all(self):
+        return self._manual.clear_all()
+
+    # -- risk orders --------------------------------------------------------
+    def attach_stop_loss(self, price):
+        return self._risk_orders.attach_stop_loss(price)
+
+    def attach_take_profit(self, price):
+        return self._risk_orders.attach_take_profit(price)
+
+    def clear_risk_order(self, kind: str):
+        return self._risk_orders.clear_risk_order(kind)
+
+    # -- queries ------------------------------------------------------------
+    def get_bot_run(self, run_id: str):
+        return self._queries.get_bot_run(run_id)
+
+    def list_bot_runs(self, limit: int = 20, mode_filter: str | None = None):
+        return self._queries.list_bot_runs(limit, mode_filter)
+
+    def get_signals_for_run(self, run_id: str):
+        return self._queries.get_signals_for_run(run_id)
+
+    def get_orders_for_run(self, run_id: str):
+        return self._queries.get_orders_for_run(run_id)
+
+    def get_fills_for_run(self, run_id: str):
+        return self._queries.get_fills_for_run(run_id)
+
+    def get_run_counts(self, run_ids: list[str]):
+        return self._queries.get_run_counts(run_ids)
+
+    def get_risk_events_for_run(self, run_id: str):
+        return self._queries.get_risk_events_for_run(run_id)
+
+    def get_audit_log(self, limit: int = 50, event_type: str | None = None):
+        return self._queries.get_audit_log(limit, event_type)
 
 
-# -- module-level helpers -----------------------------------------------------
+def _seed_runtime_config(settings: Any):
+    """Build a RuntimeBotConfig from settings (.env defaults)."""
+    from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
+
+    cfg = RuntimeBotConfig()
+    if settings is None:
+        return cfg
+    for key in RuntimeBotConfig.AVAILABLE_KEYS:
+        attr = _ATTR_MAP.get(key)
+        if attr is None:
+            continue
+        val = getattr(settings, attr, None)
+        if val is not None:
+            try:
+                cfg.set(key, str(val))
+            except (KeyError, ValueError):
+                pass
+    return cfg
 
 
-def _serialize_bot_run(run: BotRun) -> dict[str, object]:
-    """Convert a BotRun entity to a JSON-safe dict."""
-    return {
-        "run_id": run.run_id,
-        "strategy_name": run.strategy_name,
-        "symbol": run.symbol,
-        "interval": run.interval,
-        "mode": run.mode,
-        "started_at": run.started_at.isoformat() if run.started_at else None,
-        "ended_at": run.ended_at.isoformat() if run.ended_at else None,
-    }
+def _restore_active_symbol(repo: BotStateRepository):
+    """Load persisted active symbol on startup (best-effort)."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    try:
+        return repo.load_active_symbol()
+    except Exception:
+        logger.warning("Could not restore active symbol state")
+        return None

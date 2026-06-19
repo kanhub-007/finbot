@@ -1,8 +1,8 @@
-"""Architecture tests: type hints resolve on TradingControlMixin (S7).
+"""Architecture tests: type hints resolve on BotQueryService (S7).
 
 Closes H2 and H8 from the code review remediation spec.
 
-H2: ``TradingControlMixin`` references 8 unimported types in annotations
+H2: ``BotQueryService`` references 8 unimported types in annotations
 (``BotRun``, ``ProcessedSignal``, ``OrderResponseRecord``, ``FillRecord``,
 ``RunCounts``, ``RiskEventRecord``, ``AuditLogEntry``). ``from __future__
 import annotations`` lets the module import cleanly, but
@@ -26,8 +26,17 @@ import typing
 
 import pytest
 
-from finbot.core.domain.services.bot_manager._trading_control import (
-    TradingControlMixin,
+from finbot.core.domain.services.bot_manager.bot_query_service import (
+    BotQueryService,
+)
+from finbot.core.domain.services.bot_manager.manual_order_service import (
+    ManualOrderService,
+)
+from finbot.core.domain.services.bot_manager.risk_order_service import (
+    RiskOrderService,
+)
+from finbot.core.domain.services.bot_manager.runtime_config_service import (
+    RuntimeConfigService,
 )
 
 # The 8 query methods whose return annotations reference unimported types
@@ -47,40 +56,36 @@ _QUERY_METHODS = [
 @pytest.mark.parametrize("method_name", _QUERY_METHODS)
 def test_query_method_type_hints_resolve(method_name: str) -> None:
     """typing.get_type_hints must not raise NameError for any query method."""
-    method = getattr(TradingControlMixin, method_name)
+    method = getattr(BotQueryService, method_name)
     try:
         typing.get_type_hints(method)
     except NameError as exc:
         pytest.fail(f"{method_name}: unresolved type hint — {exc}")
 
 
-# The public methods whose parameters lacked annotations (H8). Each must
-# annotate ``side``, ``price``, and/or ``size`` with a concrete type
-# (not the implicit ``Any``).
+# The public methods whose parameters lacked annotations (H8). After S7
+# decomposition, methods live on different collaborators.
 _ANNOTATED_PARAM_METHODS = {
-    "set_default_size": {"size"},
-    "submit_manual_order": {"side", "size"},
-    "submit_manual_order_with_brackets": {"side", "size", "sl_price", "tp_price"},
-    "attach_stop_loss": {"price"},
-    "attach_take_profit": {"price"},
-    "_attach_risk_order": {"kind", "price"},
-    "_resolve_risk_price": {"price"},
+    (RuntimeConfigService, "set_default_size"): {"size"},
+    (ManualOrderService, "submit_manual_order"): {"side", "size"},
+    (
+        ManualOrderService,
+        "submit_manual_order_with_brackets",
+    ): {"side", "size", "sl_price", "tp_price"},
+    (RiskOrderService, "attach_stop_loss"): {"price"},
+    (RiskOrderService, "attach_take_profit"): {"price"},
 }
 
 
 @pytest.mark.parametrize(
-    "method_name,required_params", list(_ANNOTATED_PARAM_METHODS.items())
+    "owner_cls,method_name,required_params",
+    [(cls, name, params) for (cls, name), params in _ANNOTATED_PARAM_METHODS.items()],
 )
 def test_public_method_params_are_annotated(
-    method_name: str, required_params: set[str]
+    owner_cls, method_name: str, required_params: set[str]
 ) -> None:
-    """Each previously-unannotated parameter must carry a concrete annotation.
-
-    A bare ``Any`` (or no annotation) leaves callers free to pass the wrong
-    type. The fix annotates ``side: OrderSide``, ``price: Decimal | str``
-    (because ``%`` strings are accepted), ``size: Decimal``.
-    """
-    method = getattr(TradingControlMixin, method_name)
+    """Each previously-unannotated parameter must carry a concrete annotation."""
+    method = getattr(owner_cls, method_name)
     sig = inspect.signature(method)
     for param_name in required_params:
         assert (
@@ -108,6 +113,6 @@ def test_query_methods_return_typed_lists() -> None:
     included) so a stray ``Any`` is caught.
     """
     for method_name in _QUERY_METHODS:
-        method = getattr(TradingControlMixin, method_name)
+        method = getattr(BotQueryService, method_name)
         hints = typing.get_type_hints(method)
         assert "return" in hints, f"{method_name}: missing return annotation"
