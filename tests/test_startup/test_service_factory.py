@@ -68,7 +68,10 @@ class TestBuildExchangeGateway:
         )
         assert isinstance(gateway, HyperliquidExchangeGateway)
         # Credentials must flow through from settings, not be dropped.
-        assert gateway._private_key == "0x" + "ab" * 32
+        # The key is stored as a redacting PrivateKey value object (S4/M5);
+        # ``.raw`` exposes the value at the signing boundary.
+        assert gateway._private_key.raw == "0x" + "ab" * 32
+        assert "0x" + "ab" * 32 not in repr(gateway)
         assert gateway._account_address == "0xabc"
         assert gateway._base_url == "https://api.hyperliquid.xyz"
 
