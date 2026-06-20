@@ -83,7 +83,9 @@ class StrategyLogFileReader:
         if not os.path.isdir(self._log_dir):
             return []
         return sorted(
-            f.stem for f in os.scandir(self._log_dir) if f.name.endswith(".jsonl")
+            os.path.splitext(f.name)[0]
+            for f in os.scandir(self._log_dir)
+            if f.name.endswith(".jsonl")
         )
 
     def read_tail(

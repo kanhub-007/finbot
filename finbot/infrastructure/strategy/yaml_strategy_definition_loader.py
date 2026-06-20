@@ -29,6 +29,7 @@ class YamlStrategyDefinitionLoader(StrategyDefinitionLoader):
     def __init__(self, parser: StrategyDefinitionParser | None = None):
         self._parser = parser or StrategyDefinitionParser()
         self._last_result: StrategyValidationResult | None = None
+        self._last_definition: StrategyDefinition | None = None
 
     def load_from_text(self, content: str) -> StrategyDefinition:
         result = self._parser.parse(content)
@@ -40,6 +41,7 @@ class YamlStrategyDefinitionLoader(StrategyDefinitionLoader):
             raise StrategyLoadError(
                 "Strategy validation passed but no definition returned"
             )
+        self._last_definition = result.definition
         return result.definition
 
     def load_from_file(self, path: str) -> StrategyDefinition:
@@ -79,3 +81,17 @@ class YamlStrategyDefinitionLoader(StrategyDefinitionLoader):
         if self._last_result is None:
             return []
         return list(self._last_result.required_indicators)
+
+    def last_timeframes(self):
+        """Return the timeframes declared by the last-loaded strategy.
+
+        Returns ``None`` for single-TF strategies (no ``timeframes`` block)
+        or when no strategy has been loaded yet.
+        """
+        from finbot.core.domain.services.strategy_timeframe_parser import (
+            parse_timeframes,
+        )
+
+        if self._last_definition is None:
+            return None
+        return parse_timeframes(self._last_definition)

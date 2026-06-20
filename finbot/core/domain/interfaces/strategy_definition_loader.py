@@ -1,5 +1,7 @@
 """Strategy definition loader interface."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -25,3 +27,11 @@ class StrategyDefinitionLoader(ABC):
         raw text (e.g. compatibility checks) do not pay for parsing.
         """
         ...
+
+    def last_timeframes(self):  # type: ignore[empty-body]
+        """Return the timeframes declared by the last-loaded strategy.
+
+        Returns ``None`` for single-TF strategies (no ``timeframes`` block).
+        Override in implementations that parse strategy YAML.
+        """
+        return None
