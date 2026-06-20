@@ -8,11 +8,11 @@ from finbot.core.domain.services.enrichment_validator import (
     EnrichmentValidator,
 )
 from tests.fakes import (
+    FakeBotStateRepository,
     FakeStrategyEvaluator,
     InMemoryBarFrameConverter,
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
-    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_dry_run_submission_strategy,

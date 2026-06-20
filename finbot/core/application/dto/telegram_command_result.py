@@ -1,6 +1,6 @@
 """TelegramCommandResult — DTO returned by HandleTelegramCommand for presentation."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

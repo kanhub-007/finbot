@@ -4,12 +4,11 @@ These tests verify the stateless transition functions that produce new
 immutable Trade instances from fills. No I/O, no repo, no mocks.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from finbot.core.domain.entities.fill_record import FillRecord
 from finbot.core.domain.entities.position_direction import PositionDirection
-from finbot.core.domain.entities.trade import Trade
 from finbot.core.domain.services.trade_lifecycle import (
     apply_entry_fill,
     apply_exit_fill,
@@ -18,8 +17,8 @@ from finbot.core.domain.services.trade_lifecycle import (
     sign_for,
 )
 
-
 # -- helpers ---------------------------------------------------------------
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -105,7 +104,7 @@ class TestApplyEntryFill:
     def test_single_entry_sets_entry_price(self) -> None:
         """First entry: entry_price = fill price."""
         fill = _buy_fill(size="0.1", price="50000")
-        trade = open_from_fill(fill, position_id="p1")
+        open_from_fill(fill, position_id="p1")
         # Already correct from open, but apply_entry_fill handles subsequent entries.
 
     def test_weighted_average_entry_price(self) -> None:
@@ -131,9 +130,11 @@ class TestApplyEntryFill:
         trade = apply_entry_fill(trade, f3)
 
         # (0.1*100 + 0.2*200 + 0.3*300) / 0.6 = (10 + 40 + 90) / 0.6 = 233.33...
-        expected = (Decimal("0.1") * Decimal("100")
-                    + Decimal("0.2") * Decimal("200")
-                    + Decimal("0.3") * Decimal("300")) / Decimal("0.6")
+        expected = (
+            Decimal("0.1") * Decimal("100")
+            + Decimal("0.2") * Decimal("200")
+            + Decimal("0.3") * Decimal("300")
+        ) / Decimal("0.6")
         assert trade.size == Decimal("0.6")
         assert trade.entry_price == expected
 

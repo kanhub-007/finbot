@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from finbot.core.application.use_cases.account_event_handler import AccountEventHandler
 from finbot.core.application.use_cases.live_trading_runtime import (
     LiveTradingRuntimeUseCase,
 )
@@ -34,12 +35,16 @@ from finbot.core.domain.interfaces.order_submission_strategy import (
 from finbot.core.domain.interfaces.runtime_event_emitter import (
     RuntimeEventEmitter,
 )
+from finbot.core.domain.interfaces.strategy_definition_loader import (
+    StrategyDefinitionLoader,
+)
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
 )
 from finbot.core.domain.interfaces.strategy_validator import (
     StrategyValidator,
 )
+from finbot.core.domain.services.trade_ledger import TradeLedger
 
 
 class LiveTradingRuntimeBuilder:
@@ -87,6 +92,9 @@ class LiveTradingRuntimeBuilder:
         self._cloid_generator: CloidGenerator | None = None
         self._bot_loop: BotLoop | None = None
         self._strategy_validator: StrategyValidator | None = None
+        self._strategy_loader: StrategyDefinitionLoader | None = None
+        self._account_event_handler: AccountEventHandler | None = None
+        self._trade_ledger: TradeLedger | None = None
         self._live_state: Any | None = None
 
     # -- required setters ---------------------------------------------------
@@ -95,15 +103,11 @@ class LiveTradingRuntimeBuilder:
         self._exchange = gateway
         return self
 
-    def with_evaluator(
-        self, evaluator: StrategyEvaluator
-    ) -> LiveTradingRuntimeBuilder:
+    def with_evaluator(self, evaluator: StrategyEvaluator) -> LiveTradingRuntimeBuilder:
         self._evaluator = evaluator
         return self
 
-    def with_repository(
-        self, repo: BotStateRepository
-    ) -> LiveTradingRuntimeBuilder:
+    def with_repository(self, repo: BotStateRepository) -> LiveTradingRuntimeBuilder:
         self._repo = repo
         return self
 
@@ -185,9 +189,7 @@ class LiveTradingRuntimeBuilder:
         self._cloid_generator = gen
         return self
 
-    def with_bot_loop(
-        self, loop: BotLoop | None
-    ) -> LiveTradingRuntimeBuilder:
+    def with_bot_loop(self, loop: BotLoop | None) -> LiveTradingRuntimeBuilder:
         self._bot_loop = loop
         return self
 
@@ -197,9 +199,25 @@ class LiveTradingRuntimeBuilder:
         self._strategy_validator = validator
         return self
 
-    def with_live_state(
-        self, state: Any | None
+    def with_strategy_loader(
+        self, loader: StrategyDefinitionLoader | None
     ) -> LiveTradingRuntimeBuilder:
+        self._strategy_loader = loader
+        return self
+
+    def with_account_event_handler(
+        self, handler: AccountEventHandler | None
+    ) -> LiveTradingRuntimeBuilder:
+        self._account_event_handler = handler
+        return self
+
+    def with_trade_ledger(
+        self, ledger: TradeLedger | None
+    ) -> LiveTradingRuntimeBuilder:
+        self._trade_ledger = ledger
+        return self
+
+    def with_live_state(self, state: Any | None) -> LiveTradingRuntimeBuilder:
         self._live_state = state
         return self
 
@@ -245,5 +263,8 @@ class LiveTradingRuntimeBuilder:
             cloid_generator=self._cloid_generator,
             bot_loop=self._bot_loop,
             strategy_validator=self._strategy_validator,
+            strategy_loader=self._strategy_loader,
+            account_event_handler=self._account_event_handler,
+            trade_ledger=self._trade_ledger,
             live_state=self._live_state,
         )

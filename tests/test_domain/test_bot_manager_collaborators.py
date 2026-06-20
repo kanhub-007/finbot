@@ -24,7 +24,7 @@ from finbot.core.domain.services.bot_manager.runtime_config_service import (
 from finbot.core.domain.services.bot_manager.symbol_session_service import (
     SymbolSessionService,
 )
-from tests.fakes import FakeExchangeGateway, FakeBotStateRepository
+from tests.fakes import FakeBotStateRepository, FakeExchangeGateway
 
 
 class TestBotManagerLock:

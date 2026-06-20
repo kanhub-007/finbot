@@ -5,6 +5,8 @@ import sqlite3
 
 from finbot.core.domain.interfaces.database_migrator import DatabaseMigrator
 
+_MEMORY_URI_KEEPERS: dict[str, sqlite3.Connection] = {}
+
 # Ordered list of (version, sql) pairs.  Add new migrations at the end.
 MIGRATIONS: list[tuple[int, str]] = [
     (
@@ -200,7 +202,7 @@ class SqliteMigrator(DatabaseMigrator):
         Returns the highest applied version.
         """
         _ensure_directory(self._db_path)
-        conn = sqlite3.connect(self._db_path)
+        conn = sqlite3.connect(self._db_path, uri=self._db_path.startswith("file:"))
         try:
             current = self._version_from_conn(conn)
             # Manual transaction control so the version INSERT and the
@@ -213,7 +215,10 @@ class SqliteMigrator(DatabaseMigrator):
                     current = version
             return max(current, self.LATEST_VERSION)
         finally:
-            conn.close()
+            if _is_memory_uri(self._db_path):
+                _MEMORY_URI_KEEPERS[self._db_path] = conn
+            else:
+                conn.close()
 
     @staticmethod
     def _ensure_schema_version_table(conn: sqlite3.Connection) -> None:
@@ -249,7 +254,10 @@ class SqliteMigrator(DatabaseMigrator):
         if not os.path.exists(self._db_path):
             return 0
         try:
-            conn = sqlite3.connect(self._db_path)
+            conn = sqlite3.connect(
+                self._db_path,
+                uri=self._db_path.startswith("file:"),
+            )
             try:
                 return self._version_from_conn(conn)
             finally:
@@ -268,8 +276,15 @@ class SqliteMigrator(DatabaseMigrator):
             return 0
 
 
+def _is_memory_uri(db_path: str) -> bool:
+    """Return whether *db_path* is a shared in-memory SQLite URI."""
+    return db_path.startswith("file:") and "mode=memory" in db_path
+
+
 def _ensure_directory(db_path: str) -> None:
     """Create parent directories so sqlite3.connect can create the file."""
+    if db_path.startswith("file:"):
+        return
     parent = os.path.dirname(db_path)
     if parent:
         os.makedirs(parent, exist_ok=True)

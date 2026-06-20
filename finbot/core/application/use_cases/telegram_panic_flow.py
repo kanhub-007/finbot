@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from finbot.core.application.dto.callback_query_request import CallbackQueryRequest
+from finbot.core.application.dto.telegram_command_request import (
+    TelegramCommandRequest,
+)
 from finbot.core.application.dto.telegram_command_result import (
     TelegramCommandResult,
 )
@@ -9,6 +13,7 @@ from finbot.core.application.use_cases.telegram_helpers import (
     _escape_mdv2,
     _get_symbols,
 )
+from finbot.core.domain.entities.callback_data import CallbackData
 
 
 async def _handle_panic(uc, request: TelegramCommandRequest) -> TelegramCommandResult:

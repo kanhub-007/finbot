@@ -20,11 +20,11 @@ from finbot.core.domain.services.risk_gates.max_position_gate import (
 )
 from finbot.core.domain.services.risk_gates.mode_gate import ModeGate
 from tests.fakes import (
+    FakeBotStateRepository,
     FakeStrategyEvaluator,
     InMemoryBarFrameConverter,
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
-    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_dry_run_submission_strategy,
@@ -109,7 +109,10 @@ def _make_runtime(**overrides):
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=TradingMode.DRY_RUN,
-        submission_strategy=make_dry_run_submission_strategy(repo, exchange=overrides.get("exchange_gateway", TrackingDryRunExchange("BTC"))),
+        submission_strategy=make_dry_run_submission_strategy(
+            repo,
+            exchange=overrides.get("exchange_gateway", TrackingDryRunExchange("BTC")),
+        ),
         event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(100),
         required_columns={"atr"},

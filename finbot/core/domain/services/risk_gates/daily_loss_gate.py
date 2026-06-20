@@ -32,7 +32,7 @@ class DailyLossGate(RiskGate):
 
         if self._max <= 0:
             return RiskDecision(accepted=True, gate_name="daily_loss")
-        daily = context.get("daily_loss_usd", Decimal("0"))
+        daily = _to_decimal(context.get("daily_loss_usd", "0"))
         if daily >= self._max:
             return RiskDecision(
                 accepted=False,
@@ -40,3 +40,13 @@ class DailyLossGate(RiskGate):
                 gate_name="daily_loss",
             )
         return RiskDecision(accepted=True, gate_name="daily_loss")
+
+
+def _to_decimal(value: object) -> Decimal:
+    """Coerce *value* to Decimal, defaulting to 0 on failure."""
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return Decimal("0")

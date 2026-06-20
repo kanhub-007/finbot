@@ -32,38 +32,38 @@ class ExchangeGateway(ABC):
     def cancel_by_cloid(self, symbol: str, cloid: str) -> dict[str, Any]:
         """Cancel a single order by its client-assigned ID."""
 
+    @abstractmethod
     def cancel_by_oid(self, symbol: str, oid: str) -> dict[str, Any]:
         """Cancel a single order by its exchange-assigned ID.
 
-        Base method raises so subclasses opt in explicitly. Used by /cancel.
+        Used by /cancel.
         """
-        raise NotImplementedError
+        ...
 
     # -- leverage / market data (trading-control spec) ---------------------
 
+    @abstractmethod
     def set_leverage(
         self, symbol: str, leverage: int, margin_mode: str = "isolated"
     ) -> dict[str, Any]:
-        """Set leverage and margin mode for a symbol.
+        """Set leverage and margin mode for a symbol."""
+        ...
 
-        Implementations should call the exchange API. The base method raises
-        so subclasses are forced to opt in explicitly.
-        """
-        raise NotImplementedError
-
+    @abstractmethod
     def get_leverage(self, symbol: str) -> tuple[int, str] | None:
         """Read current leverage and margin mode for a symbol.
 
         Returns ``(leverage, margin_mode)`` or ``None`` if the exchange does
-        not expose it (caller falls back to 1x isolated). Base method raises
-        so subclasses opt in explicitly.
+        not expose it (caller falls back to 1x isolated).
         """
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def get_price(self, symbol: str) -> Decimal:
         """Return the current mark/mid price for a symbol."""
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def get_balance(self) -> WalletBalance:
         """Return wallet value, margin used, and available margin."""
-        raise NotImplementedError
+        ...

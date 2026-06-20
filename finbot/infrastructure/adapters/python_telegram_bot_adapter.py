@@ -11,11 +11,13 @@ from finbot.core.domain.entities.send_result import SendResult
 from finbot.core.domain.interfaces.telegram_bot_port import TelegramBotPort
 
 # PTB error types considered transient (may succeed on retry)
-_TRANSIENT_ERROR_TYPES: frozenset[str] = frozenset({
-    "TimedOut",
-    "NetworkError",
-    "RetryAfter",
-})
+_TRANSIENT_ERROR_TYPES: frozenset[str] = frozenset(
+    {
+        "TimedOut",
+        "NetworkError",
+        "RetryAfter",
+    }
+)
 
 
 class PythonTelegramBotAdapter(TelegramBotPort):

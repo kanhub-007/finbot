@@ -11,12 +11,11 @@ a pre-built instance.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from typing import Any
 
 from finbot.config.settings import Settings
-from finbot.core.domain.entities.strategy_load_error import StrategyLoadError
+from finbot.core.domain.services.content_hash import hash_strategy_file
 from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
     YamlStrategyDefinitionLoader,
 )
@@ -113,8 +112,11 @@ def create_live_trading_runtime_use_case(
 
     loader = YamlStrategyDefinitionLoader()
     definition = loader.load_from_file(strategy_path)
-    strategy_hash = _hash_strategy_file(strategy_path)
+    strategy_hash = hash_strategy_file(strategy_path)
 
+    from finbot.core.application.use_cases.account_event_handler import (
+        AccountEventHandler,
+    )
     from finbot.core.domain.services.trade_ledger import TradeLedger
     from finbot.infrastructure.adapters import (
         shared_runtime_strategy_evaluator_factory as _eval_factory_mod,
@@ -130,6 +132,11 @@ def create_live_trading_runtime_use_case(
 
     required_columns = set(loader.last_required_columns())
     required_indicators = loader.last_required_indicators()
+    # When the strategy declares no indicators, fall back to computing
+    # all required columns as indicators.  This is resolved here so the
+    # runtime does not need a hidden ``or`` fallback.
+    if not required_indicators:
+        required_indicators = list(required_columns)
 
     if warmup_bars is None and live_data:
         warmup_bars = _load_warmup_bars(symbol, interval, min_bars=100)
@@ -190,6 +197,11 @@ def create_live_trading_runtime_use_case(
         .with_order_planner(order_planner)
         .with_bot_loop(bot_loop)
         .with_strategy_validator(create_validate_strategy_use_case())
+        .with_strategy_loader(loader)
+        .with_trade_ledger(trade_ledger)
+        .with_account_event_handler(
+            AccountEventHandler(repo, trade_ledger, notification_sender)
+        )
     )
     if trading_mode != TradingMode.DRY_RUN:
         from finbot.core.domain.services.cloid_generator import CloidGenerator
@@ -219,6 +231,7 @@ def _build_submission(trading_mode, gateway, repo, trade_ledger, symbol):
     from finbot.infrastructure.adapters.hyperliquid_metadata_provider import (
         HyperliquidMetadataProvider,
     )
+    from finbot.infrastructure.adapters.live_order_executor import LiveOrderExecutor
     from finbot.infrastructure.adapters.live_submission_strategy import (
         LiveSubmissionStrategy,
     )
@@ -226,20 +239,17 @@ def _build_submission(trading_mode, gateway, repo, trade_ledger, symbol):
     metadata_provider = HyperliquidMetadataProvider()
     metadata = metadata_provider.get_metadata(symbol)
     normalizer = OrderNormalizer(metadata=metadata) if metadata is not None else None
+    executor = LiveOrderExecutor(gateway, normalizer, repo)
     return (
         metadata_provider,
         normalizer,
-        LiveSubmissionStrategy(gateway, order_normalizer=normalizer, repo=repo),
+        LiveSubmissionStrategy(
+            gateway,
+            order_normalizer=normalizer,
+            repo=repo,
+            executor=executor,
+        ),
     )
-
-
-def _hash_strategy_file(path: str) -> str:
-    """Return a hex digest of the strategy file contents."""
-    try:
-        with open(path, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()[:16]
-    except OSError as e:
-        raise StrategyLoadError(f"Cannot read strategy file for hashing: {e}") from e
 
 
 def _load_warmup_bars(

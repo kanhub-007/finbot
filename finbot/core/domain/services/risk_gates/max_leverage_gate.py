@@ -10,11 +10,11 @@ from finbot.core.domain.interfaces.risk_gate import RiskGate
 class MaxLeverageGate(RiskGate):
     """Reject entries whose effective leverage exceeds *max_leverage*.
 
-    The effective leverage is read from ``context["leverage"]``.  When no
-    leverage is supplied it defaults to ``1`` (an unleveraged / cash-sized
-    position), which is safe for the spot-sized strategies Finbot currently
-    runs.  As with the other numeric gates, ``max_leverage <= 0`` disables
-    the check entirely.
+    The effective leverage is read from ``context["leverage"]``.  When the
+    key is absent it defaults to ``1`` for backward-compatible dry-run style
+    planning. When the key is present with ``None`` the gate rejects because
+    live risk data is unavailable. As with the other numeric gates,
+    ``max_leverage <= 0`` disables the check entirely.
     """
 
     def __init__(self, max_leverage: int = 0) -> None:
@@ -24,6 +24,12 @@ class MaxLeverageGate(RiskGate):
         if self._max <= 0:
             return RiskDecision(accepted=True, gate_name="max_leverage")
         leverage = context.get("leverage", 1)
+        if leverage is None:
+            return RiskDecision(
+                accepted=False,
+                reason="Leverage unavailable",
+                gate_name="max_leverage",
+            )
         if leverage > self._max:
             return RiskDecision(
                 accepted=False,

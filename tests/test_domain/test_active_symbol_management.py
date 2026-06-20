@@ -12,7 +12,6 @@ from finbot.infrastructure.repositories.in_memory_bot_state_repository import (
 )
 from tests.fakes import FakeExchangeGateway
 
-
 _NO_EXCHANGE = object()
 
 
@@ -391,7 +390,10 @@ class TestSubmitManualOrder:
         manager.activate_symbol("BTC")
         manager.start(
             strategy_path="tests/fixtures/strategies/amt_dip_buyer_final.yaml",
-            symbol="BTC", interval="1h", mode="dry_run", warmup_bars=0,
+            symbol="BTC",
+            interval="1h",
+            mode="dry_run",
+            warmup_bars=0,
         )
 
         result = manager.submit_manual_order(OrderSide.BUY, Decimal("0.01"))
@@ -445,7 +447,10 @@ class TestSubmitManualOrder:
         result = manager.submit_manual_order(OrderSide.BUY, Decimal("-0.01"))
 
         assert result["status"] == "rejected"
-        assert "positive" in result["message"].lower() or "size" in result["message"].lower()
+        assert (
+            "positive" in result["message"].lower()
+            or "size" in result["message"].lower()
+        )
 
 
 class TestCloseActivePosition:
@@ -479,7 +484,10 @@ class TestCloseActivePosition:
         result = manager.close_active_position()
 
         assert result["status"] == "rejected"
-        assert "no" in result["message"].lower() and "position" in result["message"].lower()
+        assert (
+            "no" in result["message"].lower()
+            and "position" in result["message"].lower()
+        )
 
     def test_close_requires_active_symbol(self):
         """No active symbol → rejected."""
@@ -529,7 +537,10 @@ class TestClearAll:
         manager.activate_symbol("BTC")
         manager.start(
             strategy_path="tests/fixtures/strategies/amt_dip_buyer_final.yaml",
-            symbol="BTC", interval="1h", mode="dry_run", warmup_bars=0,
+            symbol="BTC",
+            interval="1h",
+            mode="dry_run",
+            warmup_bars=0,
         )
 
         result = manager.clear_all()
@@ -650,7 +661,10 @@ class TestStopLossAndTakeProfit:
         manager.activate_symbol("BTC")
         manager.start(
             strategy_path="tests/fixtures/strategies/amt_dip_buyer_final.yaml",
-            symbol="BTC", interval="1h", mode="dry_run", warmup_bars=0,
+            symbol="BTC",
+            interval="1h",
+            mode="dry_run",
+            warmup_bars=0,
         )
 
         result = manager.attach_stop_loss(Decimal("94000"))
@@ -717,7 +731,6 @@ class TestConfigDefaultsFromEnv:
 
     def test_settings_seed_runtime_config(self):
         """Settings max_position/daily_loss seed the RuntimeBotConfig."""
-        from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
         from finbot.core.domain.services.bot_manager import BotManager
 
         class FakeSettings:
@@ -955,7 +968,11 @@ class TestConfigSaveProfiles:
         result = manager.load_config_profile("nonexistent")
 
         assert result["status"] == "rejected"
-        assert "scalping" in result["message"] or "not found" in result["message"].lower() or "unknown" in result["message"].lower()
+        assert (
+            "scalping" in result["message"]
+            or "not found" in result["message"].lower()
+            or "unknown" in result["message"].lower()
+        )
 
     def test_list_profiles(self):
         """/config profile list shows saved profile names."""
@@ -975,8 +992,6 @@ class TestBracketOrders:
 
     def _long_manager_after(self):
         """After a bracket order: position should be open, SL and TP placed."""
-        from finbot.core.domain.entities.position_direction import PositionDirection
-        from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 
         # The exchange will report an open long AFTER the entry fills.
         exchange = FakeExchangeGateway()
@@ -1059,10 +1074,10 @@ class TestSpecGapsRound2:
 
     def test_run_rejected_when_position_open(self):
         """/run is rejected when a manual position is open (design decision #2)."""
-        from tests.fakes import FakeRuntime
         from finbot.core.domain.entities.position_direction import PositionDirection
         from finbot.core.domain.entities.position_snapshot import PositionSnapshot
         from finbot.core.domain.services.bot_manager import BotManager
+        from tests.fakes import FakeRuntime
 
         repo = InMemoryBotStateRepository()
         runtime = FakeRuntime(repo=repo)
@@ -1080,7 +1095,10 @@ class TestSpecGapsRound2:
 
         result = manager.start(
             strategy_path="tests/fixtures/strategies/amt_dip_buyer_final.yaml",
-            symbol="BTC", interval="1h", mode="dry_run", warmup_bars=0,
+            symbol="BTC",
+            interval="1h",
+            mode="dry_run",
+            warmup_bars=0,
         )
 
         assert result["status"] == "rejected"
@@ -1102,7 +1120,10 @@ class TestSpecGapsRound2:
         result = manager.submit_manual_order(OrderSide.BUY, Decimal("0.0000001"))
 
         assert result["status"] == "rejected"
-        assert "precise" in result["message"].lower() or "decimal" in result["message"].lower()
+        assert (
+            "precise" in result["message"].lower()
+            or "decimal" in result["message"].lower()
+        )
 
     def test_long_rejects_below_min_size(self):
         """/long below minimum order size → rejected."""
@@ -1111,12 +1132,17 @@ class TestSpecGapsRound2:
         from tests.fakes import InMemoryMarketMetadataProvider
 
         # BTC with min_size=0.001
-        meta = InMemoryMarketMetadataProvider({
-            "BTC": MarketMetadata(
-                symbol="BTC", sz_decimals=5, min_size=Decimal("0.001"),
-                price_tick=Decimal("0.1"), max_leverage=50,
-            )
-        })
+        meta = InMemoryMarketMetadataProvider(
+            {
+                "BTC": MarketMetadata(
+                    symbol="BTC",
+                    sz_decimals=5,
+                    min_size=Decimal("0.001"),
+                    price_tick=Decimal("0.1"),
+                    max_leverage=50,
+                )
+            }
+        )
         exchange = FakeExchangeGateway()
         exchange.price_to_report = Decimal("50000")
         manager = _make_manager(exchange=exchange)
@@ -1127,7 +1153,9 @@ class TestSpecGapsRound2:
         result = manager.submit_manual_order(OrderSide.BUY, Decimal("0.0001"))
 
         assert result["status"] == "rejected"
-        assert "minimum" in result["message"].lower() or "min" in result["message"].lower()
+        assert (
+            "minimum" in result["message"].lower() or "min" in result["message"].lower()
+        )
 
     def test_symbol_switch_warns_on_open_position(self):
         """/symbol ETH while BTC has a position → warning in result."""

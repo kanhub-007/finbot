@@ -5,6 +5,9 @@ accumulates, or closes a Trade, then persists via the repo inside the
 caller's transaction.
 """
 
+from __future__ import annotations
+
+from collections import OrderedDict
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
@@ -23,6 +26,10 @@ from finbot.core.domain.services.trade_lifecycle import (
     open_from_fill,
 )
 
+# Maximum number of recent fill IDs to track in memory for O(1) dedup.
+# Beyond this the repo DB check (has_fill) provides the safety net.
+_MAX_CACHED_FILL_IDS = 10_000
+
 
 class TradeLedger:
     """Aggregates fills into Trade lifecycle records.
@@ -36,7 +43,10 @@ class TradeLedger:
     def __init__(self, repo: BotStateRepository, strategy_hash: str = "") -> None:
         self._repo = repo
         self._strategy_hash = strategy_hash
-        self._applied_fill_ids: set[str] = set()
+        # Bounded LRU cache of applied fill IDs for O(1) intra-session dedup.
+        # The repo ``has_fill`` check is the cross-session safety net;
+        # this cache avoids a DB round-trip for every fill on the hot path.
+        self._applied_fill_ids: OrderedDict[str, None] = OrderedDict()
         # Cache of realized daily loss per UTC day. The daily-loss gate reads
         # this on every non-HOLD signal; the value only changes when a trade
         # closes on that day, so we compute once and invalidate on close.
@@ -63,7 +73,10 @@ class TradeLedger:
         if existing is None and self._repo.has_fill(fill.fill_id):
             return FillOutcome(status="duplicate")
 
-        self._applied_fill_ids.add(fill.fill_id)
+        self._applied_fill_ids[fill.fill_id] = None
+        # Evict oldest entry when the bounded LRU cache exceeds capacity.
+        while len(self._applied_fill_ids) > _MAX_CACHED_FILL_IDS:
+            self._applied_fill_ids.popitem(last=False)
 
         # Reuse the open trade already fetched for the idempotency check —
         # nothing between the two reads can change it, so a second indexed

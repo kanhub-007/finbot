@@ -5,7 +5,6 @@ starting the bot reads leverage from it and syncs to the exchange.
 """
 
 import time
-from decimal import Decimal
 
 from finbot.core.domain.entities.strategy_execution_config import (
     StrategyExecutionConfig,
@@ -80,9 +79,7 @@ class TestStrategyExecutionConfig:
             interval="1h",
             mode="dry_run",
             warmup_bars=0,
-            execution_config=StrategyExecutionConfig(
-                leverage=5, margin_mode="cross"
-            ),
+            execution_config=StrategyExecutionConfig(leverage=5, margin_mode="cross"),
         )
 
         assert ("BTC", 5, "cross") in exchange.set_leverage_calls

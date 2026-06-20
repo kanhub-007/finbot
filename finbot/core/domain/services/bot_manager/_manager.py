@@ -18,14 +18,21 @@ existing callers (MCP tools, Telegram handler, tests) work unchanged.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
+from finbot.core.domain.entities.bot_config import BotConfig
 from finbot.core.domain.entities.wallet_balance import WalletBalance
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
+from finbot.core.domain.interfaces.config_writer_port import ConfigWriterPort
+from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
+from finbot.core.domain.interfaces.market_metadata_provider import (
+    MarketMetadataProvider,
+)
 from finbot.core.domain.services.bot_manager.bot_lifecycle_service import (
     BotLifecycleService,
+    RuntimeFactory,
 )
 from finbot.core.domain.services.bot_manager.bot_manager_lock import (
     BotManagerLock,
@@ -49,6 +56,34 @@ from finbot.core.domain.services.bot_manager.symbol_session_service import (
     SymbolSessionService,
 )
 
+
+class SettingsLike(Protocol):
+    """Minimal protocol for a settings object consumed by BotManager.
+
+    The real ``Settings`` lives in ``finbot.config.settings`` (Pydantic),
+    which is outside the domain layer.  This protocol keeps BotManager
+    layer-clean.
+    """
+
+    mode: str
+    live_trading_ack: bool
+    max_position_usd: object
+    max_daily_loss_usd: object
+    max_open_orders: object
+    stale_data_seconds: object
+    hyperliquid_testnet: bool
+    hyperliquid_private_key: object
+    hyperliquid_account_address: str
+    hyperliquid_vault_address: str
+    database_path: str
+
+
+class CreateBotConfigCallable(Protocol):
+    """Callable that converts settings into a :class:`BotConfig`."""
+
+    def __call__(self, settings: object) -> BotConfig: ...
+
+
 _ATTR_MAP = {
     "max_position": "max_position_usd",
     "daily_loss": "max_daily_loss_usd",
@@ -67,14 +102,14 @@ class BotManager:
     def __init__(
         self,
         *,
-        runtime_factory: Any,
+        runtime_factory: RuntimeFactory,
         repository: BotStateRepository,
-        exchange: Any | None = None,
-        settings: Any | None = None,
-        create_bot_config: Any | None = None,
+        exchange: ExchangeGateway | None = None,
+        settings: SettingsLike | None = None,
+        create_bot_config: CreateBotConfigCallable | None = None,
         startup_time: float | None = None,
-        metadata_provider: Any | None = None,
-        config_writer: Any | None = None,
+        metadata_provider: MarketMetadataProvider | None = None,
+        config_writer: ConfigWriterPort | None = None,
     ) -> None:
         self._lock = BotManagerLock()
         self._state = BotManagerState()
@@ -95,12 +130,15 @@ class BotManager:
             self._state, self._lock, exchange, metadata_provider, repository
         )
         self._config = RuntimeConfigService(self._state, self._lock, config_writer)
-        self._risk_orders = RiskOrderService(self._state, self._lock, exchange)
+        self._risk_orders = RiskOrderService(
+            self._state, self._lock, exchange, repository
+        )
         self._manual = ManualOrderService(
             self._state,
             self._lock,
             exchange,
             self._risk_orders,
+            repository=repository,
             metadata_provider=metadata_provider,
             mode=getattr(settings, "mode", "dry_run") if settings else "dry_run",
             live_trading_ack=(

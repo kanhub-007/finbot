@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import warnings
 from decimal import Decimal
 from typing import ClassVar
 
 from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
 from finbot.core.domain.entities.order_state import OrderState
+
+logger = logging.getLogger(__name__)
 
 
 class InvalidTransitionError(ValueError):
@@ -141,7 +145,16 @@ class OrderStateMachine:
         fill_size: Decimal | None = None,
     ) -> None:
         if to_state == OrderState.PARTIALLY_FILLED:
-            size = fill_size if fill_size is not None else _parse_fill_size(reason)
+            if fill_size is not None:
+                size = fill_size
+            else:
+                warnings.warn(
+                    "transition() called without fill_size; parsing from reason "
+                    "string is deprecated.  Pass fill_size explicitly.",
+                    DeprecationWarning,
+                    stacklevel=3,
+                )
+                size = _parse_fill_size(reason)
             lifecycle.filled_size += size
             lifecycle.remaining_size = max(
                 Decimal("0"),

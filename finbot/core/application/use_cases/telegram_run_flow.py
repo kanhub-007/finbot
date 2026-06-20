@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from finbot.core.application.dto.callback_query_request import CallbackQueryRequest
+from finbot.core.application.dto.telegram_command_request import (
+    TelegramCommandRequest,
+)
 from finbot.core.application.dto.telegram_command_result import (
     TelegramCommandResult,
 )
@@ -10,6 +14,7 @@ from finbot.core.application.use_cases.telegram_helpers import (
     _escape_mdv2,
     _get_symbols,
 )
+from finbot.core.domain.entities.callback_data import CallbackData
 
 
 async def _handle_run(uc, request: TelegramCommandRequest) -> TelegramCommandResult:
@@ -110,14 +115,14 @@ async def _handle_run_callback(
 
 def _render_symbol_page(uc, session, page: int = 0) -> TelegramCommandResult:
     """Render a paginated symbol picker."""
-    _SYMBOLS_PER_PAGE = 6
+    symbols_per_page = 6
     symbols = _get_symbols(uc._metadata_provider)
-    total_pages = (len(symbols) + _SYMBOLS_PER_PAGE - 1) // _SYMBOLS_PER_PAGE
+    total_pages = (len(symbols) + symbols_per_page - 1) // symbols_per_page
     page = max(0, min(page, total_pages - 1))
 
     sid = session.session_id
-    start = page * _SYMBOLS_PER_PAGE
-    page_symbols = symbols[start : start + _SYMBOLS_PER_PAGE]
+    start = page * symbols_per_page
+    page_symbols = symbols[start : start + symbols_per_page]
 
     # Symbol buttons (2 rows of 3)
     keyboard_rows = []

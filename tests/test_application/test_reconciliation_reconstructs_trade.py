@@ -72,7 +72,6 @@ def test_exchange_flat_db_open_trade_kept() -> None:
     )
 
     repo = InMemoryBotStateRepository()
-    ledger = TradeLedger(repo)
 
     # Pre-seed an open trade
     from datetime import UTC, datetime
@@ -88,13 +87,6 @@ def test_exchange_flat_db_open_trade_kept() -> None:
         status="open",
     )
     repo.open_trade(trade)
-
-    # Exchange is flat
-    position = PositionSnapshot(
-        symbol="BTC",
-        direction=PositionDirection.FLAT,
-        size=Decimal("0"),
-    )
 
     # The open trade should still be there
     existing = repo.get_open_trade("BTC")

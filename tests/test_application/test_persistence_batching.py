@@ -11,6 +11,9 @@ from finbot.core.domain.services.enrichment_validator import EnrichmentValidator
 from finbot.core.domain.services.order_normalizer import OrderNormalizer
 from finbot.core.domain.services.order_planner import OrderPlanner
 from finbot.core.domain.services.risk_gates.mode_gate import ModeGate
+from finbot.infrastructure.adapters.live_submission_strategy import (
+    LiveSubmissionStrategy,
+)
 from finbot.infrastructure.repositories.sqlite_bot_state_repository import (
     SqliteBotStateRepository,
 )
@@ -24,10 +27,6 @@ from tests.fakes import (
     indicator_bar,
     make_event_emitter,
     new_closed_candle,
-)
-
-from finbot.infrastructure.adapters.live_submission_strategy import (
-    LiveSubmissionStrategy,
 )
 
 
@@ -95,9 +94,7 @@ def test_accepted_candle_uses_one_transaction() -> None:
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=TradingMode.TESTNET,
-        submission_strategy=LiveSubmissionStrategy(
-            FakeExchangeGateway(), None, repo
-        ),
+        submission_strategy=LiveSubmissionStrategy(FakeExchangeGateway(), None, repo),
         event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(100),
         required_columns={"atr"},

@@ -88,18 +88,30 @@ def test_closed_trades_filtered_by_bot_run() -> None:
     now = datetime.now(UTC)
 
     t1 = Trade(
-        position_id="p1", bot_run_id="run1", symbol="BTC",
-        side=PositionDirection.LONG, size=Decimal("0"),
-        entry_price=Decimal("50000"), opened_at=now,
-        status="closed", realized_pnl=Decimal("100"),
-        closed_at=now, close_price=Decimal("51000"),
+        position_id="p1",
+        bot_run_id="run1",
+        symbol="BTC",
+        side=PositionDirection.LONG,
+        size=Decimal("0"),
+        entry_price=Decimal("50000"),
+        opened_at=now,
+        status="closed",
+        realized_pnl=Decimal("100"),
+        closed_at=now,
+        close_price=Decimal("51000"),
     )
     t2 = Trade(
-        position_id="p2", bot_run_id="run2", symbol="ETH",
-        side=PositionDirection.SHORT, size=Decimal("0"),
-        entry_price=Decimal("3000"), opened_at=now,
-        status="closed", realized_pnl=Decimal("-50"),
-        closed_at=now, close_price=Decimal("2950"),
+        position_id="p2",
+        bot_run_id="run2",
+        symbol="ETH",
+        side=PositionDirection.SHORT,
+        size=Decimal("0"),
+        entry_price=Decimal("3000"),
+        opened_at=now,
+        status="closed",
+        realized_pnl=Decimal("-50"),
+        closed_at=now,
+        close_price=Decimal("2950"),
     )
 
     repo.open_trade(t1)
@@ -127,20 +139,32 @@ def test_total_realized_pnl_summary() -> None:
 
     repo.open_trade(
         Trade(
-            position_id="p1", bot_run_id="run1", symbol="BTC",
-            side=PositionDirection.LONG, size=Decimal("0"),
-            entry_price=Decimal("50000"), opened_at=now,
-            status="closed", realized_pnl=Decimal("100"),
-            closed_at=now, close_price=Decimal("51000"),
+            position_id="p1",
+            bot_run_id="run1",
+            symbol="BTC",
+            side=PositionDirection.LONG,
+            size=Decimal("0"),
+            entry_price=Decimal("50000"),
+            opened_at=now,
+            status="closed",
+            realized_pnl=Decimal("100"),
+            closed_at=now,
+            close_price=Decimal("51000"),
         )
     )
     repo.open_trade(
         Trade(
-            position_id="p2", bot_run_id="run1", symbol="ETH",
-            side=PositionDirection.SHORT, size=Decimal("0"),
-            entry_price=Decimal("3000"), opened_at=now,
-            status="closed", realized_pnl=Decimal("-50"),
-            closed_at=now, close_price=Decimal("2950"),
+            position_id="p2",
+            bot_run_id="run1",
+            symbol="ETH",
+            side=PositionDirection.SHORT,
+            size=Decimal("0"),
+            entry_price=Decimal("3000"),
+            opened_at=now,
+            status="closed",
+            realized_pnl=Decimal("-50"),
+            closed_at=now,
+            close_price=Decimal("2950"),
         )
     )
 

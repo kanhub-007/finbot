@@ -3,7 +3,11 @@
 Extracted from :class:`LiveTradingRuntimeUseCase` so the candle pipeline
 stays a thin orchestrator.  Owns the post-planning side effects for a
 testnet/live order: precision normalization, exchange submission, and
-response persistence.
+response persistence.  Lives in **infrastructure** because it performs
+exchange I/O (submission + persistence); the application layer depends on
+it only through ``LiveSubmissionStrategy``, which is itself an
+infrastructure adapter implementing the ``OrderSubmissionStrategy``
+domain interface.
 
 Audit note (H7 remediation): this class no longer writes a
 ``ReconciliationRecord`` per order. The ``reconciliations`` table is the
@@ -83,7 +87,16 @@ class LiveOrderExecutor:
             logger.warning("Order normalization failed for intent %s: %s", intent_id, e)
             return False
 
-        response = self._exchange.submit_order(normalized)
+        try:
+            response = self._exchange.submit_order(normalized)
+        except Exception as exc:  # noqa: BLE001 - persist failed external effect
+            logger.exception("Order submission failed for intent %s", intent_id)
+            self._persist_response(
+                intent_id,
+                bot_run_id,
+                {"status": "error", "error": str(exc)},
+            )
+            return False
         self._persist_response(intent_id, bot_run_id, response)
         return True
 

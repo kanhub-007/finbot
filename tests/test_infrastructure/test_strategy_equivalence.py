@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from finbar_strategy_runtime.evaluation.strategy_definition_factory import (
     StrategyDefinitionFactory,
 )
@@ -36,12 +35,8 @@ from finbar_strategy_runtime.parser.strategy_definition_parser import (
 from finbot.core.domain.entities.position_direction import PositionDirection
 from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.signal_action import SignalAction
-from finbot.core.domain.interfaces.strategy_evaluator import StrategyEvaluator
 from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator import (
     SharedRuntimeStrategyEvaluator,
-)
-from finbot.infrastructure.adapters.shared_runtime_strategy_evaluator_factory import (
-    SharedRuntimeStrategyEvaluatorFactory,
 )
 from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
     YamlStrategyDefinitionLoader,
@@ -317,9 +312,9 @@ class TestStrategyEquivalence:
         """All signals must have confidence in [0, 1]."""
         pkg = _evaluate_with_package(amt_strategy, amt_bars)
         for s in pkg:
-            assert 0.0 <= s["confidence"] <= 1.0, (
-                f"Confidence out of range: {s['confidence']} at bar {s['bar_index']}"
-            )
+            assert (
+                0.0 <= s["confidence"] <= 1.0
+            ), f"Confidence out of range: {s['confidence']} at bar {s['bar_index']}"
 
     def test_stop_price_set_for_entries(
         self, amt_strategy: str, amt_bars: list[dict[str, object]]
@@ -328,9 +323,9 @@ class TestStrategyEquivalence:
         pkg = _evaluate_with_package(amt_strategy, amt_bars)
         for s in pkg:
             if s["direction"] != "exit":
-                assert s["stop_price"] is not None and s["stop_price"] > 0, (
-                    f"Missing stop price at bar {s['bar_index']}"
-                )
+                assert (
+                    s["stop_price"] is not None and s["stop_price"] > 0
+                ), f"Missing stop price at bar {s['bar_index']}"
 
     def test_exit_signals_use_position_direction(
         self, amt_strategy: str, amt_bars: list[dict[str, object]]
@@ -343,9 +338,10 @@ class TestStrategyEquivalence:
         assert len(exit_signals) > 0, "No exit signals to verify"
 
         for s in exit_signals:
-            assert s["action"] in ("long_exit", "short_exit"), (
-                f"Unexpected exit action: {s['action']}"
-            )
+            assert s["action"] in (
+                "long_exit",
+                "short_exit",
+            ), f"Unexpected exit action: {s['action']}"
 
     def test_signal_idempotency_keys_present(
         self, amt_strategy: str, amt_bars: list[dict[str, object]]

@@ -117,29 +117,27 @@ def _add_panic_parser(sub) -> None:
 def _cmd_run(args) -> None:
     settings = Settings()
 
+    # Mode/URL consistency — refuse testnet-vs-mainnet mismatches before
+    # any live/testnet startup touches an execution gateway.
+    from finbot.core.domain.services.mode_url_guard import (
+        check_mode_url_consistency,
+    )
+
+    reasons = check_mode_url_consistency(
+        mode=settings.mode,
+        hyperliquid_testnet=settings.hyperliquid_testnet,
+    )
+    blocking = [r for r in reasons if settings.mode != "dry_run"]
+    if blocking:
+        for reason in blocking:
+            print(f"MODE/URL MISMATCH: {reason}")
+        sys.exit(1)
+    for reason in reasons:
+        print(f"WARNING: {reason}")
+
     # Live-mode safety gate.
     if settings.mode == "live":
         _check_live_mode_gate(settings)
-    else:
-        # Mode/URL consistency — refuse testnet-vs-mainnet mismatches, warn
-        # on dry-run-with-mainnet.  Mirrors the MCP start_bot guard (C4).
-        from finbot.core.domain.services.mode_url_guard import (
-            check_mode_url_consistency,
-        )
-
-        reasons = check_mode_url_consistency(
-            mode=settings.mode,
-            hyperliquid_testnet=settings.hyperliquid_testnet,
-        )
-        # testnet/live mismatches are hard rejects.
-        blocking = [r for r in reasons if settings.mode != "dry_run"]
-        if blocking:
-            for reason in blocking:
-                print(f"MODE/URL MISMATCH: {reason}")
-            sys.exit(1)
-        # dry_run-on-mainnet is only a warning (no orders placed).
-        for reason in reasons:
-            print(f"WARNING: {reason}")
 
     if args.live_data:
         # New runtime: blocking event loop with real pipeline.

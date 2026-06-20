@@ -14,7 +14,7 @@ def _sig() -> SignalDecision:
         action=SignalAction.LONG_ENTRY,
         symbol="BTC",
         interval="1h",
-        candle_timestamp=0,
+        candle_timestamp=1700000000,
         strategy_hash="h",
     )
 

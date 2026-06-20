@@ -14,14 +14,14 @@ from finbot.core.domain.interfaces.bot_manager_port import BotManagerPort
 from finbot.core.domain.interfaces.telegram_chat_repository import (
     TelegramChatRepository,
 )
+from finbot.infrastructure.adapters import (
+    thread_safe_telegram_notification_dispatcher as telegram_dispatcher,
+)
 from finbot.infrastructure.adapters.filesystem_strategy_directory import (
     FilesystemStrategyDirectory,
 )
 from finbot.infrastructure.adapters.python_telegram_bot_adapter import (
     PythonTelegramBotAdapter,
-)
-from finbot.infrastructure.adapters.thread_safe_telegram_notification_dispatcher import (
-    ThreadSafeTelegramNotificationDispatcher,
 )
 from finbot.infrastructure.repositories.sqlite_telegram_chat_repository import (
     SqliteTelegramChatRepository,
@@ -32,6 +32,7 @@ from finbot.presentation.telegram.notification_sender import (
 )
 
 logger = logging.getLogger(__name__)
+NotificationDispatcher = telegram_dispatcher.ThreadSafeTelegramNotificationDispatcher
 
 
 class TelegramControlPlane:
@@ -56,14 +57,14 @@ class TelegramControlPlane:
         self._handler: TelegramBotHandler | None = None
         self._adapter: PythonTelegramBotAdapter | None = None
         self._notification_sender: TelegramNotificationSender | None = None
-        self._dispatcher: ThreadSafeTelegramNotificationDispatcher | None = None
+        self._dispatcher: NotificationDispatcher | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
 
     @property
     def notification_dispatcher(
         self,
-    ) -> ThreadSafeTelegramNotificationDispatcher | None:
+    ) -> NotificationDispatcher | None:
         """Return the thread-safe dispatcher for runtime notification scheduling."""
         return self._dispatcher
 
@@ -93,12 +94,11 @@ class TelegramControlPlane:
             self._settings.telegram_strategies_dir
         )
 
-        from finbot.infrastructure.adapters.in_memory_telegram_session_store import (
-            InMemoryTelegramSessionStore,
-        )
-
         from finbot.infrastructure.adapters.hyperliquid_metadata_provider import (
             HyperliquidMetadataProvider,
+        )
+        from finbot.infrastructure.adapters.in_memory_telegram_session_store import (
+            InMemoryTelegramSessionStore,
         )
 
         metadata_provider = HyperliquidMetadataProvider()
@@ -139,7 +139,7 @@ class TelegramControlPlane:
 
         # Create dispatcher now that loop exists
         if self._notification_sender is not None:
-            self._dispatcher = ThreadSafeTelegramNotificationDispatcher(
+            self._dispatcher = NotificationDispatcher(
                 loop=self._loop,
                 sender=self._notification_sender,
             )

@@ -6,7 +6,7 @@ can report ALL issues at once instead of failing one-at-a-time.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,9 @@ def check_live_mode(
     database_path: str,
 ) -> LiveModeCheckResult:
     """Return whether live trading is permitted and, if not, why.
+
+    Checks mode eligibility (non-"live" is rejected), the explicit
+    acknowledgment flag, key presence, position cap, and durable DB.
 
     All parameters are read from :class:`Settings` by the caller.
     """

@@ -51,14 +51,23 @@ class Settings(BaseSettings):
 
     @property
     def telegram_allowed_user_ids(self) -> frozenset[int]:
-        """Parse the comma-separated allowed user IDs."""
+        """Parse the comma-separated allowed user IDs.
+
+        Non-numeric entries are silently skipped so a single typo
+        does not break the entire allowlist.
+        """
         if not self.telegram_allowed_users.strip():
             return frozenset()
-        return frozenset(
-            int(uid.strip())
-            for uid in self.telegram_allowed_users.split(",")
-            if uid.strip()
-        )
+        ids: set[int] = set()
+        for uid in self.telegram_allowed_users.split(","):
+            uid = uid.strip()
+            if not uid:
+                continue
+            try:
+                ids.add(int(uid))
+            except ValueError:
+                pass
+        return frozenset(ids)
 
     @property
     def telegram_control_configured(self) -> bool:

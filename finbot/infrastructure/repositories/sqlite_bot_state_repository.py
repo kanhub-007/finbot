@@ -83,6 +83,9 @@ class SqliteBotStateRepository(BotStateRepository):
         # Per-thread nested-transaction flag (replaces the instance-level
         # bool that let one thread's transaction suppress another's commit).
         self._tx_state = threading.local()
+        # DDL guard: ensures CREATE TABLE IF NOT EXISTS runs at most once
+        # per session for the active_symbol table.
+        self._active_symbol_table_ensured: bool = False
 
     @property
     def _in_transaction(self) -> bool:
@@ -347,7 +350,14 @@ class SqliteBotStateRepository(BotStateRepository):
     # -- active symbol persistence (trading-control spec) ------------------
 
     def _ensure_active_symbol_table(self) -> None:
-        """Create the single-row active_symbol table if absent."""
+        """Create the single-row active_symbol table if absent.
+
+        Uses a session-level flag so the DDL runs at most once per
+        repository instance, avoiding a per-call ``CREATE TABLE IF NOT
+        EXISTS`` on the symbol-session hot path.
+        """
+        if self._active_symbol_table_ensured:
+            return
         self._execute(
             "CREATE TABLE IF NOT EXISTS active_symbol ("
             "id INTEGER PRIMARY KEY CHECK (id = 1),"
@@ -355,6 +365,7 @@ class SqliteBotStateRepository(BotStateRepository):
             "leverage INTEGER NOT NULL,"
             "margin_mode TEXT NOT NULL)"
         )
+        self._active_symbol_table_ensured = True
 
     def save_active_symbol(self, state) -> None:
         """Persist (overwrite) the single active-symbol row."""
@@ -755,7 +766,11 @@ class SqliteBotStateRepository(BotStateRepository):
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:
             _ensure_directory(self._db_path)
-            self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            self._conn = sqlite3.connect(
+                self._db_path,
+                check_same_thread=False,
+                uri=self._db_path.startswith("file:"),
+            )
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn

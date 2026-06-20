@@ -35,6 +35,10 @@ class DryRunExchangeGateway(ExchangeGateway):
         """Return a synthetic cancellation response."""
         return {"status": "dry_run", "symbol": symbol, "cloid": cloid}
 
+    def cancel_by_oid(self, symbol: str, oid: str) -> dict[str, Any]:
+        """Return a synthetic cancellation response."""
+        return {"status": "dry_run", "symbol": symbol, "oid": oid}
+
     def set_leverage(
         self, symbol: str, leverage: int, margin_mode: str = "isolated"
     ) -> dict[str, Any]:

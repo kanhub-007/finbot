@@ -1,5 +1,7 @@
 """Tests for the HandleTelegramCommand use case — /whoami, authorization, etc."""
 
+from datetime import UTC
+
 import pytest
 
 from finbot.core.application.dto.callback_query_request import (
@@ -646,8 +648,9 @@ class TestHistory:
     @pytest.mark.asyncio
     async def test_history_returns_paginated_run_list(self):
         """/history returns a paginated list of recent bot runs."""
+        from datetime import datetime
+
         from finbot.core.domain.entities.bot_run import BotRun
-        from datetime import datetime, timezone
 
         fake_manager = FakeBotManager(is_running=False)
         runs = [
@@ -658,7 +661,7 @@ class TestHistory:
                 interval="1h",
                 mode="LIVE",
                 run_id="r_001",
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
             ),
             BotRun(
                 strategy_name="trend_follow.yaml",
@@ -667,7 +670,7 @@ class TestHistory:
                 interval="4h",
                 mode="dry_run",
                 run_id="r_002",
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
             ),
         ]
         fake_manager.list_bot_runs = lambda limit=20, mode_filter=None: runs[:limit]
@@ -1090,7 +1093,6 @@ class TestConfirmationFlow:
     @pytest.mark.asyncio
     async def test_long_in_live_shows_confirmation(self):
         """/long in live mode shows Confirm/Cancel, no order placed."""
-        from tests.fakes_telegram import FakeBotManager
 
         uc = self._use_case(mode="live")
         await uc.execute(
@@ -1163,7 +1165,6 @@ class TestConfirmationFlow:
         # Extract session id from the confirm callback data
         confirm_cb = prompt.reply_markup["inline_keyboard"][0][0]["callback_data"]
         # confirm:<sid>:exec
-        sid = confirm_cb.split(":")[1]
 
         result = await uc.handle_callback(
             CallbackQueryRequest(
@@ -1374,7 +1375,6 @@ class TestManualOrderConfirmationModeInjected:
 
     def test_live_mode_idle_bot_still_requires_confirmation(self):
         """While idle in live mode, /long must still confirm (not skip)."""
-        from decimal import Decimal
 
         from finbot.core.domain.entities.active_symbol_state import (
             ActiveSymbolState,
@@ -1406,11 +1406,12 @@ class TestManualOrderDraftReplacesSessionStash:
     not serialised into session.interval as 'long|0.1|sl|tp'."""
 
     def test_manual_order_draft_entity_exists_and_is_typed(self):
+        from decimal import Decimal
+
         from finbot.core.domain.entities.manual_order_draft import (
             ManualOrderDraft,
         )
         from finbot.core.domain.entities.order_side import OrderSide
-        from decimal import Decimal
 
         draft = ManualOrderDraft(
             side=OrderSide.BUY,

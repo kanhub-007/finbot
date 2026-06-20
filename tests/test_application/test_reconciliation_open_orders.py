@@ -35,11 +35,11 @@ from finbot.infrastructure.adapters.simple_runtime_event_emitter import (
     SimpleRuntimeEventEmitter,
 )
 from tests.fakes import (
+    FakeBotStateRepository,
     FakeExchangeGateway,
     FakeStrategyEvaluator,
     InMemoryBarFrameConverter,
     InMemoryIndicatorEngine,
-    FakeBotStateRepository,
     closed_warmup_bars,
     make_dry_run_submission_strategy,
 )

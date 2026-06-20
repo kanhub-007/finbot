@@ -17,11 +17,11 @@ from finbot.core.domain.services.risk_gates.duplicate_signal_gate import (
 )
 from finbot.core.domain.services.risk_gates.mode_gate import ModeGate
 from tests.fakes import (
+    FakeBotStateRepository,
     FakeStrategyEvaluator,
     InMemoryBarFrameConverter,
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
-    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_dry_run_submission_strategy,

@@ -43,11 +43,15 @@ class YamlStrategyDefinitionLoader(StrategyDefinitionLoader):
         return result.definition
 
     def load_from_file(self, path: str) -> StrategyDefinition:
+        content = self.load_content(path)
+        return self.load_from_text(content)
+
+    def load_content(self, path: str) -> str:
+        """Read the raw strategy file content."""
         full = Path(path).resolve()
         if not full.is_file():
             raise FileNotFoundError(f"Strategy file not found: {path}")
-        content = full.read_text(encoding="utf-8")
-        return self.load_from_text(content)
+        return full.read_text(encoding="utf-8")
 
     def last_required_columns(self) -> list[str]:
         """Concrete enriched columns required by the last-loaded strategy.

@@ -15,12 +15,16 @@ from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_side import OrderSide
 from finbot.core.domain.entities.order_type import OrderType
 from finbot.core.domain.entities.position_direction import PositionDirection
+from finbot.core.domain.interfaces.bot_state_repository import BotStateRepository
 from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 from finbot.core.domain.services.bot_manager.bot_manager_lock import (
     BotManagerLock,
 )
 from finbot.core.domain.services.bot_manager.bot_manager_state import (
     BotManagerState,
+)
+from finbot.core.domain.services.bot_manager.recorded_order_submission import (
+    submit_and_record,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,10 +64,12 @@ class RiskOrderService:
         state: BotManagerState,
         lock: BotManagerLock,
         exchange: ExchangeGateway | None,
+        repository: BotStateRepository,
     ) -> None:
         self._state = state
         self._lock = lock
         self._exchange = exchange
+        self._repo = repository
 
     def attach_stop_loss(self, price: Decimal | str) -> dict[str, Any]:
         """Attach a reduce-only stop-loss trigger (cloid SL:<symbol>)."""
@@ -172,10 +178,16 @@ class RiskOrderService:
             limit_price=price_dec,
             cloid=cloid,
         )
-        try:
-            response = self._exchange.submit_order(intent)
-        except Exception as exc:
-            return {"status": "error", "message": str(exc)}
+        submit_result = submit_and_record(
+            self._exchange,
+            self._repo,
+            intent,
+            symbol,
+            cloid_prefix="risk",
+        )
+        if submit_result["status"] != "ok":
+            return submit_result
+        response = submit_result["response"]
         return {
             "status": "ok",
             "kind": kind.lower(),

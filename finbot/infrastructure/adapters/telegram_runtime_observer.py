@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
-from finbot.core.domain.events.bot_error_event import BotErrorEvent
 from finbot.core.domain.events.risk_event_triggered import RiskEventTriggered
 from finbot.core.domain.events.runtime_events import (
     EnrichmentRejectedEvent,
     RiskTriggeredEvent,
-    TradeExecutedEvent,
 )
 from finbot.core.domain.events.trade_executed import TradeExecuted
 from finbot.core.domain.interfaces.bot_notification_sender import (
@@ -40,20 +36,9 @@ class TelegramRuntimeObserver:
             )
         )
 
-    def on_trade_executed(self, event: TradeExecutedEvent) -> None:
+    def on_trade_executed(self, event: TradeExecuted) -> None:
         """Forward a trade fill to the notification sender."""
-        self._sender.notify_trade(
-            TradeExecuted(
-                run_id=event.run_id,
-                symbol=event.symbol,
-                side=event.side,
-                size=event.size,
-                price=event.price,
-                pnl=event.pnl,
-                order_id=event.order_id,
-                timestamp=datetime.now(timezone.utc),
-            )
-        )
+        self._sender.notify_trade(event)
 
     def on_enrichment_rejected(self, event: EnrichmentRejectedEvent) -> None:
         """Forward an enrichment rejection as a risk notification."""

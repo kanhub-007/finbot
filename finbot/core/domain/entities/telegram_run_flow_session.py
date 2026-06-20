@@ -1,7 +1,7 @@
 """TelegramRunFlowSession — stores /run guided-flow state server-side."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from finbot.core.domain.entities.manual_order_draft import ManualOrderDraft
 
@@ -25,13 +25,13 @@ class TelegramRunFlowSession:
     #: Typed stash for manual-order params awaiting confirmation (M9).
     #: Replaces the prior ``interval = "long|0.1|sl|tp"`` serialised hack.
     manual_order_draft: ManualOrderDraft | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     expires_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc) + timedelta(minutes=30)
+        default_factory=lambda: datetime.now(UTC) + timedelta(minutes=30)
     )
 
     @property
     def is_expired(self, now: datetime | None = None) -> bool:
         """Check if the session has expired."""
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         return now > self.expires_at

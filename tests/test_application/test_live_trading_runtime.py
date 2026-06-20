@@ -7,11 +7,11 @@ from finbot.core.domain.services.enrichment_validator import (
     EnrichmentValidator,
 )
 from tests.fakes import (
+    FakeBotStateRepository,
     FakeStrategyEvaluator,
     InMemoryBarFrameConverter,
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
-    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_dry_run_submission_strategy,
@@ -49,9 +49,7 @@ def _create_runtime(
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=bar_frame_converter or InMemoryBarFrameConverter(),
         mode=mode,
-        submission_strategy=make_dry_run_submission_strategy(
-            _repo, exchange=_exchange
-        ),
+        submission_strategy=make_dry_run_submission_strategy(_repo, exchange=_exchange),
         event_emitter=make_event_emitter(),
         warmup_bars=warmup_bars or closed_warmup_bars(100),
         required_columns=required_columns or set(),

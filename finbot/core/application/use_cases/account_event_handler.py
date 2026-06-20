@@ -13,6 +13,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
+from finbot.core.domain.dto.fill_outcome import FillOutcome
 from finbot.core.domain.entities.fill_record import FillRecord
 from finbot.core.domain.entities.order_lifecycle import OrderLifecycle
 from finbot.core.domain.entities.order_state import OrderState
@@ -26,6 +27,7 @@ from finbot.core.domain.services.order_state_machine import (
     OrderStateMachine,
 )
 from finbot.core.domain.services.trade_ledger import TradeLedger
+from finbot.core.domain.services.transactional import transactional
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +139,7 @@ class AccountEventHandler:
         )
         result = self._apply_fill_within_tx(order_id, fill, size)
         if result["status"] == "processed":
-            self._notify_fill(fill)
+            self._notify_fill(fill, result.get("outcome"))
         return result
 
     def _apply_fill_within_tx(
@@ -148,21 +150,23 @@ class AccountEventHandler:
         Uses a repo transaction if available; otherwise applies directly.
         Both paths share the same three operations via _apply_fill_effects.
         """
-        tx = getattr(self._repo, "transaction", None)
-        if tx is None:
-            return self._apply_fill_effects(order_id, fill, size)
-        with tx():
-            return self._apply_fill_effects(order_id, fill, size)
+        return transactional(
+            self._repo, lambda: self._apply_fill_effects(order_id, fill, size)
+        )
 
     def _apply_fill_effects(
         self, order_id: str, fill: FillRecord, size: Decimal
     ) -> dict[str, Any]:
-        """Transition + ledger + record (shared by txn/non-txn paths)."""
+        """Transition + ledger + record (shared by txn/non-txn paths).
+
+        Returns the :class:`FillOutcome` from the trade ledger so the
+        caller can extract PnL for notifications without re-querying.
+        """
         if not self._apply_fill_transition(order_id, size):
-            return {"status": "transition_rejected"}
-        self._trade_ledger.apply_fill(fill)
+            return {"status": "transition_rejected", "outcome": None}
+        outcome = self._trade_ledger.apply_fill(fill)
         self._repo.record_fill(fill)
-        return {"status": "processed"}
+        return {"status": "processed", "outcome": outcome}
 
     def _apply_fill_transition(self, order_id: str, size: Decimal) -> bool:
         """Advance the lifecycle for a fill; return False on transition failure."""
@@ -214,16 +218,21 @@ class AccountEventHandler:
 
     # -- notifications -----------------------------------------------------
 
-    def _notify_fill(self, fill: FillRecord) -> None:
-        """Send a trade notification if a sender is configured."""
-        if self._notification_sender is None:
+    def _notify_fill(
+        self, fill: FillRecord, outcome: FillOutcome | None = None
+    ) -> None:
+        """Send a trade notification if a sender is configured.
+
+        Uses the *outcome* from :meth:`TradeLedger.apply_fill` to extract
+        PnL for closing fills.  When *outcome* is ``None`` (transition
+        rejected), no notification is sent.
+        """
+        if self._notification_sender is None or outcome is None:
             return
         try:
-            # Check if this fill closes or reduces a trade for PnL
             pnl_str: str | None = None
-            trade = self._trade_ledger.get_open_trade_for_symbol(fill.symbol)
-            if trade and trade.status == "closed":
-                pnl_str = str(trade.realized_pnl)
+            if outcome.status == "closed" and outcome.realized_pnl is not None:
+                pnl_str = str(outcome.realized_pnl)
 
             from datetime import UTC, datetime
 
@@ -241,7 +250,7 @@ class AccountEventHandler:
             )
             self._notification_sender.notify_trade(event)
         except Exception:
-            logger.debug("Failed to send trade notification", exc_info=True)
+            logger.warning("Failed to send trade notification", exc_info=True)
 
     # -- lifecycle access ---------------------------------------------------
 

@@ -15,12 +15,16 @@ from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_side import OrderSide
 from finbot.core.domain.entities.order_type import OrderType
 from finbot.core.domain.entities.position_direction import PositionDirection
+from finbot.core.domain.interfaces.bot_state_repository import BotStateRepository
 from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 from finbot.core.domain.services.bot_manager.bot_manager_lock import (
     BotManagerLock,
 )
 from finbot.core.domain.services.bot_manager.bot_manager_state import (
     BotManagerState,
+)
+from finbot.core.domain.services.bot_manager.recorded_order_submission import (
+    submit_and_record,
 )
 from finbot.core.domain.services.bot_manager.risk_order_service import (
     RiskOrderService,
@@ -38,6 +42,7 @@ class ManualOrderService:
         lock: BotManagerLock,
         exchange: ExchangeGateway | None,
         risk_orders: RiskOrderService,
+        repository: BotStateRepository,
         metadata_provider: Any | None = None,
         mode: str = "dry_run",
         live_trading_ack: bool = False,
@@ -46,6 +51,7 @@ class ManualOrderService:
         self._lock = lock
         self._exchange = exchange
         self._risk_orders = risk_orders
+        self._repo = repository
         self._metadata_provider = metadata_provider
         self._mode = mode
         self._ack = live_trading_ack
@@ -105,11 +111,13 @@ class ManualOrderService:
         )
         if gate_error is not None:
             return {"status": "rejected", "message": gate_error}
-        try:
-            response = self._exchange.submit_order(intent)
-        except Exception as exc:
-            return {"status": "error", "message": str(exc)}
-        return {"status": "ok", "response": response, "symbol": symbol}
+        return submit_and_record(
+            self._exchange,
+            self._repo,
+            intent,
+            symbol,
+            cloid_prefix="manual",
+        )
 
     def submit_manual_order_with_brackets(
         self,
@@ -178,7 +186,7 @@ class ManualOrderService:
         """Market-close the position for a symbol; clears SL/TP."""
         if self._exchange is None:
             return {"error": "No exchange gateway wired"}
-        result = _close_symbol_position(self._exchange, symbol)
+        result = _close_symbol_position(self._exchange, symbol, self._repo)
         if result.get("status") != "ok":
             return result
         self._risk_orders.clear_risk_orders_for_symbol(symbol)
@@ -196,7 +204,7 @@ class ManualOrderService:
             strategy_running = self._state.runtime is not None
         if self._exchange is None:
             return {"status": "error", "message": "No exchange gateway wired"}
-        result = _close_symbol_position(self._exchange, symbol)
+        result = _close_symbol_position(self._exchange, symbol, self._repo)
         if result.get("status") == "ok":
             self._risk_orders.clear_risk_orders_for_symbol(symbol)
             if strategy_running:
@@ -229,7 +237,10 @@ class ManualOrderService:
         pos = self._exchange.get_position(symbol)
         closed = 0
         if pos is not None and pos.direction.value != "flat":
-            if _close_symbol_position(self._exchange, symbol).get("status") == "ok":
+            if (
+                _close_symbol_position(self._exchange, symbol, self._repo).get("status")
+                == "ok"
+            ):
                 closed = 1
         if cancelled == 0 and closed == 0:
             return {"status": "rejected", "message": "Nothing to clear."}
@@ -285,7 +296,11 @@ def _run_manual_gates(
     return None
 
 
-def _close_symbol_position(exchange: ExchangeGateway, symbol: str) -> dict[str, object]:
+def _close_symbol_position(
+    exchange: ExchangeGateway,
+    symbol: str,
+    repo: BotStateRepository,
+) -> dict[str, object]:
     """Submit a reduce-only market close for a symbol's full position."""
     pos = exchange.get_position(symbol)
     if pos is None or pos.direction.value == "flat":
@@ -298,8 +313,7 @@ def _close_symbol_position(exchange: ExchangeGateway, symbol: str) -> dict[str, 
         order_type=OrderType.MARKET,
         reduce_only=True,
     )
-    response = exchange.submit_order(intent)
-    return {"status": "ok", "response": response, "symbol": symbol}
+    return submit_and_record(exchange, repo, intent, symbol, cloid_prefix="manual")
 
 
 def _safe_price(exchange: ExchangeGateway, symbol: str) -> Decimal | None:

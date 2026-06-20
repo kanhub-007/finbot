@@ -21,12 +21,33 @@ from finbot.core.domain.interfaces.telegram_bot_port import TelegramBotPort
 logger = logging.getLogger(__name__)
 
 _HANDLED_COMMANDS = [
-    "start", "whoami", "stop", "status", "run", "history",
-    "panic", "help", "list", "mute", "unmute",
+    "start",
+    "whoami",
+    "stop",
+    "status",
+    "run",
+    "history",
+    "panic",
+    "help",
+    "list",
+    "mute",
+    "unmute",
     # trading-control spec
-    "symbol", "price", "balance", "leverage", "position",
-    "long", "short", "close", "clear", "sl", "tp", "config", "size",
-    "orders", "cancel",
+    "symbol",
+    "price",
+    "balance",
+    "leverage",
+    "position",
+    "long",
+    "short",
+    "close",
+    "clear",
+    "sl",
+    "tp",
+    "config",
+    "size",
+    "orders",
+    "cancel",
 ]
 
 
@@ -73,12 +94,16 @@ class TelegramBotHandler:
 
         try:
             request = TelegramCommandRequest(
-                command=f"/{update.message.text.split()[0].strip('/').split('@')[0]}"
-                if update.message.text
-                else "/start",
-                args=update.message.text.split(maxsplit=1)[1]
-                if update.message.text and " " in update.message.text
-                else "",
+                command=(
+                    f"/{update.message.text.split()[0].strip('/').split('@')[0]}"
+                    if update.message.text
+                    else "/start"
+                ),
+                args=(
+                    update.message.text.split(maxsplit=1)[1]
+                    if update.message.text and " " in update.message.text
+                    else ""
+                ),
                 chat_id=update.effective_chat.id,
                 user_id=update.effective_user.id,
                 message_id=update.message.message_id,
@@ -145,7 +170,6 @@ class TelegramBotHandler:
         from finbot.core.application.dto.telegram_command_result import (
             TelegramCommandResult,
         )
-        from finbot.core.domain.entities.send_result import SendResult
 
         r: TelegramCommandResult = result  # type: ignore[assignment]
 

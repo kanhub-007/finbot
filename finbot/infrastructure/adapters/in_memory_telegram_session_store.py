@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from finbot.core.domain.entities.telegram_run_flow_session import (
     TelegramRunFlowSession,
@@ -40,11 +40,7 @@ class InMemoryTelegramSessionStore(TelegramSessionStore):
 
     def expire_old(self, now: object) -> int:
         assert isinstance(now, datetime)
-        to_delete = [
-            sid
-            for sid, s in self._sessions.items()
-            if s.is_expired(now)
-        ]
+        to_delete = [sid for sid, s in self._sessions.items() if s.is_expired(now)]
         for sid in to_delete:
             del self._sessions[sid]
         return len(to_delete)

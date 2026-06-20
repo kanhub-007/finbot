@@ -122,14 +122,14 @@ def _build_strategy_evaluator(strategy_path: str, symbol: str, interval: str):
     own evaluator via the shared factory.
     """
     from finbot.core.domain.interfaces.strategy_evaluator import StrategyEvaluator
+    from finbot.core.domain.services.content_hash import hash_strategy_file
     from finbot.infrastructure.adapters import (
         shared_runtime_strategy_evaluator_factory as _eval_factory_mod,
     )
-    from finbot.startup.runtime_factory import _hash_strategy_file
 
     loader = YamlStrategyDefinitionLoader()
     definition = loader.load_from_file(strategy_path)
-    strategy_hash = _hash_strategy_file(strategy_path)
+    strategy_hash = hash_strategy_file(strategy_path)
     evaluator: (
         StrategyEvaluator
     ) = _eval_factory_mod.SharedRuntimeStrategyEvaluatorFactory().create(

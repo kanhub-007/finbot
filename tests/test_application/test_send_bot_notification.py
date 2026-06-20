@@ -1,6 +1,6 @@
 """Tests for SendBotNotification — trade, risk, and error notifications."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -37,9 +37,7 @@ class TestTradeNotification:
     ):
         """Trade notification goes to all registered chats."""
         outbox = FakeTelegramOutbox()
-        use_case = SendBotNotification(
-            bot_port=outbox, chat_repo=populated_repo
-        )
+        use_case = SendBotNotification(bot_port=outbox, chat_repo=populated_repo)
 
         event = TradeExecuted(
             run_id="r_abc123",
@@ -49,7 +47,7 @@ class TestTradeNotification:
             price="67432.50",
             pnl=None,
             order_id="12345",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         results = await use_case.notify_trade(event)
@@ -65,15 +63,16 @@ class TestTradeNotification:
             assert "12345" in msg["text"]
             assert "r_abc123" in msg["text"]
             # Each chat gets a "View status" button
-            assert msg["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "/status"
+            assert (
+                msg["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+                == "/status"
+            )
 
     @pytest.mark.asyncio
     async def test_trade_notification_includes_pnl_when_closing(self, populated_repo):
         """Closing trades include PnL in the notification."""
         outbox = FakeTelegramOutbox()
-        use_case = SendBotNotification(
-            bot_port=outbox, chat_repo=populated_repo
-        )
+        use_case = SendBotNotification(bot_port=outbox, chat_repo=populated_repo)
 
         event = TradeExecuted(
             run_id="r_abc123",
@@ -83,7 +82,7 @@ class TestTradeNotification:
             price="67890.00",
             pnl="22.87",
             order_id="12346",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         await use_case.notify_trade(event)
@@ -106,7 +105,7 @@ class TestTradeNotification:
             price="67432.50",
             pnl=None,
             order_id="12345",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         results = await use_case.notify_trade(event)
@@ -121,9 +120,7 @@ class TestRiskNotification:
     ):
         """Risk event notification goes to all chats with reason."""
         outbox = FakeTelegramOutbox()
-        use_case = SendBotNotification(
-            bot_port=outbox, chat_repo=populated_repo
-        )
+        use_case = SendBotNotification(bot_port=outbox, chat_repo=populated_repo)
 
         event = RiskEventTriggered(
             run_id="r_abc123",
@@ -144,9 +141,7 @@ class TestRiskNotification:
     async def test_risk_notification_bot_not_stopped(self, populated_repo):
         """Non-fatal risk events note that bot continues."""
         outbox = FakeTelegramOutbox()
-        use_case = SendBotNotification(
-            bot_port=outbox, chat_repo=populated_repo
-        )
+        use_case = SendBotNotification(bot_port=outbox, chat_repo=populated_repo)
 
         event = RiskEventTriggered(
             run_id="r_abc123",
@@ -168,9 +163,7 @@ class TestErrorNotification:
     async def test_error_notification_broadcasts_to_all_chats(self, populated_repo):
         """Error event notification goes to all chats."""
         outbox = FakeTelegramOutbox()
-        use_case = SendBotNotification(
-            bot_port=outbox, chat_repo=populated_repo
-        )
+        use_case = SendBotNotification(bot_port=outbox, chat_repo=populated_repo)
 
         event = BotErrorEvent(
             run_id="r_abc123",

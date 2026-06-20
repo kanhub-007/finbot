@@ -104,13 +104,17 @@ class WarmupWindow:
             if isinstance(raw, (int, float)):
                 return int(raw)
             if isinstance(raw, datetime):
-                return int(raw.timestamp())
-            # string — try ISO, then epoch int/float
+                # Naive datetimes are assumed UTC (bar timestamps are always
+                # UTC in the exchange feed).
+                dt = raw if raw.tzinfo else raw.replace(tzinfo=UTC)
+                return int(dt.timestamp())
+            # string — try ISO, then epoch int/float.
+            # All bar timestamps are UTC; naive-parsed strings are assumed UTC.
             s = str(raw)
             for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
                 try:
-                    dt = datetime.strptime(s, fmt)
-                    return int(dt.replace(tzinfo=UTC).timestamp())
+                    dt = datetime.strptime(s, fmt).replace(tzinfo=UTC)
+                    return int(dt.timestamp())
                 except ValueError:
                     continue
             return int(float(s))

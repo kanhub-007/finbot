@@ -7,7 +7,7 @@ interaction assertions. All state is observable and assertable.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from finbot.core.domain.entities.telegram_chat import TelegramChat
 from finbot.core.domain.entities.telegram_run_flow_session import (

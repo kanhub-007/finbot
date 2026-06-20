@@ -3,12 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from finbar_strategy_runtime.domain.entities.strategy_definition import (
-        StrategyDefinition,
-    )
 
 
 @dataclass(frozen=True)
@@ -22,4 +16,4 @@ class ValidateStrategyResult:
     schema_version: str = ""
     primary_timeframe: str = ""
     indicator_count: int = 0
-    definition: StrategyDefinition | None = None
+    definition: object | None = None

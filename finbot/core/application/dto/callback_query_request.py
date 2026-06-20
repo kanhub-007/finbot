@@ -1,6 +1,6 @@
 """CallbackQueryRequest — DTO for a Telegram inline-keyboard callback query."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,7 @@
 """Tests for redact() word boundaries (S23: L4)."""
+
 from finbot.infrastructure.services.log_redactor import redact
+
 
 class TestRedactBoundaries:
     def test_substring_in_identifier_does_not_over_redact(self):

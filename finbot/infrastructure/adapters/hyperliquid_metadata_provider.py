@@ -68,9 +68,7 @@ class HyperliquidMetadataProvider(MarketMetadataProvider):
             md = MarketMetadata(
                 symbol=name,
                 sz_decimals=asset.get("szDecimals", 0),
-                price_tick=_tick_to_decimal(
-                    asset.get("coinCdcDecimalPlaces", 0)
-                ),
+                price_tick=_tick_to_decimal(asset.get("coinCdcDecimalPlaces", 0)),
                 max_leverage=asset.get("maxLeverage", 0),
             )
             self._cache[name.upper()] = md
@@ -112,9 +110,7 @@ class HyperliquidMetadataProvider(MarketMetadataProvider):
             md = MarketMetadata(
                 symbol=name,
                 sz_decimals=asset.get("szDecimals", 0),
-                price_tick=_tick_to_decimal(
-                    asset.get("coinCdcDecimalPlaces", 0)
-                ),
+                price_tick=_tick_to_decimal(asset.get("coinCdcDecimalPlaces", 0)),
                 max_leverage=asset.get("maxLeverage", 0),
             )
             per_dex[name] = md

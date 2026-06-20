@@ -1,7 +1,7 @@
 """TelegramChat domain entity — an authorized chat subscribed to notifications."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass(frozen=True)
@@ -15,5 +15,5 @@ class TelegramChat:
 
     chat_id: int
     user_id: int
-    registered_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    registered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     notifications_enabled: bool = True

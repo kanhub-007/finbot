@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from finbot.core.application.use_cases.live_order_executor import LiveOrderExecutor
+from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
@@ -14,6 +14,7 @@ from finbot.core.domain.interfaces.order_normalizer import OrderNormalizer
 from finbot.core.domain.interfaces.order_submission_strategy import (
     OrderSubmissionStrategy,
 )
+from finbot.infrastructure.adapters.live_order_executor import LiveOrderExecutor
 
 
 class LiveSubmissionStrategy(OrderSubmissionStrategy):
@@ -28,15 +29,16 @@ class LiveSubmissionStrategy(OrderSubmissionStrategy):
         exchange_gateway: ExchangeGateway,
         order_normalizer: OrderNormalizer | None,
         repo: BotStateRepository,
+        executor: LiveOrderExecutor | None = None,
     ) -> None:
-        self._submitter = LiveOrderExecutor(
+        self._submitter = executor or LiveOrderExecutor(
             exchange_gateway, order_normalizer, repo
         )
         self._repo = repo
 
     def submit(
         self,
-        intent: object,
+        intent: OrderIntent,
         bot_run_id: str,
         latest_bar: dict[str, Any] | None,
     ) -> tuple[str, bool]:
@@ -47,7 +49,5 @@ class LiveSubmissionStrategy(OrderSubmissionStrategy):
         if latest_bar is not None:
             ref_price = Decimal(str(latest_bar.get("close", "0")))
 
-        submitted = self._submitter.submit(
-            intent, intent_id, bot_run_id, ref_price
-        )
+        submitted = self._submitter.submit(intent, intent_id, bot_run_id, ref_price)
         return intent_id, submitted

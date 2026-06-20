@@ -16,8 +16,6 @@ import json
 import logging
 from datetime import UTC
 from datetime import datetime as _dt
-from decimal import Decimal
-from pathlib import Path
 from typing import Any
 
 from finbot.core.application.dto.candle_processing_result import (
@@ -69,15 +67,26 @@ from finbot.core.domain.interfaces.market_metadata_provider import (
 )
 from finbot.core.domain.interfaces.order_normalizer import OrderNormalizer
 from finbot.core.domain.interfaces.order_planner import OrderPlanner
+from finbot.core.domain.interfaces.order_submission_strategy import (
+    OrderSubmissionStrategy,
+)
+from finbot.core.domain.interfaces.runtime_event_emitter import RuntimeEventEmitter
+from finbot.core.domain.interfaces.strategy_definition_loader import (
+    StrategyDefinitionLoader,
+)
 from finbot.core.domain.interfaces.strategy_evaluator import (
     StrategyEvaluator,
 )
-from finbot.core.domain.interfaces.runtime_event_emitter import RuntimeEventEmitter
 from finbot.core.domain.interfaces.strategy_validator import (
     StrategyValidator,
 )
 from finbot.core.domain.services.live_mode_guard import check_live_mode
+from finbot.core.domain.services.order_helpers import (
+    normalize_order_side,
+    parse_decimal,
+)
 from finbot.core.domain.services.trade_ledger import TradeLedger
+from finbot.core.domain.services.transactional import transactional
 from finbot.core.domain.services.warmup_window import WarmupWindow
 
 logger = logging.getLogger(__name__)
@@ -116,6 +125,7 @@ class LiveTradingRuntimeUseCase:
         cloid_generator: CloidGenerator | None = None,
         bot_loop: BotLoop | None = None,
         strategy_validator: StrategyValidator | None = None,
+        strategy_loader: StrategyDefinitionLoader | None = None,
         account_event_handler: AccountEventHandler | None = None,
         trade_ledger: TradeLedger | None = None,
         live_state: Any | None = None,
@@ -135,6 +145,7 @@ class LiveTradingRuntimeUseCase:
         self._cloid_gen = cloid_generator
         self._bot_loop = bot_loop
         self._strategy_validator = strategy_validator
+        self._strategy_loader = strategy_loader
         self._account_handler = account_event_handler
         self._trade_ledger = trade_ledger or TradeLedger(self._repo)
         self._live_state = live_state
@@ -233,17 +244,28 @@ class LiveTradingRuntimeUseCase:
         """
         if self._strategy_validator is None:
             return None
+        # Delegate file I/O to the injected strategy loader (domain interface)
+        # so this use case has no filesystem dependency.
+        if self._strategy_loader is None:
+            return RunBotResult(
+                status="rejected",
+                message="strategy compatibility: no strategy loader available",
+            )
         try:
-            content = Path(strategy_path).read_text(encoding="utf-8")
+            content = self._strategy_loader.load_content(strategy_path)
+        except Exception as e:  # noqa: BLE001 - fail closed
+            logger.warning("Strategy content load failed: %s", e)
+            if mode in ("testnet", "live"):
+                return RunBotResult(
+                    status="rejected",
+                    message=f"strategy compatibility: cannot read strategy ({e})",
+                )
+            return None
+        try:
             result = self._strategy_validator.compatibility(
                 ValidateStrategyRequest(
                     strategy_path=strategy_path, strategy_content=content
                 )
-            )
-        except OSError as e:
-            return RunBotResult(
-                status="rejected",
-                message=f"strategy compatibility: cannot read strategy file ({e})",
             )
         except Exception as e:  # noqa: BLE001 - fail closed on any check error
             logger.warning("Strategy compatibility check failed: %s", e)
@@ -356,8 +378,8 @@ class LiveTradingRuntimeUseCase:
                     OrderLifecycle(
                         order_id=oid,
                         symbol=self._symbol,
-                        side=_normalise_order_side(order.get("side", "")),
-                        original_size=_parse_decimal(order.get("sz")),
+                        side=normalize_order_side(order.get("side", "")),
+                        original_size=parse_decimal(order.get("sz")),
                         state=OrderState.OPEN,
                     )
                 )
@@ -528,9 +550,7 @@ class LiveTradingRuntimeUseCase:
                 self._enriched_frame, self._warmup.latest_bar
             )
             df = self._trim_frame(df)
-        enriched = self._indicator_calc.calculate(
-            df, self._required_indicators or list(self._required_columns)
-        )
+        enriched = self._indicator_calc.calculate(df, self._required_indicators)
         self._enriched_frame = enriched
         return enriched
 
@@ -646,16 +666,8 @@ class LiveTradingRuntimeUseCase:
         return self._dispatch_submission(plan)
 
     def _with_persistence_transaction(self, fn):
-        """Run *fn* inside a repo transaction if the repo supports one.
-
-        Falls back to direct execution for in-memory repos that don't expose
-        ``transaction`` (they have no fsync cost to avoid).
-        """
-        tx = getattr(self._repo, "transaction", None)
-        if tx is None:
-            return fn()
-        with tx():
-            return fn()
+        """Run *fn* inside a repo transaction if the repo supports one."""
+        return transactional(self._repo, fn)
 
     def _build_risk_context(
         self, bar: dict[str, Any], position: PositionSnapshot
@@ -674,19 +686,19 @@ class LiveTradingRuntimeUseCase:
             "daily_loss_usd": self._trade_ledger.realized_loss_on(_dt.now(UTC).date()),
         }
 
-    def _read_leverage(self) -> int:
-        """Return the active symbol's leverage, falling back to 1 when unknown.
+    def _read_leverage(self) -> int | None:
+        """Return active leverage, failing closed when live risk data is unknown.
 
-        ``ExchangeGateway.get_leverage`` returns ``None`` when the exchange
-        has no position yet for the symbol (Hyperliquid only reports
-        leverage on an open position). The fallback matches the
-        ``MaxLeverageGate`` documented default of 1x.
+        Dry-run and no-position accounts may safely assume 1x. Testnet/live
+        return ``None`` only when the exchange read fails; the
+        ``MaxLeverageGate`` rejects explicit unknown leverage instead of
+        pretending failed risk-data reads are safe.
         """
         try:
             reported = self._exchange.get_leverage(self._symbol or "")
         except Exception:
-            logger.debug("get_leverage failed", exc_info=True)
-            return 1
+            logger.warning("get_leverage failed", exc_info=True)
+            return 1 if self._mode == TradingMode.DRY_RUN else None
         if reported is None:
             return 1
         return int(reported[0])
@@ -770,30 +782,3 @@ def _normalize_ts(candle: dict[str, Any]) -> int:
     if isinstance(ts, float):
         return int(ts)
     return int(ts)
-
-
-def _normalise_order_side(raw: Any) -> str:
-    """Normalise a Hyperliquid open-order ``side`` field to a lifecycle side.
-
-    The exchange uses "B"/"S" (and occasionally "buy"/"sell"); lifecycles
-    store the lowercase word. Falls back to "unknown" so an unexpected
-    payload never crashes reconciliation.
-    """
-    s = str(raw).strip().lower()
-    if s in ("b", "buy", "long"):
-        return "buy"
-    if s in ("s", "sell", "short"):
-        return "sell"
-    return "unknown"
-
-
-def _parse_decimal(value: Any) -> Decimal:
-    """Parse an exchange numeric field into a Decimal (0 on failure).
-
-    Used for ``sz`` fields in open-order payloads. Never raises — a
-    malformed size shouldn't abort reconciliation.
-    """
-    try:
-        return Decimal(str(value))
-    except Exception:
-        return Decimal("0")

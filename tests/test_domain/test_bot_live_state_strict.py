@@ -1,6 +1,9 @@
 """Tests for BotLiveState strict update (S18: M2)."""
+
 import pytest
+
 from finbot.core.domain.services.bot_live_state import BotLiveState
+
 
 class TestBotLiveStateStrict:
     def test_update_rejects_unknown_field(self):

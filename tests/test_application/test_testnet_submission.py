@@ -16,12 +16,12 @@ from finbot.core.domain.services.risk_gates.duplicate_signal_gate import (
 )
 from finbot.core.domain.services.risk_gates.mode_gate import ModeGate
 from tests.fakes import (
+    FakeBotStateRepository,
     FakeExchangeGateway,
     FakeStrategyEvaluator,
     InMemoryBarFrameConverter,
     InMemoryIndicatorEngine,
     InMemoryMarketMetadataProvider,
-    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_event_emitter,
@@ -36,6 +36,7 @@ def _make_live_submission_strategy(exchange, repo, normalizer=None):
     )
 
     return LiveSubmissionStrategy(exchange, normalizer, repo)
+
 
 # ---------------------------------------------------------------------------
 # Helpers

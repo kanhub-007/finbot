@@ -5,6 +5,9 @@ Functions take the use case instance (``uc``) as first arg.
 
 from __future__ import annotations
 
+from finbot.core.application.dto.telegram_command_request import (
+    TelegramCommandRequest,
+)
 from finbot.core.application.dto.telegram_command_result import (
     TelegramCommandResult,
 )

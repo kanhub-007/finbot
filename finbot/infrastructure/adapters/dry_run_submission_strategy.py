@@ -8,11 +8,13 @@ fill from the latest bar and applies it to the :class:`TradeLedger`.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime as _dt
+from datetime import UTC
+from datetime import datetime as _dt
 from decimal import Decimal
 from typing import Any
 
 from finbot.core.domain.entities.fill_record import FillRecord
+from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
 )
@@ -45,7 +47,7 @@ class DryRunSubmissionStrategy(OrderSubmissionStrategy):
 
     def submit(
         self,
-        intent: object,
+        intent: OrderIntent,
         bot_run_id: str,
         latest_bar: dict[str, Any] | None,
     ) -> tuple[str, bool]:
@@ -66,7 +68,9 @@ class DryRunSubmissionStrategy(OrderSubmissionStrategy):
 
     @staticmethod
     def _synthesize_fill(
-        intent, intent_id: str, bot_run_id: str,
+        intent: OrderIntent,
+        intent_id: str,
+        bot_run_id: str,
         latest_bar: dict[str, Any] | None,
     ) -> FillRecord | None:
         """Build a synthetic FillRecord from an OrderIntent."""

@@ -34,8 +34,8 @@ from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
     YamlStrategyDefinitionLoader,
 )
 from tests.fakes import (
-    InMemoryExchangeGateway,
     FakeBotStateRepository,
+    InMemoryExchangeGateway,
     closed_warmup_bars,
     make_dry_run_submission_strategy,
     make_event_emitter,
@@ -94,9 +94,7 @@ def test_real_calculator_composes_intermediate_indicators() -> None:
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=PandasBarFrameConverter(),
         mode=TradingMode.DRY_RUN,
-        submission_strategy=make_dry_run_submission_strategy(
-            FakeBotStateRepository()
-        ),
+        submission_strategy=make_dry_run_submission_strategy(FakeBotStateRepository()),
         event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(120),
         required_columns=set(loader.last_required_columns()),

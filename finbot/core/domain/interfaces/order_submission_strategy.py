@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+from finbot.core.domain.entities.order_intent import OrderIntent
+
 
 class OrderSubmissionStrategy(ABC):
     """Strategy for submitting orders based on trading mode.
@@ -19,7 +21,7 @@ class OrderSubmissionStrategy(ABC):
     @abstractmethod
     def submit(
         self,
-        intent: Any,
+        intent: OrderIntent,
         bot_run_id: str,
         latest_bar: dict[str, Any] | None,
     ) -> tuple[str, bool]:

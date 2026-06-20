@@ -39,11 +39,7 @@ def format_trade_text(event: TradeExecuted) -> str:
 
 def format_risk_text(event: RiskEventTriggered) -> str:
     """Format a RiskEventTriggered event as a MarkdownV2 message string."""
-    text = (
-        f"\u26a0\ufe0f *Risk Event*\n"
-        f"{event.reason}\n"
-        f"Run: {event.run_id}"
-    )
+    text = f"\u26a0\ufe0f *Risk Event*\n" f"{event.reason}\n" f"Run: {event.run_id}"
     if event.bot_stopped:
         text += "\n*Bot stopped\\.* No further orders will be placed\\."
     return text
@@ -51,11 +47,7 @@ def format_risk_text(event: RiskEventTriggered) -> str:
 
 def format_error_text(event: BotErrorEvent) -> str:
     """Format a BotErrorEvent as a MarkdownV2 message string."""
-    return (
-        f"\u274c *Error*\n"
-        f"{event.message}\n"
-        f"Run: {event.run_id}"
-    )
+    return f"\u274c *Error*\n" f"{event.message}\n" f"Run: {event.run_id}"
 
 
 class SendBotNotification:

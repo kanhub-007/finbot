@@ -23,6 +23,36 @@ class SignalDecision:
     stop_price: Decimal | None = None
     target_price: Decimal | None = None
 
+    def __post_init__(self) -> None:
+        """Warn on key fields that would produce an invalid signal key.
+
+        Validation is deferred to :attr:`signal_key` (which raises) so
+        tests that construct partial signals without accessing the key
+        continue to work.  Non-HOLD signals with empty key fields get a
+        runtime warning at construction time to catch misconfiguration
+        early in production.
+        """
+        if self.action == SignalAction.HOLD:
+            return
+        missing: list[str] = []
+        if not self.symbol:
+            missing.append("symbol")
+        if not self.interval:
+            missing.append("interval")
+        if not self.candle_timestamp:
+            missing.append("candle_timestamp")
+        if not self.strategy_hash:
+            missing.append("strategy_hash")
+        if missing:
+            import warnings
+
+            warnings.warn(
+                f"SignalDecision({self.action.value}) has empty key fields "
+                f"({', '.join(missing)}); signal_key will raise at access.",
+                UserWarning,
+                stacklevel=2,
+            )
+
     @property
     def signal_key(self) -> str:
         """Unique signal key for idempotent processing.

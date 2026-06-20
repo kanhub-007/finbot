@@ -6,7 +6,6 @@ Classical school: real runtime with fake adapters, in-memory repo.
 from decimal import Decimal
 
 from finbot.core.domain.entities.position_direction import PositionDirection
-from finbot.core.domain.entities.position_snapshot import PositionSnapshot
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.entities.trading_mode import TradingMode
@@ -96,7 +95,7 @@ class TestDryRunTradeTracking:
         # Warmup is ready after 100 bars; process a new candle.
         from tests.fakes import new_closed_candle
 
-        result = runtime.process_closed_candle(new_closed_candle(100))
+        runtime.process_closed_candle(new_closed_candle(100))
         # The FakeStrategyEvaluator produces HOLD by default — need to replace.
         # Instead, directly test the synthesis path via the built runtime.
 
@@ -107,6 +106,7 @@ class TestDryRunTradeTracking:
 
         # Simulate what _synthesize_fill + apply_fill does
         from datetime import UTC, datetime
+
         from finbot.core.domain.entities.fill_record import FillRecord
 
         fill = FillRecord(
@@ -135,6 +135,7 @@ class TestDryRunTradeTracking:
         ledger = TradeLedger(repo)
 
         from datetime import UTC, datetime
+
         from finbot.core.domain.entities.fill_record import FillRecord
 
         # Entry
@@ -181,6 +182,7 @@ class TestDailyLossEndToEnd:
         ledger = TradeLedger(repo)
 
         from datetime import UTC, datetime
+
         from finbot.core.domain.entities.fill_record import FillRecord
 
         # Close a losing trade today
@@ -224,7 +226,6 @@ class TestDailyLossEndToEnd:
     def test_risk_event_persisted_on_rejection(self) -> None:
         """When a gate rejects, a risk event is persisted."""
         repo = InMemoryBotStateRepository()
-        ledger = TradeLedger(repo)
 
         from finbot.core.domain.entities.risk_event_record import RiskEventRecord
 

@@ -104,8 +104,11 @@ class TestSqliteTradeRepository:
 
         t1 = self._make_trade(position_id="p1", status="open")
         t2 = self._make_trade(
-            position_id="p2", symbol="ETH", status="closed",
-            realized_pnl=Decimal("-10"), closed_at=now,
+            position_id="p2",
+            symbol="ETH",
+            status="closed",
+            realized_pnl=Decimal("-10"),
+            closed_at=now,
             close_price=Decimal("49000"),
         )
 
@@ -121,13 +124,18 @@ class TestSqliteTradeRepository:
         now = datetime.now(UTC)
 
         t1 = self._make_trade(
-            position_id="p1", status="closed",
-            realized_pnl=Decimal("100"), close_price=Decimal("51000"),
+            position_id="p1",
+            status="closed",
+            realized_pnl=Decimal("100"),
+            close_price=Decimal("51000"),
             closed_at=now - timedelta(minutes=30),
         )
         t2 = self._make_trade(
-            position_id="p2", symbol="ETH", status="closed",
-            realized_pnl=Decimal("-50"), close_price=Decimal("2950"),
+            position_id="p2",
+            symbol="ETH",
+            status="closed",
+            realized_pnl=Decimal("-50"),
+            close_price=Decimal("2950"),
             closed_at=now,
         )
 
@@ -154,14 +162,21 @@ class TestSqliteTradeRepository:
         )
 
         t1 = self._make_trade(
-            position_id="p1", bot_run_id="r1", status="closed",
-            realized_pnl=Decimal("100"), close_price=Decimal("51000"),
+            position_id="p1",
+            bot_run_id="r1",
+            status="closed",
+            realized_pnl=Decimal("100"),
+            close_price=Decimal("51000"),
             closed_at=now,
         )
         t2 = self._make_trade(
-            position_id="p2", bot_run_id="r2", symbol="ETH",
-            status="closed", realized_pnl=Decimal("-50"),
-            close_price=Decimal("2950"), closed_at=now,
+            position_id="p2",
+            bot_run_id="r2",
+            symbol="ETH",
+            status="closed",
+            realized_pnl=Decimal("-50"),
+            close_price=Decimal("2950"),
+            closed_at=now,
         )
 
         repo.open_trade(t1)
@@ -182,20 +197,28 @@ class TestSqliteTradeRepository:
 
         # Losing trade today
         t1 = self._make_trade(
-            position_id="p1", status="closed",
-            realized_pnl=Decimal("-30"), close_price=Decimal("47000"),
+            position_id="p1",
+            status="closed",
+            realized_pnl=Decimal("-30"),
+            close_price=Decimal("47000"),
             closed_at=now,
         )
         # Another losing trade today
         t2 = self._make_trade(
-            position_id="p2", symbol="ETH", status="closed",
-            realized_pnl=Decimal("-20"), close_price=Decimal("2900"),
+            position_id="p2",
+            symbol="ETH",
+            status="closed",
+            realized_pnl=Decimal("-20"),
+            close_price=Decimal("2900"),
             closed_at=now,
         )
         # Profitable trade today — excluded from loss sum
         t3 = self._make_trade(
-            position_id="p3", symbol="SOL", status="closed",
-            realized_pnl=Decimal("40"), close_price=Decimal("110"),
+            position_id="p3",
+            symbol="SOL",
+            status="closed",
+            realized_pnl=Decimal("40"),
+            close_price=Decimal("110"),
             closed_at=now,
         )
 
@@ -213,8 +236,10 @@ class TestSqliteTradeRepository:
         yesterday = now - timedelta(days=1)
 
         t_old = self._make_trade(
-            position_id="p1", status="closed",
-            realized_pnl=Decimal("-100"), close_price=Decimal("49000"),
+            position_id="p1",
+            status="closed",
+            realized_pnl=Decimal("-100"),
+            close_price=Decimal("49000"),
             closed_at=yesterday,
         )
         repo.open_trade(t_old)

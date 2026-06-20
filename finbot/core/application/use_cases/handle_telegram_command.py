@@ -11,37 +11,30 @@ from finbot.core.application.dto.telegram_command_request import (
 from finbot.core.application.dto.telegram_command_result import (
     TelegramCommandResult,
 )
-from finbot.core.application.use_cases.telegram_helpers import (
-    _DEFAULT_INTERVALS,
-    _DEFAULT_SYMBOLS,
-    _escape_mdv2,
-    _get_symbols,
-    _parse_brackets,
+from finbot.core.application.use_cases.telegram_config_flow import (
+    _handle_config,
+    _handle_config_profile,
+    _handle_config_save,
+    _handle_size,
+    _render_config_view,
 )
-from finbot.core.domain.entities.callback_data import CallbackData
-from finbot.core.domain.entities.telegram_chat import TelegramChat
-from finbot.core.domain.interfaces.bot_manager_port import BotManagerPort
-from finbot.core.domain.interfaces.strategy_directory import StrategyDirectory
-from finbot.core.domain.interfaces.telegram_chat_repository import (
-    TelegramChatRepository,
-)
-from finbot.core.domain.interfaces.telegram_session_store import (
-    TelegramSessionStore,
-)
-
-
-from finbot.core.application.use_cases.telegram_run_flow import (
-    _handle_run,
-    _handle_run_callback,
-    _read_execution_config,
-    _render_symbol_page,
-    _run_cb_confirm,
-    _run_cb_int,
-    _run_cb_mode,
-    _run_cb_mode_live,
-    _run_cb_strat,
-    _run_cb_sym,
-    _start_bot_from_session,
+from finbot.core.application.use_cases.telegram_lifecycle import (
+    _format_idle_status,
+    _format_running_status,
+    _handle_balance,
+    _handle_help,
+    _handle_history,
+    _handle_leverage,
+    _handle_list,
+    _handle_mute,
+    _handle_position,
+    _handle_price,
+    _handle_start,
+    _handle_status,
+    _handle_stop,
+    _handle_symbol,
+    _handle_unmute,
+    _render_symbol_picker,
 )
 from finbot.core.application.use_cases.telegram_manual_orders import (
     _execute_clear,
@@ -67,31 +60,27 @@ from finbot.core.application.use_cases.telegram_panic_flow import (
     _handle_panic_callback,
     _panic_execute,
 )
-from finbot.core.application.use_cases.telegram_config_flow import (
-    _handle_config,
-    _handle_config_profile,
-    _handle_config_save,
-    _handle_size,
-    _render_config_view,
+from finbot.core.application.use_cases.telegram_run_flow import (
+    _handle_run,
+    _handle_run_callback,
+    _read_execution_config,
+    _render_symbol_page,
+    _run_cb_confirm,
+    _run_cb_int,
+    _run_cb_mode,
+    _run_cb_mode_live,
+    _run_cb_strat,
+    _run_cb_sym,
+    _start_bot_from_session,
 )
-
-from finbot.core.application.use_cases.telegram_lifecycle import (
-    _handle_start,
-    _handle_help,
-    _handle_status,
-    _format_running_status,
-    _format_idle_status,
-    _handle_stop,
-    _handle_list,
-    _handle_mute,
-    _handle_unmute,
-    _handle_history,
-    _handle_balance,
-    _handle_leverage,
-    _handle_position,
-    _handle_price,
-    _handle_symbol,
-    _render_symbol_picker,
+from finbot.core.domain.entities.callback_data import CallbackData
+from finbot.core.domain.interfaces.bot_manager_port import BotManagerPort
+from finbot.core.domain.interfaces.strategy_directory import StrategyDirectory
+from finbot.core.domain.interfaces.telegram_chat_repository import (
+    TelegramChatRepository,
+)
+from finbot.core.domain.interfaces.telegram_session_store import (
+    TelegramSessionStore,
 )
 
 

@@ -1,12 +1,11 @@
 """Strategy evaluator factory interface."""
 
 from abc import ABC, abstractmethod
-
-from finbar_strategy_runtime.domain.entities.strategy_definition import (
-    StrategyDefinition,
-)
+from typing import Any
 
 from finbot.core.domain.interfaces.strategy_evaluator import StrategyEvaluator
+
+StrategyDefinition = Any
 
 
 class StrategyEvaluatorFactory(ABC):

@@ -1,10 +1,9 @@
 """Strategy definition loader interface."""
 
 from abc import ABC, abstractmethod
+from typing import Any
 
-from finbar_strategy_runtime.domain.entities.strategy_definition import (
-    StrategyDefinition,
-)
+StrategyDefinition = Any
 
 
 class StrategyDefinitionLoader(ABC):
@@ -17,3 +16,12 @@ class StrategyDefinitionLoader(ABC):
     @abstractmethod
     def load_from_file(self, path: str) -> StrategyDefinition:
         """Parse a strategy YAML/JSON file into a StrategyDefinition."""
+
+    @abstractmethod
+    def load_content(self, path: str) -> str:
+        """Read the raw strategy file content as a string.
+
+        Separated from *load_from_file* so callers that only need the
+        raw text (e.g. compatibility checks) do not pay for parsing.
+        """
+        ...

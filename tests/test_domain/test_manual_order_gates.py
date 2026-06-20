@@ -10,7 +10,6 @@ from decimal import Decimal
 from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_side import OrderSide
 from finbot.core.domain.entities.order_type import OrderType
-from finbot.core.domain.entities.risk_decision import RiskDecision
 from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
 from finbot.core.domain.services.risk_gates.manual_max_position_gate import (
     ManualMaxPositionGate,
@@ -77,7 +76,9 @@ class TestManualMaxPositionGate:
         cfg.set("max_position", "1000")
         gate = ManualMaxPositionGate(cfg)
 
-        assert gate.check(_buy_intent(size="0.01"), {"price": Decimal("50000")}).accepted
+        assert gate.check(
+            _buy_intent(size="0.01"), {"price": Decimal("50000")}
+        ).accepted
 
         cfg.set("max_position", "100")  # lower to 100
 

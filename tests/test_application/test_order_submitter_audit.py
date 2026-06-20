@@ -15,11 +15,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from finbot.core.application.use_cases.live_order_executor import LiveOrderExecutor
 from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_side import OrderSide
 from finbot.core.domain.entities.order_type import OrderType
-from tests.fakes import InMemoryExchangeGateway, FakeBotStateRepository
+from finbot.infrastructure.adapters.live_order_executor import LiveOrderExecutor
+from tests.fakes import FakeBotStateRepository, InMemoryExchangeGateway
 
 
 class _PassthroughNormalizer:

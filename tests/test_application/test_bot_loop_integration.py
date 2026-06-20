@@ -8,11 +8,11 @@ from finbot.core.domain.services.enrichment_validator import (
     EnrichmentValidator,
 )
 from tests.fakes import (
+    FakeBotStateRepository,
     FakeStrategyEvaluator,
     InMemoryBarFrameConverter,
     InMemoryExchangeGateway,
     InMemoryIndicatorEngine,
-    FakeBotStateRepository,
     closed_warmup_bars,
     indicator_bar,
     make_dry_run_submission_strategy,
@@ -132,9 +132,7 @@ def test_run_forever_raises_without_bot_loop() -> None:
         enrichment_validator=EnrichmentValidator(),
         bar_frame_converter=InMemoryBarFrameConverter(),
         mode=TradingMode.DRY_RUN,
-        submission_strategy=make_dry_run_submission_strategy(
-            FakeBotStateRepository()
-        ),
+        submission_strategy=make_dry_run_submission_strategy(FakeBotStateRepository()),
         event_emitter=make_event_emitter(),
         warmup_bars=closed_warmup_bars(100),
     )

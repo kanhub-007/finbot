@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from finbot.core.domain.entities.position_direction import PositionDirection
-from finbot.core.domain.entities.risk_decision import RiskDecision
 from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.entities.trade import Trade
