@@ -450,6 +450,14 @@ class LiveTradingRuntimeUseCase:
                 message="warmup not ready — candle skipped",
             )
 
+        # First candle after warmup — log completion.
+        if self._warmup_needed:
+            self._warmup_needed = False
+            logger.info(
+                "Warmup complete — %d bars loaded, strategy evaluation starting",
+                self._warmup.count,
+            )
+
         # 2. Enrich
         enriched = self._enrich_bars()
         if self._bar_converter.is_empty(enriched):

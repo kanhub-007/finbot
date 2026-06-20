@@ -279,7 +279,12 @@ def _load_warmup_bars(
         logger.info("Loaded %d warmup bars for %s/%s", len(bars), symbol, interval)
         return bars
     except Exception as e:  # noqa: BLE001 - degrade gracefully to live warmup
-        logger.warning("Warmup bar load failed for %s: %s", symbol, e)
+        logger.info(
+            "Warmup bar load failed for %s/%s: %s — "
+            "will warm up from live candles instead "
+            "(normal for new or low-volume tokens)",
+            symbol, interval, e,
+        )
         return []
 
 
