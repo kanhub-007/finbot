@@ -541,6 +541,24 @@ class TestRunFlow:
                 callback_query_id="cq3",
             )
         )
+        # After interval selection, risk config screen appears (not mode).
+        assert "risk" in result.text.lower() or "continue" in str(
+            result.reply_markup
+        ).lower()
+
+        # Step 4b: click Continue on risk config to proceed to mode picker.
+        # The Continue button is the last row, first button.
+        risk_keyboard = result.reply_markup["inline_keyboard"]
+        cont_cb = risk_keyboard[-1][0]["callback_data"]
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=cont_cb,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq3b",
+            )
+        )
         assert "mode" in result.text.lower() or "dry" in result.text.lower()
 
         # Step 5: select dry_run mode via callback
@@ -814,7 +832,7 @@ class TestRunFlow:
                     callback_query_id="cq2_pre",
                 )
             )
-        # Step 3: select symbol → for MTF, should go to MODE picker (skip interval)
+        # Step 3: select symbol → for MTF, should skip interval and show risk config
         symbol_cb = result.reply_markup["inline_keyboard"][0][0]["callback_data"]
         result = await use_case.handle_callback(
             CallbackQueryRequest(
@@ -825,16 +843,33 @@ class TestRunFlow:
                 callback_query_id="cq3",
             )
         )
-        # Should show mode picker, NOT interval picker
+        # Should show risk config (NOT interval picker) for MTF strategy.
         assert (
-            "mode" in result.text.lower() or "dry" in result.text.lower()
-        ), f"Expected mode picker, got: {result.text[:100]}"
+            "risk" in result.text.lower()
+        ), f"Expected risk config, got: {result.text[:150]}"
         assert (
             "30min" in result.text
-        ), f"Expected primary timeframe in text, got: {result.text[:100]}"
+        ), f"Expected primary timeframe in text, got: {result.text[:150]}"
         assert (
-            "interval" not in result.text.lower()
+            "select interval" not in result.text.lower()
         ), "Interval picker should be skipped for MTF strategy"
+
+        # Step 3b: click Continue on risk config to proceed to mode picker.
+        risk_keyboard = result.reply_markup["inline_keyboard"]
+        cont_cb = risk_keyboard[-1][0]["callback_data"]
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=cont_cb,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq3b",
+            )
+        )
+        # Now should show mode picker.
+        assert (
+            "mode" in result.text.lower() or "dry" in result.text.lower()
+        ), f"Expected mode picker after risk config, got: {result.text[:150]}"
 
 
 class TestHistory:

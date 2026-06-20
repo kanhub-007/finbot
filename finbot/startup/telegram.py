@@ -103,6 +103,12 @@ class TelegramControlPlane:
 
         metadata_provider = HyperliquidMetadataProvider()
 
+        from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
+            YamlStrategyDefinitionLoader,
+        )
+
+        strategy_loader = YamlStrategyDefinitionLoader()
+
         command_use_case = HandleTelegramCommand(
             bot_manager=self._bot_manager,
             chat_repo=self._chat_repo,
@@ -114,6 +120,7 @@ class TelegramControlPlane:
             hyperliquid_testnet=self._settings.hyperliquid_testnet,
             metadata_provider=metadata_provider,
             log_reader=_make_log_reader(),
+            strategy_loader=strategy_loader,
         )
 
         self._handler = TelegramBotHandler(

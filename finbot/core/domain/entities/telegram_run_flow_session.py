@@ -22,6 +22,12 @@ class TelegramRunFlowSession:
     symbol: str | None = None
     interval: str | None = None
     mode: str | None = None
+    #: Risk percentage per trade (e.g. 3 for 3%). Set during /run risk step.
+    risk_pct: int = 3
+    #: Leverage multiplier (e.g. 5 for 5x). Set during /run risk step.
+    leverage: int = 5
+    #: Informative intervals for MTF strategies (stored for risk→mode flow).
+    _informative_intervals: list[str] = field(default_factory=list)
     #: Typed stash for manual-order params awaiting confirmation (M9).
     #: Replaces the prior ``interval = "long|0.1|sl|tp"`` serialised hack.
     manual_order_draft: ManualOrderDraft | None = None

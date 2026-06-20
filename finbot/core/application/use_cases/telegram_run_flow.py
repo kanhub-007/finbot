@@ -115,6 +115,8 @@ async def _handle_run_callback(
         return uc._render_symbol_page(session, page=page, symbol_type=symbol_type)
     elif action == "int":
         return uc._run_cb_int(session, value)
+    elif action == "risk":
+        return _run_cb_risk(uc, session, value)
     elif action == "mode":
         return uc._run_cb_mode(session, value)
     elif action == "confirm":
@@ -287,15 +289,16 @@ def _run_cb_sym(uc, session, symbol: str) -> TelegramCommandResult:
 
     # Check for MTF timeframes in the strategy YAML (Scenario 4 / ADR-10).
     # When the strategy declares a ``timeframes`` block, the interval
-    # picker is skipped and the user goes directly to the mode picker.
+    # picker is skipped and the user goes to risk config, then mode picker.
     # Delegates to the injected StrategyDefinitionLoader so YAML/file I/O
     # stays in infrastructure, not the application layer.
     tf = _read_strategy_timeframes(uc, session.strategy_path or "")
     if tf is not None:
         primary, informatives = tf
         session.interval = primary
+        session._informative_intervals = list(informatives)
         uc._session_store.save(session)
-        return _show_mode_picker_with_timeframes(session, primary, informatives)
+        return _show_risk_config(uc, session, primary, informatives)
 
     uc._session_store.save(session)
 
@@ -345,6 +348,103 @@ def _read_strategy_timeframes(uc, path: str) -> tuple[str, list[str]] | None:
     return (tf.primary or "", informatives)
 
 
+# -- risk config step --------------------------------------------------------
+
+_RISK_PRESETS = ((3, "3%"), (5, "5%"), (10, "10%"))
+_LEV_PRESETS = ((5, "5x"), (10, "10x"), (20, "20x"))
+
+
+def _show_risk_config(
+    uc, session, interval: str, informatives: list[str]
+) -> TelegramCommandResult:
+    """Show risk-percentage and leverage picker before the mode picker.
+
+    Risk is applied to the total USD balance (not the leveraged amount).
+    The selected values are stored in *session* and forwarded to
+    ``bot_manager.start()`` via ``_start_bot_from_session``.
+    """
+    sid = session.session_id
+    tf_display = interval
+    if informatives:
+        tf_display = f"{interval} + {' + '.join(informatives)}"
+
+    risk_label = f"{session.risk_pct}%"
+    lev_label = f"{session.leverage}x"
+
+    # Build keyboard: risk presets row, leverage presets row, continue.
+    risk_row: list[dict] = []
+    for pct, label in _RISK_PRESETS:
+        sel = " \u2705" if session.risk_pct == pct else ""
+        risk_row.append(
+            {
+                "text": f"{label}{sel}",
+                "callback_data": f"run:{sid}:risk:pct:{pct}",
+            }
+        )
+
+    lev_row: list[dict] = []
+    for lev, label in _LEV_PRESETS:
+        sel = " \u2705" if session.leverage == lev else ""
+        lev_row.append(
+            {
+                "text": f"{label}{sel}",
+                "callback_data": f"run:{sid}:risk:lev:{lev}",
+            }
+        )
+
+    return TelegramCommandResult(
+        text=(
+            f"Strategy: {_escape_mdv2(session.strategy_path or '')}\n"
+            f"Symbol: {_escape_mdv2(session.symbol or '')}"
+            f" / {tf_display}\n\n"
+            f"*Risk per trade:* {risk_label} of balance\n"
+            f"*Leverage:* {lev_label}\n\n"
+            "Risk is applied to total USD balance, not the leveraged amount\."
+        ),
+        parse_mode="MarkdownV2",
+        reply_markup={
+            "inline_keyboard": [
+                risk_row,
+                lev_row,
+                [
+                    {
+                        "text": "\u25b6 Continue",
+                        "callback_data": f"run:{sid}:risk:done",
+                    },
+                ],
+            ]
+        },
+    )
+
+
+def _run_cb_risk(uc, session, value: str) -> TelegramCommandResult:
+    """Handle risk-config callbacks: pct:<N>, lev:<N>, done."""
+    informatives = getattr(session, "_informative_intervals", []) or []
+    interval = session.interval or "1h"
+
+    if value.startswith("pct:"):
+        try:
+            session.risk_pct = int(value.split(":", 1)[1])
+        except (ValueError, IndexError):
+            pass
+        uc._session_store.save(session)
+        return _show_risk_config(uc, session, interval, informatives)
+
+    if value.startswith("lev:"):
+        try:
+            session.leverage = int(value.split(":", 1)[1])
+        except (ValueError, IndexError):
+            pass
+        uc._session_store.save(session)
+        return _show_risk_config(uc, session, interval, informatives)
+
+    if value == "done":
+        return _show_mode_picker_with_timeframes(session, interval, informatives)
+
+    # Unknown sub-action — re-render.
+    return _show_risk_config(uc, session, interval, informatives)
+
+
 def _show_mode_picker_with_timeframes(
     session, interval: str, informatives: list[str]
 ) -> TelegramCommandResult:
@@ -366,21 +466,10 @@ def _show_mode_picker_with_timeframes(
 
 
 def _run_cb_int(uc, session, interval: str) -> TelegramCommandResult:
-    """User selected an interval — show mode picker."""
+    """User selected an interval — show risk config, then mode picker."""
     session.interval = interval
     uc._session_store.save(session)
-
-    sid = session.session_id
-    return TelegramCommandResult(
-        text=(
-            f"Strategy: {_escape_mdv2(session.strategy_path or '')}\n"
-            f"Symbol: {_escape_mdv2(session.symbol or '')}"
-            f" / {_escape_mdv2(interval)}\n"
-            "Select mode:"
-        ),
-        parse_mode="MarkdownV2",
-        reply_markup=_build_mode_picker_keyboard(sid),
-    )
+    return _show_risk_config(uc, session, interval, [])
 
 
 def _build_mode_picker_keyboard(sid: str) -> dict:
@@ -480,7 +569,25 @@ def _read_execution_config(uc, strategy_path: str):
 
 
 def _start_bot_from_session(uc, session, mode: str) -> TelegramCommandResult:
-    """Call bot_manager.start() with the accumulated session state."""
+    """Call bot_manager.start() with the accumulated session state.
+
+    Before starting: applies the risk% and leverage selections from the
+    /run flow by updating the runtime config and setting leverage on the
+    active symbol.
+    """
+    # Apply risk% → max_position_usd on the runtime config.
+    # Risk is on total USD balance, not the leveraged amount.
+    if session.risk_pct > 0:
+        bal = uc._bot_manager.get_balance()
+        if bal is not None:
+            max_usd = bal.wallet_value * session.risk_pct // 100
+            uc._bot_manager.update_bot_config("max_position", str(max_usd))
+
+    # Set leverage on the active symbol.
+    if session.leverage > 0:
+        uc._bot_manager.activate_symbol(session.symbol or "")
+        uc._bot_manager.set_leverage(session.leverage, "isolated")
+
     exec_config = uc._read_execution_config(session.strategy_path or "")
     result = uc._bot_manager.start(
         strategy_path=session.strategy_path or "",
