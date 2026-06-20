@@ -445,3 +445,57 @@ class TestMTFFactoryIntervalOverride:
 
         assert hasattr(runtime, "_informative_intervals")
         assert runtime._informative_intervals == []
+
+    def test_mtf_timeframes_summary_string(self, monkeypatch):
+        """The runtime fields can produce a timeframes summary for MCP response."""
+        settings = _test_settings(mode="dry_run")
+        monkeypatch.setattr("finbot.startup.runtime_factory.Settings", lambda: settings)
+
+        runtime = create_live_trading_runtime_use_case(
+            self.MTF_STRATEGY,
+            "BTC",
+            "1h",
+            mode="dry_run",
+            live_data=False,
+            warmup_bars=_recent_bars(30, base_ts=int(time.time())),
+        )
+
+        primary = runtime._interval
+        informatives = runtime._informative_intervals
+        summary = _timeframes_summary(primary, informatives)
+        assert summary == "30min + 1h"
+
+    def test_mtf_runtime_fields_available_for_mcp_response(self, monkeypatch):
+        """Scenario 3: after factory construction, _interval and
+        _informative_intervals are set so the lifecycle can surface them."""
+        settings = _test_settings(mode="dry_run")
+        monkeypatch.setattr("finbot.startup.runtime_factory.Settings", lambda: settings)
+
+        runtime = create_live_trading_runtime_use_case(
+            self.MTF_STRATEGY,
+            "BTC",
+            "1h",
+            mode="dry_run",
+            live_data=False,
+            warmup_bars=_recent_bars(30, base_ts=int(time.time())),
+        )
+
+        # Simulate what the lifecycle service reads for the result dict.
+        assert runtime._interval == "30min"
+        assert runtime._informative_intervals == ["1h"]
+        result = {"status": "running", "bot_run_id": "test"}
+        result["interval"] = runtime._interval
+        if runtime._informative_intervals:
+            result["informative_intervals"] = ",".join(runtime._informative_intervals)
+        assert result["interval"] == "30min"
+        assert result["informative_intervals"] == "1h"
+
+
+# -- helpers -------------------------------------------------------------
+
+
+def _timeframes_summary(primary: str, informatives: list[str]) -> str:
+    """Build a human-readable timeframes summary."""
+    if not informatives:
+        return primary
+    return f"{primary} + {' + '.join(informatives)}"

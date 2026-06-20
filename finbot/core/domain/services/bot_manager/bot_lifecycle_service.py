@@ -149,7 +149,20 @@ class BotLifecycleService:
                 target=self._run_forever, name="finbot-runtime", daemon=True
             )
             self._state.thread.start()
-            return {"status": "running", "bot_run_id": bot_run_id}
+            result: dict[str, str] = {"status": "running", "bot_run_id": bot_run_id}
+            # Include resolved timeframes (MTF strategies override the
+            # caller's interval via the YAML primary; informatives are
+            # auto-discovered).  MCP / Telegram use this for display.
+            if hasattr(runtime, "_interval"):
+                result["interval"] = runtime._interval
+            if (
+                hasattr(runtime, "_informative_intervals")
+                and runtime._informative_intervals
+            ):
+                result["informative_intervals"] = ",".join(
+                    runtime._informative_intervals
+                )
+            return result
 
     def stop(self) -> dict[str, str]:
         """Stop the running bot and join its thread."""
