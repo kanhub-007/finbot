@@ -68,11 +68,11 @@ def _make_runtime_factory(
     return factory
 
 
-def create_server() -> FastMCP:
-    """Build the FastMCP server with all dependencies wired.
+def create_server() -> FinbotMcpServer:
+    """Build the MCP server with all dependencies wired.
 
     Returns:
-        Configured FastMCP server instance ready to run.
+        Wrapped FastMCP server instance ready to run.
     """
     settings = Settings()
     repo = create_bot_state_repository(migrate=True)

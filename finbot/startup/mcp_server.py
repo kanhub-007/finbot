@@ -29,3 +29,7 @@ class FinbotMcpServer:
     server: Any
     bot_manager: Any
     telegram: Any | None = None
+
+    def run(self, *args: Any, **kwargs: Any) -> Any:
+        """Delegate transport startup to the wrapped FastMCP server."""
+        return self.server.run(*args, **kwargs)
