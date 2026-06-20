@@ -110,6 +110,7 @@ class HandleTelegramCommand:
         hyperliquid_testnet: bool = True,
         metadata_provider: object | None = None,
         log_reader: object | None = None,
+        strategy_loader: object | None = None,
     ) -> None:
         self._bot_manager = bot_manager
         self._chat_repo = chat_repo
@@ -121,6 +122,7 @@ class HandleTelegramCommand:
         self._testnet = hyperliquid_testnet
         self._metadata_provider = metadata_provider
         self._log_reader = log_reader
+        self._strategy_loader = strategy_loader
 
     async def _handle_start(
         self, request: TelegramCommandRequest

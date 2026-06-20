@@ -281,8 +281,20 @@ def _run_cb_symidx(uc, session, value: str) -> TelegramCommandResult:
 
 
 def _run_cb_sym(uc, session, symbol: str) -> TelegramCommandResult:
-    """User selected a symbol — show interval picker."""
+    """User selected a symbol — show interval picker, or skip to mode
+    picker when the strategy declares MTF timeframes."""
     session.symbol = _normalize_symbol(symbol)
+
+    # Check for MTF timeframes in the strategy YAML (Scenario 4 / ADR-10).
+    # When the strategy declares a ``timeframes`` block, the interval
+    # picker is skipped and the user goes directly to the mode picker.
+    tf = _read_strategy_timeframes(session.strategy_path or "")
+    if tf is not None:
+        primary, informatives = tf
+        session.interval = primary
+        uc._session_store.save(session)
+        return _show_mode_picker_with_timeframes(session, primary, informatives)
+
     uc._session_store.save(session)
 
     sid = session.session_id
@@ -301,6 +313,78 @@ def _run_cb_sym(uc, session, symbol: str) -> TelegramCommandResult:
         ),
         parse_mode="MarkdownV2",
         reply_markup={"inline_keyboard": keyboard_rows},
+    )
+
+
+def _read_strategy_timeframes(path: str) -> tuple[str, list[str]] | None:
+    """Parse the ``timeframes`` block from a strategy YAML file.
+
+    Returns ``(primary, informatives)`` when the strategy has a
+    ``timeframes`` block with at least a primary interval; ``None``
+    otherwise.
+    """
+    if not path:
+        return None
+    try:
+        from pathlib import Path as _Path
+
+        import yaml
+
+        content = _Path(path).read_text(encoding="utf-8")
+        data = yaml.safe_load(content)
+        if not isinstance(data, dict):
+            return None
+        tf = data.get("timeframes")
+        if not isinstance(tf, dict):
+            return None
+        primary = tf.get("primary")
+        if not primary:
+            return None
+        informatives: list[str] = []
+        for item in tf.get("informative", []) or []:
+            if isinstance(item, dict) and "interval" in item:
+                informatives.append(item["interval"])
+        return (str(primary), informatives)
+    except Exception:
+        return None
+
+
+def _show_mode_picker_with_timeframes(
+    session, interval: str, informatives: list[str]
+) -> TelegramCommandResult:
+    """Show the mode picker with timeframe info (MTF skip path)."""
+    sid = session.session_id
+    tf_display = interval
+    if informatives:
+        tf_display = f"{interval} + {' + '.join(informatives)}"
+    return TelegramCommandResult(
+        text=(
+            f"Strategy: {_escape_mdv2(session.strategy_path or '')}\n"
+            f"Symbol: {_escape_mdv2(session.symbol or '')}"
+            f" / {tf_display}\n"
+            "Select mode:"
+        ),
+        parse_mode="MarkdownV2",
+        reply_markup={
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "\U0001f4ca Dry Run",
+                        "callback_data": f"run:{sid}:mode:dry_run",
+                    },
+                    {
+                        "text": "\U0001f9ea Testnet",
+                        "callback_data": f"run:{sid}:mode:testnet",
+                    },
+                ],
+                [
+                    {
+                        "text": "\u26a0 Live",
+                        "callback_data": f"run:{sid}:mode:live",
+                    },
+                ],
+            ]
+        },
     )
 
 

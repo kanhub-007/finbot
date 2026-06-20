@@ -754,6 +754,79 @@ class TestRunFlow:
 
         assert fake_manager.start_called is False
 
+    @pytest.mark.asyncio
+    async def test_mtf_strategy_skips_interval_picker(self):
+        """Scenario 4: MTF strategy skips interval picker, shows timeframes
+        in mode picker."""
+        fake_manager = FakeBotManager(is_running=False)
+        fake_sessions = InMemoryTelegramSessionStore()
+        strat_dir = FakeStrategyDirectory(["14_amt_value_reject_30m_1h_mtf.yaml"])
+        strat_dir._base_dir = "strategies"  # real strategies directory
+        use_case = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=strat_dir,
+            session_store=fake_sessions,
+            allowed_users=frozenset({987654321}),
+            metadata_provider=_SymbolListProvider(["BTC"]),
+        )
+
+        # Step 1: /run → strategies
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/run",
+                args="",
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+            )
+        )
+        strategy_cb = result.reply_markup["inline_keyboard"][0][0]["callback_data"]
+
+        # Step 2: select strategy → symbol picker
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=strategy_cb,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq1",
+            )
+        )
+        # May show market type picker → select crypto
+        if "market type" in result.text.lower():
+            symbol_cb = result.reply_markup["inline_keyboard"][0][0]["callback_data"]
+            result = await use_case.handle_callback(
+                CallbackQueryRequest(
+                    callback_data=symbol_cb,
+                    chat_id=123456789,
+                    user_id=987654321,
+                    message_id=100,
+                    callback_query_id="cq2_pre",
+                )
+            )
+        # Step 3: select symbol → for MTF, should go to MODE picker (skip interval)
+        symbol_cb = result.reply_markup["inline_keyboard"][0][0]["callback_data"]
+        result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=symbol_cb,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq3",
+            )
+        )
+        # Should show mode picker, NOT interval picker
+        assert (
+            "mode" in result.text.lower() or "dry" in result.text.lower()
+        ), f"Expected mode picker, got: {result.text[:100]}"
+        assert (
+            "30min" in result.text
+        ), f"Expected primary timeframe in text, got: {result.text[:100]}"
+        assert (
+            "interval" not in result.text.lower()
+        ), "Interval picker should be skipped for MTF strategy"
+
 
 class TestHistory:
     @pytest.mark.asyncio
