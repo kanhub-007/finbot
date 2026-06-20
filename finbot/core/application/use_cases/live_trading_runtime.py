@@ -164,6 +164,9 @@ class LiveTradingRuntimeUseCase:
         self._interval: str = interval or ""
         self._started: bool = False
         self._informative_intervals: list[str] = list(informative_intervals or [])
+        # Cache of latest bar per informative timeframe (MTF).
+        # Dict of alias → bar; initialized on first informative candle.
+        self._informative_cache: dict[str, dict[str, Any]] = {}
 
         # Warmup
         self._warmup = WarmupWindow()
@@ -508,6 +511,14 @@ class LiveTradingRuntimeUseCase:
             bot_run_id=self._bot_run_id,
             symbol=self._symbol,
         )
+
+    def process_informative_candle(self, alias: str, bar: dict[str, Any]) -> None:
+        """Process a candle from an informative (non-primary) timeframe.
+
+        Stores the latest bar in the informative cache so it can be merged
+        into the next primary bar before indicator calculation.
+        """
+        self._informative_cache[alias] = dict(bar)
 
     # -- internal pipeline steps ---------------------------------------------
 
