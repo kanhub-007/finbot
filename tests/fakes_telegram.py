@@ -240,11 +240,17 @@ class FakeBotManager:
     ) -> dict[str, str]:
         return {"status": "ok", "leverage": str(leverage), "margin_mode": margin_mode}
 
-    def submit_manual_order(self, side, size) -> dict:
+    def submit_manual_order(self, side, size, limit_px=None, usd_notional=None) -> dict:
         return {"status": "ok", "response": {"order_id": "fake"}}
 
     def submit_manual_order_with_brackets(
-        self, side, size, sl_price=None, tp_price=None
+        self,
+        side,
+        size,
+        sl_price=None,
+        tp_price=None,
+        limit_px=None,
+        usd_notional=None,
     ) -> dict:
         return {"status": "ok", "response": {"order_id": "fake"}}
 

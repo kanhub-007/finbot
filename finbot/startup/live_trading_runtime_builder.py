@@ -95,6 +95,7 @@ class LiveTradingRuntimeBuilder:
         self._strategy_loader: StrategyDefinitionLoader | None = None
         self._account_event_handler: AccountEventHandler | None = None
         self._trade_ledger: TradeLedger | None = None
+        self._strategy_log_writer: Any | None = None
         self._live_state: Any | None = None
 
     # -- required setters ---------------------------------------------------
@@ -217,6 +218,10 @@ class LiveTradingRuntimeBuilder:
         self._trade_ledger = ledger
         return self
 
+    def with_strategy_log_writer(self, writer: Any | None) -> LiveTradingRuntimeBuilder:
+        self._strategy_log_writer = writer
+        return self
+
     def with_live_state(self, state: Any | None) -> LiveTradingRuntimeBuilder:
         self._live_state = state
         return self
@@ -266,5 +271,6 @@ class LiveTradingRuntimeBuilder:
             strategy_loader=self._strategy_loader,
             account_event_handler=self._account_event_handler,
             trade_ledger=self._trade_ledger,
+            strategy_log_writer=self._strategy_log_writer,
             live_state=self._live_state,
         )

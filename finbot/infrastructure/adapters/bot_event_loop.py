@@ -43,6 +43,7 @@ class BotEventLoop(BotLoop):
     """
 
     MAX_BACKOFF = 60.0
+    MAX_RECONNECT_ATTEMPTS = 10
     #: Seconds a candle may take before its processing is logged as a stall
     #: (P12 — tail-latency observability for account events queued behind it).
     CANDLE_STALL_WARN_SECONDS = 1.0
@@ -170,7 +171,13 @@ class BotEventLoop(BotLoop):
 
     def _reconnect(self) -> None:
         backoff = self._reconnect_backoff
+        attempts = 0
         while self._running:
+            attempts += 1
+            if attempts > self.MAX_RECONNECT_ATTEMPTS:
+                logger.error("Reconnect failed after %d attempts — giving up", attempts)
+                self._running = False
+                return
             try:
                 self._stream.stop()
             except Exception:

@@ -26,13 +26,16 @@ class ManualMaxPositionGate(ManualOrderGate):
         if limit <= 0:
             return RiskDecision(accepted=True, gate_name="manual_max_position")
 
-        price = context.get("price")
-        if price is None:
-            # Without a price we cannot compute notional — fail open to avoid
-            # blocking closes, but entries should always pass a price.
-            return RiskDecision(accepted=True, gate_name="manual_max_position")
-
-        notional = Decimal(str(intent.size)) * Decimal(str(price))
+        # Prefer caller-supplied USD notional (ignores leverage so the
+        # user's input amount is checked, not the leveraged position).
+        usd = context.get("usd_notional")
+        if usd is not None:
+            notional = Decimal(str(usd))
+        else:
+            price = context.get("price")
+            if price is None:
+                return RiskDecision(accepted=True, gate_name="manual_max_position")
+            notional = Decimal(str(intent.size)) * Decimal(str(price))
         if notional > limit:
             return RiskDecision(
                 accepted=False,

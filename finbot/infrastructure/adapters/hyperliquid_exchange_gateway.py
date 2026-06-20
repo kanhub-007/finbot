@@ -183,7 +183,9 @@ class HyperliquidExchangeGateway(ExchangeGateway):
 
     def cancel_by_cloid(self, symbol: str, cloid: str) -> dict[str, Any]:
         exchange = self._ensure_exchange()
-        result = exchange.cancel_by_cloid(symbol, cloid)  # type: ignore[no-any-return]
+        result = exchange.cancel_by_cloid(  # type: ignore[no-any-return]
+            symbol, _to_sdk_cloid(cloid)
+        )
         self._account_cache.remove_open_order(symbol, lambda o: o.get("cloid") == cloid)
         return result
 
@@ -205,7 +207,7 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         exchange = self._ensure_exchange()
         is_cross = margin_mode.lower() == "cross"
         return exchange.update_leverage(  # type: ignore[no-any-return]
-            leverage=int(leverage), coin=symbol, is_cross=is_cross
+            int(leverage), symbol, is_cross=is_cross
         )
 
     def get_leverage(self, symbol: str) -> tuple[int, str] | None:
@@ -240,17 +242,41 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         return Decimal(str(price))
 
     def get_balance(self) -> WalletBalance:
-        """Return wallet value, margin used, and available margin."""
+        """Return perp margin + spot USDC balances."""
         info = self._ensure_info()
         state = info.user_state(self._account_address or "")
-        margin_summary = state.get("marginSummary", {})
-        wallet_value = Decimal(str(margin_summary.get("accountValue", "0")))
-        margin_used = Decimal(str(margin_summary.get("initialMargin", "0")))
-        available = Decimal(str(margin_summary.get("availableMargin", "0")))
+        # Cross-margin summary includes spot USDC as collateral when
+        # cross-margin is active; fall back to isolated summary.
+        cms = state.get("crossMarginSummary", {})
+        ims = state.get("marginSummary", {})
+        wallet_value = Decimal(
+            str(cms.get("accountValue") or ims.get("accountValue", "0"))
+        )
+        margin_used = Decimal(
+            str(
+                cms.get("totalMarginUsed")
+                or ims.get("totalMarginUsed")
+                or ims.get("initialMargin", "0")
+            )
+        )
+        available = Decimal(
+            str(state.get("withdrawable") or ims.get("availableMargin", "0"))
+        )
+        # Spot USDC — may not be deposited to margin yet.
+        spot_usdc = Decimal("0")
+        try:
+            spot_state = info.spot_user_state(self._account_address or "")
+            for b in spot_state.get("balances", []):
+                if b.get("coin") == "USDC":
+                    spot_usdc = Decimal(str(b.get("total", "0")))
+                    break
+        except Exception:
+            pass
         return WalletBalance(
             wallet_value=wallet_value,
             margin_used=margin_used,
             available=available,
+            spot_usdc=spot_usdc,
         )
 
     def get_exchange(self) -> Exchange:
@@ -326,27 +352,27 @@ def _execute_order(
             )  # type: ignore[no-any-return]
         # Limit exit — use limit order with reduce_only.
         return exchange.order(
-            coin=intent.symbol,
-            is_buy=is_buy,
-            sz=float(intent.size),
-            limit_px=_limit_px_or_raise(intent.limit_price),
+            intent.symbol,
+            is_buy,
+            float(intent.size),
+            _limit_px_or_raise(intent.limit_price),
             order_type={"limit": {"tif": "Gtc"}},
             reduce_only=True,
-            cloid=intent.cloid,
+            cloid=_cloid_or_none(intent.cloid),
         )  # type: ignore[no-any-return]
 
     if intent.order_type == OrderType.MARKET:
         return exchange.market_open(
-            coin=intent.symbol,
-            is_buy=is_buy,
-            sz=float(intent.size),
-            limit_px=(float(intent.limit_price) if intent.limit_price else None),
-            cloid=intent.cloid,
+            intent.symbol,
+            is_buy,
+            float(intent.size),
+            px=(float(intent.limit_price) if intent.limit_price else None),
+            cloid=_cloid_or_none(intent.cloid),
         )  # type: ignore[no-any-return]
 
     # Limit order.
     payload: dict[str, Any] = {
-        "coin": intent.symbol,
+        "name": intent.symbol,
         "is_buy": is_buy,
         "sz": float(intent.size),
         "limit_px": _limit_px_or_raise(intent.limit_price),
@@ -354,7 +380,7 @@ def _execute_order(
         "reduce_only": intent.reduce_only,
     }
     if intent.cloid:
-        payload["cloid"] = intent.cloid
+        payload["cloid"] = _to_sdk_cloid(intent.cloid)
     return exchange.order(**payload)  # type: ignore[no-any-return]
 
 
@@ -368,3 +394,19 @@ def _limit_px_or_raise(price: Decimal | None) -> float:
     if price is None:
         raise ValueError("LIMIT order requires a limit_price")
     return float(price)
+
+
+def _to_sdk_cloid(raw: str):
+    """Convert a readable cloid string to the SDK's Cloid type."""
+    import hashlib
+
+    from hyperliquid.utils.types import Cloid
+
+    return Cloid("0x" + hashlib.sha256(raw.encode()).hexdigest()[:32])
+
+
+def _cloid_or_none(raw: str | None):
+    """Return a SDK Cloid or None."""
+    if raw is None:
+        return None
+    return _to_sdk_cloid(raw)

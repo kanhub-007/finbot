@@ -38,6 +38,7 @@ _HANDLED_COMMANDS = [
     "balance",
     "leverage",
     "position",
+    "mode",
     "long",
     "short",
     "close",
@@ -48,6 +49,7 @@ _HANDLED_COMMANDS = [
     "size",
     "orders",
     "cancel",
+    "log",
 ]
 
 

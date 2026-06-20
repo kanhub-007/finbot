@@ -202,6 +202,7 @@ def create_live_trading_runtime_use_case(
         .with_account_event_handler(
             AccountEventHandler(repo, trade_ledger, notification_sender)
         )
+        .with_strategy_log_writer(_make_log_writer())
     )
     if trading_mode != TradingMode.DRY_RUN:
         from finbot.core.domain.services.cloid_generator import CloidGenerator
@@ -274,3 +275,12 @@ def _load_warmup_bars(
     except Exception as e:  # noqa: BLE001 - degrade gracefully to live warmup
         logger.warning("Warmup bar load failed for %s: %s", symbol, e)
         return []
+
+
+def _make_log_writer():
+    """Create a shared StrategyLogWriter for the runtime."""
+    from finbot.infrastructure.services.strategy_log_writer import (
+        StrategyLogWriter,
+    )
+
+    return StrategyLogWriter()

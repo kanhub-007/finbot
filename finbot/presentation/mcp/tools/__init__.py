@@ -12,7 +12,9 @@ from fastmcp import FastMCP
 
 from .bot_control import register_bot_control_tools
 from .bot_history import register_bot_history_tools
+from .logs import register_log_tools
 from .safety import register_safety_tools
+from .trading import register_trading_tools
 from .util import register_util_tools
 
 
@@ -22,11 +24,14 @@ def register_tools(
     *,
     settings: Any | None = None,
     validate_strategy_use_case: Any | None = None,
+    log_reader: Any | None = None,
 ) -> None:
     """Register all finbot MCP tools on the given server instance."""
     register_bot_control_tools(mcp, bot_manager, settings=settings)
     register_bot_history_tools(mcp, bot_manager)
     register_safety_tools(mcp, bot_manager)
+    register_trading_tools(mcp, bot_manager)
+    register_log_tools(mcp, bot_manager, log_reader=log_reader)
     register_util_tools(
         mcp, bot_manager, validate_strategy_use_case=validate_strategy_use_case
     )

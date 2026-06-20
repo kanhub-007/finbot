@@ -39,21 +39,32 @@ from finbot.infrastructure.adapters.hyperliquid_exchange_gateway import (
 
 
 class _FakeExchange:
-    """Records every SDK call's kwargs."""
+    """Records every SDK call's positional/kw args."""
 
     def __init__(self) -> None:
-        self.calls: list[tuple[str, dict]] = []
+        self.calls: list[tuple[str, tuple, dict]] = []
 
-    def order(self, **kw):
-        self.calls.append(("order", kw))
+    def order(self, name: str, is_buy: bool, sz: float, limit_px: float, **kw):
+        self.calls.append(("order", (name, is_buy, sz, limit_px), kw))
         return {"status": "ok"}
 
-    def market_open(self, **kw):
-        self.calls.append(("market_open", kw))
+    def market_open(
+        self,
+        name: str,
+        is_buy: bool,
+        sz: float,
+        px=None,
+        slippage=0.05,
+        cloid=None,
+        builder=None,
+    ):
+        self.calls.append(
+            ("market_open", (name, is_buy, sz), {"px": px, "cloid": cloid})
+        )
         return {"status": "ok"}
 
-    def market_close(self, **kw):
-        self.calls.append(("market_close", kw))
+    def market_close(self, coin: str, sz=None, **kw):
+        self.calls.append(("market_close", (coin,), {"sz": sz, **kw}))
         return {"status": "ok"}
 
 
@@ -85,12 +96,11 @@ class TestExecuteOrderPrecisionBoundary:
 
         gw.submit_order(intent)
 
-        name, kw = gw._exchange.calls[0]
+        name, (_, is_buy, sz, limit_px), kw = gw._exchange.calls[0]
         assert name == "order"
-        # Round-trip: the float passed to the SDK equals the original Decimal.
-        assert Decimal(str(kw["sz"])) == size
-        assert Decimal(str(kw["limit_px"])) == price
-        assert kw["is_buy"] is True
+        assert Decimal(str(sz)) == size
+        assert Decimal(str(limit_px)) == price
+        assert is_buy is True
         assert kw["reduce_only"] is False
 
     def test_limit_order_with_no_price_raises_not_silently_zero(
@@ -111,7 +121,7 @@ class TestExecuteOrderPrecisionBoundary:
         with pytest.raises((ValueError, TypeError)):
             _execute_order(fake, intent)
         # No call was recorded because the conversion raised before any SDK call.
-        assert fake.calls == [] or fake.calls[0][1].get("limit_px") != 0.0
+        assert fake.calls == [] or fake.calls[0][2].get("limit_px") != 0.0
 
     def test_market_order_passes_none_limit_px_to_market_open(self) -> None:
         """MARKET entry with no price passes ``limit_px=None`` (not 0.0)."""
@@ -124,10 +134,10 @@ class TestExecuteOrderPrecisionBoundary:
             cloid="c-1",
         )
         gw.submit_order(intent)
-        name, kw = gw._exchange.calls[0]
+        name, (_, is_buy, _sz), kw = gw._exchange.calls[0]
         assert name == "market_open"
-        assert kw["limit_px"] is None
-        assert kw["is_buy"] is True
+        assert kw["px"] is None
+        assert is_buy is True
 
     def test_reduce_only_limit_passes_reduce_only_and_cloid(self) -> None:
         """A reduce-only LIMIT order passes ``reduce_only=True`` and cloid."""
@@ -142,11 +152,11 @@ class TestExecuteOrderPrecisionBoundary:
             cloid="SL:BTC",
         )
         gw.submit_order(intent)
-        name, kw = gw._exchange.calls[0]
+        name, (_, is_buy, _sz, _limit_px), kw = gw._exchange.calls[0]
         assert name == "order"
         assert kw["reduce_only"] is True
-        assert kw["is_buy"] is False
-        assert kw["cloid"] == "SL:BTC"
+        assert is_buy is False
+        assert kw["cloid"] is not None  # converted to Cloid by gateway
 
     def test_reduce_only_market_uses_market_close(self) -> None:
         """A reduce-only MARKET order routes to ``market_close``."""
@@ -160,6 +170,6 @@ class TestExecuteOrderPrecisionBoundary:
             cloid="c-1",
         )
         gw.submit_order(intent)
-        name, kw = gw._exchange.calls[0]
+        name, _args, kw = gw._exchange.calls[0]
         assert name == "market_close"
-        assert Decimal(str(kw["sz"])) == Decimal("0.1")
+        assert Decimal(str(kw.get("sz", "0"))) == Decimal("0.1")

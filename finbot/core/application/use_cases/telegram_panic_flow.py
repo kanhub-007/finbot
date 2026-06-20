@@ -114,7 +114,13 @@ def _handle_confirm_callback(uc, request, data) -> TelegramCommandResult:
                 text="No active symbol\\.", parse_mode="MarkdownV2"
             )
         return uc._execute_manual_order(
-            draft.side, active, draft.size, draft.sl_price, draft.tp_price
+            draft.side,
+            active,
+            draft.size,
+            draft.sl_price,
+            draft.tp_price,
+            draft.limit_px,
+            draft.usd_notional,
         )
 
     return TelegramCommandResult(

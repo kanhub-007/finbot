@@ -60,8 +60,10 @@ class TestActivateSymbol:
         assert active.leverage == 5
         assert active.margin_mode == "isolated"
 
-    def test_activate_symbol_falls_back_to_1x_when_exchange_has_no_leverage(self):
-        """If exchange can't report leverage, default to 1x isolated."""
+    def test_activate_symbol_falls_back_to_unknown_when_exchange_has_no_leverage(
+        self,
+    ):
+        """If exchange can't report leverage, show unknown (0, '?')."""
         exchange = FakeExchangeGateway()
         exchange.leverage_to_report = None  # simulate unreadable
         manager = _make_manager(exchange=exchange)
@@ -70,8 +72,8 @@ class TestActivateSymbol:
 
         active = manager.get_active_symbol()
         assert active is not None
-        assert active.leverage == 1
-        assert active.margin_mode == "isolated"
+        assert active.leverage == 0
+        assert active.margin_mode == "?"
 
     def test_activate_symbol_blocked_when_strategy_running(self):
         """Switching symbol while a strategy runs is a hard block."""

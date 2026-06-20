@@ -111,7 +111,9 @@ class TelegramControlPlane:
             allowed_users=self._settings.telegram_allowed_user_ids,
             live_trading_ack=self._settings.live_trading_ack,
             mode=self._settings.mode,
+            hyperliquid_testnet=self._settings.hyperliquid_testnet,
             metadata_provider=metadata_provider,
+            log_reader=_make_log_reader(),
         )
 
         self._handler = TelegramBotHandler(
@@ -179,3 +181,12 @@ def create_telegram_control_plane(
         chat_repo = SqliteTelegramChatRepository(settings.database_path)
 
     return TelegramControlPlane(settings=settings, chat_repo=chat_repo)
+
+
+def _make_log_reader():
+    """Create the strategy log reader for Telegram /log command."""
+    from finbot.infrastructure.services.strategy_log_writer import (
+        StrategyLogFileReader,
+    )
+
+    return StrategyLogFileReader()

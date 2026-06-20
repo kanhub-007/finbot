@@ -14,6 +14,7 @@ responsible for:
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -24,9 +25,17 @@ from finbot.core.domain.interfaces.market_data_stream import MarketDataStream
 if TYPE_CHECKING:
     from hyperliquid.info import Info
 
+logger = logging.getLogger(__name__)
+
 
 class HyperliquidMarketDataStream(MarketDataStream):
-    """Live Hyperliquid candle subscription adapter.
+    """Live Hyperliquid candle subscription via WebSocket.
+
+    Supports both standard perps (BTC, ETH) and HIP-3 vault perps
+    (flx:TSLA, xyz:AAPL).  HIP-3 symbols are handled by loading the
+    DEX metadata into the SDK ``Info`` object and registering the full
+    ``dex:COIN`` symbol in ``name_to_coin`` so the remap is an identity
+    passthrough.
 
     Parameters
     ----------
@@ -48,6 +57,7 @@ class HyperliquidMarketDataStream(MarketDataStream):
         self._sub_id: int | None = None
         self._symbol: str = ""
         self._interval: str = ""
+        self._is_hip3: bool = False
         # Candle close tracking
         self._pending_bar: dict[str, Any] | None = None
         self._current_candle_ts_ms: int = 0
@@ -77,16 +87,25 @@ class HyperliquidMarketDataStream(MarketDataStream):
         self._current_candle_ts_ms = 0
         self._last_emitted_ts_ms = 0
 
+        self._is_hip3 = ":" in symbol
+
         from hyperliquid.info import Info
 
-        # For HIP-3 tokens (dex:COIN), Info needs perp_dexs to
-        # recognise the coin name during subscription remapping.
-        perp_dexs: list[str] | None = None
-        if ":" in symbol:
+        if self._is_hip3:
             dex = symbol.split(":")[0]
-            perp_dexs = [dex]
+            # Info fetches dex metadata so candle data includes the correct
+            # asset index.  The coin remap inside subscribe() uses
+            # name_to_coin which only maps bare coin names (e.g. PALLADIUM),
+            # not dex:COIN.  Register the full symbol so the remap is an
+            # identity passthrough and the websocket receives flx:PALLADIUM.
+            self._info = Info(self._base_url, skip_ws=False, perp_dexs=[dex])
+            self._info.name_to_coin[symbol] = symbol
+            logger.info(
+                "HIP-3 symbol %s — subscribed via websocket (dex=%s)", symbol, dex
+            )
+        else:
+            self._info = Info(self._base_url, skip_ws=False)
 
-        self._info = Info(self._base_url, skip_ws=False, perp_dexs=perp_dexs)
         self._sub_id = self._info.subscribe(
             {"type": "candle", "coin": symbol, "interval": interval},
             self._on_candle,
@@ -121,6 +140,7 @@ class HyperliquidMarketDataStream(MarketDataStream):
         self._user_callback = None
         self._symbol = ""
         self._interval = ""
+        self._is_hip3 = False
 
     # -- internal -----------------------------------------------------------
 
@@ -175,6 +195,8 @@ class HyperliquidMarketDataStream(MarketDataStream):
             return
 
         # ts_ms < current — out-of-order; ignore.
+
+    # -- stale data checker ------------------------------------------------
 
     def _start_stale_checker(self) -> None:
         if self._stale_seconds <= 0:

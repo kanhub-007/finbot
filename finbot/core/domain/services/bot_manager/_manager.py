@@ -252,14 +252,16 @@ class BotManager:
         return self._config.list_config_profiles()
 
     # -- manual orders ------------------------------------------------------
-    def submit_manual_order(self, side, size=None):
-        return self._manual.submit_manual_order(side, size)
+    def submit_manual_order(self, side, size=None, limit_px=None, usd_notional=None):
+        return self._manual.submit_manual_order(
+            side, size, limit_px=limit_px, usd_notional=usd_notional
+        )
 
     def submit_manual_order_with_brackets(
-        self, side, size, sl_price=None, tp_price=None
+        self, side, size, sl_price=None, tp_price=None, limit_px=None, usd_notional=None
     ):
         return self._manual.submit_manual_order_with_brackets(
-            side, size, sl_price, tp_price
+            side, size, sl_price, tp_price, limit_px=limit_px, usd_notional=usd_notional
         )
 
     def cancel_order(self, order_id: str):

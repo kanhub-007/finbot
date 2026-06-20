@@ -18,8 +18,8 @@ from finbot.startup.mcp_server import FinbotMcpServer
 from finbot.startup.service_factory import (
     create_bot_config,
     create_bot_state_repository,
-    create_exchange_gateway,
     create_live_trading_runtime_use_case,
+    create_telegram_exchange_gateway,
 )
 
 load_dotenv()
@@ -76,7 +76,7 @@ def create_server() -> FinbotMcpServer:
     """
     settings = Settings()
     repo = create_bot_state_repository(migrate=True)
-    exchange = create_exchange_gateway(settings)
+    exchange = create_telegram_exchange_gateway(settings)
 
     # Telegram integration (optional, background thread).
     # ``telegram_holder`` lets the runtime factory resolve the dispatcher
@@ -120,20 +120,20 @@ def create_server() -> FinbotMcpServer:
             "It connects to Hyperliquid and executes trading strategies "
             "on live market data."
             "\n\n"
-            "QUICK REFERENCE:\n"
-            "• start_bot(): Start a trading bot with a strategy file, "
-            "symbol, interval, and mode (dry_run/testnet/live).\n"
-            "• get_bot_status(): Check current bot state — running status, "
-            "last candle, last signal, position, counts.\n"
-            "• stop_bot(): Stop the running bot safely.\n"
-            "• validate_strategy(): Check a strategy YAML file before running.\n"
-            "• list_bot_runs(): See completed bot runs with summaries.\n"
-            "• get_bot_run_results(): Get detailed signals/orders/fills "
-            "for a specific run.\n"
-            "• panic(): Emergency stop + cancel orders + optionally close "
-            "position.\n"
-            "• ping(): Health check — server status and exchange connectivity.\n"
-            "• get_audit_log(): Retrieve recent audit log entries.\n"
+            "RUNTIME:\n"
+            "• start_bot / stop_bot / get_bot_status\n"
+            "• list_bot_runs / get_bot_run_results\n"
+            "• validate_strategy / ping / panic / get_audit_log\n"
+            "\n"
+            "TRADING (requires activate_symbol first):\n"
+            "• get_balance / get_price / get_position / get_leverage\n"
+            "• set_leverage / activate_symbol / get_active_symbol\n"
+            "• place_long_order / place_short_order\n"
+            "• close_position / set_stop_loss / set_take_profit\n"
+            "• list_open_orders / cancel_order / clear_all\n"
+            "\n"
+            "LOGS:\n"
+            "• list_strategy_logs / get_strategy_log\n"
             "\n"
             "SAFETY NOTES:\n"
             "• Default mode is dry_run — no real orders placed.\n"
@@ -166,6 +166,7 @@ def create_server() -> FinbotMcpServer:
         bot_manager,
         settings=settings,
         validate_strategy_use_case=create_validate_strategy_use_case(),
+        log_reader=_make_log_reader(),
     )
 
     config = get_transport_config()
@@ -204,3 +205,12 @@ def run() -> None:
     else:
         logger.info("Starting MCP server on stdio")
         server.run(transport="stdio")
+
+
+def _make_log_reader():
+    """Create the strategy log reader for MCP log tools."""
+    from finbot.infrastructure.services.strategy_log_writer import (
+        StrategyLogFileReader,
+    )
+
+    return StrategyLogFileReader()

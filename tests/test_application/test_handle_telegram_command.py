@@ -455,6 +455,17 @@ class TestRunRejection:
         assert result.reply_markup is not None
 
 
+class _SymbolListProvider:
+    """Fake metadata provider returning a fixed symbol list."""
+
+    def __init__(self, symbols: list[str]) -> None:
+        self._symbols = symbols
+
+    def list_symbols(self) -> list[str]:
+        """Return configured symbols."""
+        return self._symbols
+
+
 class TestRunFlow:
     @pytest.mark.asyncio
     async def test_run_flow_starts_dry_run_after_keyboard_selection(self):
@@ -548,6 +559,106 @@ class TestRunFlow:
         assert fake_manager.start_called_with is not None
         assert fake_manager.start_called_with["mode"] == "dry_run"
         assert "Bot started" in result.text or "started" in result.text.lower()
+
+    @pytest.mark.asyncio
+    async def test_run_flow_separates_crypto_and_hip3_symbol_menus(self):
+        """Mixed Hyperliquid symbols show market type before ticker selection."""
+        fake_manager = FakeBotManager(is_running=False)
+        fake_sessions = InMemoryTelegramSessionStore()
+        use_case = HandleTelegramCommand(
+            bot_manager=fake_manager,
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory(["macd_cross.yaml"]),
+            session_store=fake_sessions,
+            allowed_users=frozenset({987654321}),
+            metadata_provider=_SymbolListProvider(["BTC", "ETH", "flx:TSLA"]),
+        )
+
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/run",
+                args="",
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+            )
+        )
+        strategy_cb = result.reply_markup["inline_keyboard"][0][0]["callback_data"]
+
+        type_result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=strategy_cb,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq1",
+            )
+        )
+        assert "market type" in type_result.text.lower()
+        assert "Crypto perps" in type_result.text
+        assert "HIP" in type_result.text
+
+        hip3_cb = type_result.reply_markup["inline_keyboard"][1][0]["callback_data"]
+        symbol_result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=hip3_cb,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq2",
+            )
+        )
+        assert "HIP" in symbol_result.text
+        assert symbol_result.reply_markup["inline_keyboard"][0][0]["text"] == "flx:TSLA"
+
+        symbol_cb = symbol_result.reply_markup["inline_keyboard"][0][0]["callback_data"]
+        interval_result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=symbol_cb,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq3",
+            )
+        )
+        assert "interval" in interval_result.text.lower()
+        assert "flx:TSLA" in interval_result.text
+
+    @pytest.mark.asyncio
+    async def test_run_prefill_preserves_hip3_dex_case(self):
+        """Typing /run FLX:tsla normalizes to flx:TSLA and skips menus."""
+        fake_sessions = InMemoryTelegramSessionStore()
+        use_case = HandleTelegramCommand(
+            bot_manager=FakeBotManager(is_running=False),
+            chat_repo=InMemoryTelegramChatRepository(),
+            strategy_dir=FakeStrategyDirectory(["macd_cross.yaml"]),
+            session_store=fake_sessions,
+            allowed_users=frozenset({987654321}),
+            metadata_provider=_SymbolListProvider(["BTC", "flx:TSLA"]),
+        )
+
+        result = await use_case.execute(
+            TelegramCommandRequest(
+                command="/run",
+                args="FLX:tsla",
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+            )
+        )
+        strategy_cb = result.reply_markup["inline_keyboard"][0][0]["callback_data"]
+        interval_result = await use_case.handle_callback(
+            CallbackQueryRequest(
+                callback_data=strategy_cb,
+                chat_id=123456789,
+                user_id=987654321,
+                message_id=100,
+                callback_query_id="cq1",
+            )
+        )
+
+        assert "interval" in interval_result.text.lower()
+        assert "flx:TSLA" in interval_result.text
 
     @pytest.mark.asyncio
     async def test_run_flow_live_requires_env_ack_and_telegram_confirmation(self):
@@ -1102,7 +1213,7 @@ class TestConfirmationFlow:
         )
         result = await uc.execute(
             TelegramCommandRequest(
-                command="/long", args="0.01", chat_id=1, user_id=1, message_id=2
+                command="/long", args="50000", chat_id=1, user_id=1, message_id=2
             )
         )
         # Confirmation prompt shown (button text has emoji prefix)
@@ -1123,7 +1234,7 @@ class TestConfirmationFlow:
         )
         result = await uc.execute(
             TelegramCommandRequest(
-                command="/long", args="0.01", chat_id=1, user_id=1, message_id=2
+                command="/long", args="50000", chat_id=1, user_id=1, message_id=2
             )
         )
         # No confirmation prompt — direct order (FakeBotManager returns ok)
@@ -1159,7 +1270,7 @@ class TestConfirmationFlow:
         )
         prompt = await uc.execute(
             TelegramCommandRequest(
-                command="/long", args="0.01", chat_id=1, user_id=1, message_id=2
+                command="/long", args="50000", chat_id=1, user_id=1, message_id=2
             )
         )
         # Extract session id from the confirm callback data
@@ -1197,7 +1308,7 @@ class TestConfirmationFlow:
         )
         prompt = await uc.execute(
             TelegramCommandRequest(
-                command="/long", args="0.01", chat_id=1, user_id=1, message_id=2
+                command="/long", args="50000", chat_id=1, user_id=1, message_id=2
             )
         )
         cancel_cb = prompt.reply_markup["inline_keyboard"][0][1]["callback_data"]

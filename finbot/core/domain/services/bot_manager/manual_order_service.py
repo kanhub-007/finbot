@@ -57,9 +57,13 @@ class ManualOrderService:
         self._ack = live_trading_ack
 
     def submit_manual_order(
-        self, side: OrderSide, size: Decimal | None
+        self,
+        side: OrderSide,
+        size: Decimal | None,
+        limit_px: Decimal | None = None,
+        usd_notional: Decimal | None = None,
     ) -> dict[str, Any]:
-        """Submit a manual market order on the active symbol."""
+        """Submit a manual market or limit order on the active symbol."""
         with self._lock:
             if self._state.active_symbol is None:
                 return {
@@ -99,15 +103,19 @@ class ManualOrderService:
             symbol=symbol,
             side=side,
             size=Decimal(str(resolved)),
-            order_type=OrderType.MARKET,
+            order_type=OrderType.LIMIT if limit_px else OrderType.MARKET,
             reduce_only=False,
+            limit_price=limit_px,
         )
         gate_error = _run_manual_gates(
             self._mode,
             self._ack,
             self._state.runtime_config,
             intent,
-            {"price": _safe_price(self._exchange, symbol)},
+            {
+                "price": _safe_price(self._exchange, symbol),
+                "usd_notional": usd_notional,
+            },
         )
         if gate_error is not None:
             return {"status": "rejected", "message": gate_error}
@@ -125,9 +133,13 @@ class ManualOrderService:
         size: Decimal | None,
         sl_price: Decimal | None = None,
         tp_price: Decimal | None = None,
+        limit_px: Decimal | None = None,
+        usd_notional: Decimal | None = None,
     ) -> dict[str, Any]:
         """Submit a manual entry then attach SL/TP triggers in one call."""
-        entry_result = self.submit_manual_order(side, size)
+        entry_result = self.submit_manual_order(
+            side, size, limit_px=limit_px, usd_notional=usd_notional
+        )
         if entry_result.get("status") != "ok":
             return entry_result
         symbol = entry_result.get("symbol", "")

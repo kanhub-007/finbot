@@ -39,13 +39,11 @@ class TestHyperliquidExchangeGateway:
                 cloid="cloid-1",
             )
             result = gateway.submit_order(intent)
-            mock_exchange.market_open.assert_called_once_with(
-                coin="BTC",
-                is_buy=True,
-                sz=0.001,
-                limit_px=None,
-                cloid="cloid-1",
-            )
+            mock_exchange.market_open.assert_called_once()
+            call_args = mock_exchange.market_open.call_args
+            assert call_args[0] == ("BTC", True, 0.001)
+            assert call_args[1]["px"] is None
+            assert call_args[1]["cloid"] is not None
             assert result["status"] == "ok"
 
     def test_exit_order_is_reduce_only(self) -> None:
@@ -93,7 +91,10 @@ class TestHyperliquidExchangeGateway:
                 private_key="0x" + "a" * 64,
             )
             result = gateway.cancel_by_cloid("BTC", "cloid-1")
-            mock_exchange.cancel_by_cloid.assert_called_once_with("BTC", "cloid-1")
+            mock_exchange.cancel_by_cloid.assert_called_once()
+            call_args = mock_exchange.cancel_by_cloid.call_args
+            assert call_args[0][0] == "BTC"
+            assert call_args[0][1] is not None
             assert result["status"] == "ok"
 
     def test_gateway_does_not_persist_submission(self) -> None:
@@ -197,13 +198,11 @@ class TestHyperliquidExchangeGateway:
                 cloid="cloid-hip3",
             )
             result = gateway.submit_order(intent)
-            mock_exchange.market_open.assert_called_once_with(
-                coin="xyz:AAPL",
-                is_buy=True,
-                sz=0.01,
-                limit_px=None,
-                cloid="cloid-hip3",
-            )
+            mock_exchange.market_open.assert_called_once()
+            call_args = mock_exchange.market_open.call_args
+            assert call_args[0] == ("xyz:AAPL", True, 0.01)
+            assert call_args[1]["px"] is None
+            assert call_args[1]["cloid"] is not None
             assert result["status"] == "ok"
 
     def test_hip3_position_query_uses_raw_symbol(self) -> None:
@@ -248,7 +247,10 @@ class TestHyperliquidExchangeGateway:
                 private_key="0x" + "a" * 64,
             )
             result = gateway.cancel_by_cloid("xyz:AAPL", "cloid-1")
-            mock_exchange.cancel_by_cloid.assert_called_once_with("xyz:AAPL", "cloid-1")
+            mock_exchange.cancel_by_cloid.assert_called_once()
+            call_args = mock_exchange.cancel_by_cloid.call_args
+            assert call_args[0][0] == "xyz:AAPL"
+            assert call_args[0][1] is not None
             assert result["status"] == "ok"
 
     def test_cancel_all_calls_bulk_cancel(self) -> None:

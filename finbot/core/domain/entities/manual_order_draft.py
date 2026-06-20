@@ -31,5 +31,7 @@ class ManualOrderDraft:
 
     side: OrderSide
     size: Decimal
+    limit_px: Decimal | None = None
+    usd_notional: Decimal | None = None
     sl_price: Decimal | str | None = None
     tp_price: Decimal | str | None = None

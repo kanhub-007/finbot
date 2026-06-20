@@ -154,15 +154,33 @@ class SymbolSessionService:
     # -- internal -----------------------------------------------------------
 
     def _read_exchange_leverage(self, symbol: str) -> tuple[int, str]:
+        """Read leverage from exchange if available; fall back to persisted.
+
+        Hyperliquid only exposes leverage in ``user_state`` when a position
+        is open.  When no position exists the exchange returns ``None`` —
+        keep the previously-persisted value instead of blindly defaulting
+        to 1x isolated.
+        """
         if self._exchange is None:
-            return 1, "isolated"
+            return self._fallback_leverage(symbol)
         try:
             reported = self._exchange.get_leverage(symbol)
         except Exception:
             reported = None
-        if reported is None:
-            return 1, "isolated"
-        return reported
+        if reported is not None:
+            return reported
+        return self._fallback_leverage(symbol)
+
+    def _fallback_leverage(self, symbol: str) -> tuple[int, str]:
+        """Return the last known leverage for *symbol*, or zero = unknown.
+
+        A leverage of 0 means "unknown" — displayed as "?" to the user
+        so they know they must explicitly set it with /leverage.
+        """
+        existing = self._state.active_symbol
+        if existing is not None and existing.symbol.upper() == symbol.upper():
+            return existing.leverage, existing.margin_mode
+        return 0, "?"
 
     def _switch_position_warning(
         self, previous: str | None, new_symbol: str

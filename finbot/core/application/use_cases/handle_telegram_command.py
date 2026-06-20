@@ -26,6 +26,8 @@ from finbot.core.application.use_cases.telegram_lifecycle import (
     _handle_history,
     _handle_leverage,
     _handle_list,
+    _handle_log,
+    _handle_mode,
     _handle_mute,
     _handle_position,
     _handle_price,
@@ -65,12 +67,14 @@ from finbot.core.application.use_cases.telegram_run_flow import (
     _handle_run_callback,
     _read_execution_config,
     _render_symbol_page,
+    _render_symbol_type_menu,
     _run_cb_confirm,
     _run_cb_int,
     _run_cb_mode,
     _run_cb_mode_live,
     _run_cb_strat,
     _run_cb_sym,
+    _run_cb_symidx,
     _start_bot_from_session,
 )
 from finbot.core.domain.entities.callback_data import CallbackData
@@ -103,7 +107,9 @@ class HandleTelegramCommand:
         allowed_users: frozenset[int],
         live_trading_ack: bool = False,
         mode: str = "dry_run",
+        hyperliquid_testnet: bool = True,
         metadata_provider: object | None = None,
+        log_reader: object | None = None,
     ) -> None:
         self._bot_manager = bot_manager
         self._chat_repo = chat_repo
@@ -112,7 +118,9 @@ class HandleTelegramCommand:
         self._allowed_users = allowed_users
         self._live_trading_ack = live_trading_ack
         self._mode = mode
+        self._testnet = hyperliquid_testnet
         self._metadata_provider = metadata_provider
+        self._log_reader = log_reader
 
     async def _handle_start(
         self, request: TelegramCommandRequest
@@ -289,11 +297,19 @@ class HandleTelegramCommand:
     ) -> TelegramCommandResult:
         return await _handle_run_callback(self, request, data)
 
-    def _render_symbol_page(self, session, page: int) -> TelegramCommandResult:
-        return _render_symbol_page(self, session, page)
+    def _render_symbol_type_menu(self, session) -> TelegramCommandResult:
+        return _render_symbol_type_menu(self, session)
+
+    def _render_symbol_page(
+        self, session, page: int, symbol_type: str = "crypto"
+    ) -> TelegramCommandResult:
+        return _render_symbol_page(self, session, page, symbol_type)
 
     def _run_cb_strat(self, session, idx_str: str) -> TelegramCommandResult:
         return _run_cb_strat(self, session, idx_str)
+
+    def _run_cb_symidx(self, session, value: str) -> TelegramCommandResult:
+        return _run_cb_symidx(self, session, value)
 
     def _run_cb_sym(self, session, symbol: str) -> TelegramCommandResult:
         return _run_cb_sym(self, session, symbol)
@@ -342,6 +358,12 @@ class HandleTelegramCommand:
     async def _handle_leverage(self, request: TelegramCommandRequest):
         return await _handle_leverage(self, request)
 
+    async def _handle_log(self, request: TelegramCommandRequest):
+        return await _handle_log(self, request)
+
+    async def _handle_mode(self, request: TelegramCommandRequest):
+        return await _handle_mode(self, request)
+
     async def _handle_position(self, request: TelegramCommandRequest):
         return await _handle_position(self, request)
 
@@ -361,16 +383,41 @@ class HandleTelegramCommand:
         return _live_trading_ack_mode(self)
 
     def _render_order_confirmation(
-        self, request, side, active, size, sl_price, tp_price
+        self,
+        request,
+        side,
+        active,
+        size,
+        sl_price,
+        tp_price,
+        limit_px=None,
+        usd_notional=None,
     ) -> TelegramCommandResult:
         return _render_order_confirmation(
-            self, request, side, active, size, sl_price, tp_price
+            self,
+            request,
+            side,
+            active,
+            size,
+            sl_price,
+            tp_price,
+            limit_px,
+            usd_notional,
         )
 
     def _execute_manual_order(
-        self, order_side, active, size, sl_price, tp_price
+        self,
+        order_side,
+        active,
+        size,
+        sl_price,
+        tp_price,
+        limit_px=None,
+        usd_notional=None,
     ) -> TelegramCommandResult:
-        return _execute_manual_order(self, order_side, active, size, sl_price, tp_price)
+        return _execute_manual_order(
+            self, order_side, active, size, sl_price, tp_price, limit_px, usd_notional
+        )
 
     async def _handle_close(self, request: TelegramCommandRequest):
         return await _handle_close(self, request)
@@ -431,6 +478,8 @@ _COMMAND_HANDLERS: dict[str, object] = {
     "/price": HandleTelegramCommand._handle_price,
     "/balance": HandleTelegramCommand._handle_balance,
     "/leverage": HandleTelegramCommand._handle_leverage,
+    "/log": HandleTelegramCommand._handle_log,
+    "/mode": HandleTelegramCommand._handle_mode,
     "/position": HandleTelegramCommand._handle_position,
     "/long": HandleTelegramCommand._handle_long,
     "/short": HandleTelegramCommand._handle_short,

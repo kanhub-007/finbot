@@ -13,8 +13,10 @@ class WalletBalance:
     """
 
     wallet_value: Decimal
-    """Total wallet value (equity)."""
+    """Perp margin account value (cash + unrealised PnL)."""
     margin_used: Decimal
     """Initial margin currently locked in positions."""
     available: Decimal
     """Withdrawable / available for new positions."""
+    spot_usdc: Decimal = Decimal("0")
+    """Spot USDC balance (not yet deposited into perp margin)."""

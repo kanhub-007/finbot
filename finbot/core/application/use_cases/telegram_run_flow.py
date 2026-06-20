@@ -12,7 +12,8 @@ from finbot.core.application.dto.telegram_command_result import (
 from finbot.core.application.use_cases.telegram_helpers import (
     _DEFAULT_INTERVALS,
     _escape_mdv2,
-    _get_symbols,
+    _get_symbol_groups,
+    _normalize_symbol,
 )
 from finbot.core.domain.entities.callback_data import CallbackData
 
@@ -49,9 +50,13 @@ async def _handle_run(uc, request: TelegramCommandRequest) -> TelegramCommandRes
     # Create a session for the run flow
     session = uc._session_store.create(request.chat_id, request.message_id)
 
-    # If user typed "/run BTC", pre-fill symbol to skip the picker
+    # If user typed "/run BTC" or "/run flx:TSLA", pre-fill symbol to skip
+    # the picker. HIP-3 DEX names stay lowercase while coins are uppercased.
     if request.args.strip():
-        session.symbol = request.args.strip().upper()
+        try:
+            session.symbol = _normalize_symbol(request.args)
+        except ValueError:
+            session.symbol = request.args.strip().upper()
 
     sid = session.session_id
 
@@ -82,6 +87,8 @@ async def _handle_run_callback(
     session_id = data.action  # parts[1]
     action = data.value  # parts[2]
     value = data.subvalue  # parts[3]
+    if action == "sym" and data.segment_count > 4:
+        value = ":".join(data.parts[3:])
 
     session = uc._session_store.get(session_id)
     if session is None:
@@ -99,8 +106,13 @@ async def _handle_run_callback(
         return uc._run_cb_strat(session, value)
     elif action == "sym":
         return uc._run_cb_sym(session, value)
+    elif action == "symtype":
+        return uc._render_symbol_page(session, page=0, symbol_type=value)
+    elif action == "symidx":
+        return uc._run_cb_symidx(session, value)
     elif action == "page":
-        return uc._render_symbol_page(session, page=int(value))
+        symbol_type, page = _parse_symbol_page_value(value)
+        return uc._render_symbol_page(session, page=page, symbol_type=symbol_type)
     elif action == "int":
         return uc._run_cb_int(session, value)
     elif action == "mode":
@@ -113,80 +125,164 @@ async def _handle_run_callback(
         )
 
 
-def _render_symbol_page(uc, session, page: int = 0) -> TelegramCommandResult:
-    """Render a paginated symbol picker."""
+def _render_symbol_type_menu(uc, session) -> TelegramCommandResult:
+    """Render the crypto-vs-HIP-3 symbol category picker."""
+    crypto_symbols, hip3_symbols = _get_symbol_groups(uc._metadata_provider)
+    sid = session.session_id
+    return TelegramCommandResult(
+        text=(
+            "Select perp market type:\n"
+            f"• Crypto perps: {len(crypto_symbols)} symbols\n"
+            f"• HIP\\-3 perps: {len(hip3_symbols)} symbols"
+        ),
+        parse_mode="MarkdownV2",
+        reply_markup={
+            "inline_keyboard": [
+                [
+                    {
+                        "text": f"Crypto perps ({len(crypto_symbols)})",
+                        "callback_data": f"run:{sid}:symtype:crypto",
+                    },
+                ],
+                [
+                    {
+                        "text": f"HIP-3 perps ({len(hip3_symbols)})",
+                        "callback_data": f"run:{sid}:symtype:hip3",
+                    },
+                ],
+            ]
+        },
+    )
+
+
+def _render_symbol_page(
+    uc, session, page: int = 0, symbol_type: str = "crypto"
+) -> TelegramCommandResult:
+    """Render a paginated symbol picker for one market type."""
     symbols_per_page = 6
-    symbols = _get_symbols(uc._metadata_provider)
-    total_pages = (len(symbols) + symbols_per_page - 1) // symbols_per_page
+    symbols = _symbols_for_type(uc._metadata_provider, symbol_type)
+    total_pages = max(1, (len(symbols) + symbols_per_page - 1) // symbols_per_page)
     page = max(0, min(page, total_pages - 1))
 
     sid = session.session_id
     start = page * symbols_per_page
     page_symbols = symbols[start : start + symbols_per_page]
 
-    # Symbol buttons (2 rows of 3)
     keyboard_rows = []
     row = []
-    for sym in page_symbols:
-        row.append({"text": sym, "callback_data": f"run:{sid}:sym:{sym}"})
+    for idx, sym in enumerate(page_symbols, start=start):
+        row.append(
+            {"text": sym, "callback_data": f"run:{sid}:symidx:{symbol_type},{idx}"}
+        )
         if len(row) == 3:
             keyboard_rows.append(row)
             row = []
     if row:
         keyboard_rows.append(row)
 
-    # Navigation row
     nav_row = []
     if page > 0:
         nav_row.append(
-            {"text": "\u25c0 Prev", "callback_data": f"run:{sid}:page:{page - 1}"}
+            {
+                "text": "\u25c0 Prev",
+                "callback_data": f"run:{sid}:page:{symbol_type},{page - 1}",
+            }
         )
     nav_row.append({"text": f"{page + 1}/{total_pages}", "callback_data": "none"})
     if page < total_pages - 1:
         nav_row.append(
-            {"text": "Next \u25b6", "callback_data": f"run:{sid}:page:{page + 1}"}
+            {
+                "text": "Next \u25b6",
+                "callback_data": f"run:{sid}:page:{symbol_type},{page + 1}",
+            }
         )
     keyboard_rows.append(nav_row)
-
-    # Search hint row
     keyboard_rows.append(
-        [{"text": "\u2315 Tip: /run BTC skips this step", "callback_data": "none"}]
+        [{"text": "\u21a9 Market type", "callback_data": f"run:{sid}:strat:current"}]
+    )
+    keyboard_rows.append(
+        [{"text": "\u2315 Tip: /run flx:TSLA skips this step", "callback_data": "none"}]
     )
 
     return TelegramCommandResult(
         text=(
-            f"Select symbol \\({len(symbols)} available,"
-            f" page {page + 1}/{total_pages}\\):"
+            f"Select {_symbol_type_label(symbol_type)} symbol "
+            f"\\({len(symbols)} available, page {page + 1}/{total_pages}\\):"
         ),
         parse_mode="MarkdownV2",
         reply_markup={"inline_keyboard": keyboard_rows},
     )
 
 
+def _symbols_for_type(
+    metadata_provider: object | None, symbol_type: str
+) -> tuple[str, ...]:
+    """Return symbols for the requested Telegram market category."""
+    crypto_symbols, hip3_symbols = _get_symbol_groups(metadata_provider)
+    return hip3_symbols if symbol_type == "hip3" else crypto_symbols
+
+
+def _symbol_type_label(symbol_type: str) -> str:
+    """Return a display label for a symbol category."""
+    return "HIP\\-3 perp" if symbol_type == "hip3" else "crypto perp"
+
+
+def _parse_symbol_page_value(value: str) -> tuple[str, int]:
+    """Parse ``<symbol_type>,<page>`` with backward-compatible page-only input."""
+    if "," not in value:
+        return "crypto", int(value)
+    symbol_type, page_text = value.split(",", maxsplit=1)
+    return symbol_type, int(page_text)
+
+
+def _parse_symbol_index_value(value: str) -> tuple[str, int]:
+    """Parse ``<symbol_type>,<index>`` from callback data."""
+    symbol_type, idx_text = value.split(",", maxsplit=1)
+    return symbol_type, int(idx_text)
+
+
 def _run_cb_strat(uc, session, idx_str: str) -> TelegramCommandResult:
-    """User selected a strategy — show symbol picker."""
-    strategies = uc._strategy_dir.list_strategies()
-    try:
-        idx = int(idx_str)
-        strategy_name = strategies[idx]
-    except (ValueError, IndexError):
-        return TelegramCommandResult(
-            text="Invalid strategy selection. " "Please start again with /run\\."
-        )
+    """User selected a strategy — show symbol type or symbol picker."""
+    if idx_str != "current":
+        strategies = uc._strategy_dir.list_strategies()
+        try:
+            idx = int(idx_str)
+            strategy_name = strategies[idx]
+        except (ValueError, IndexError):
+            return TelegramCommandResult(
+                text="Invalid strategy selection. " "Please start again with /run\\."
+            )
+        session.strategy_path = uc._strategy_dir.get_strategy_path(strategy_name)
+        uc._session_store.save(session)
 
-    session.strategy_path = uc._strategy_dir.get_strategy_path(strategy_name)
-    uc._session_store.save(session)
-
-    # If symbol was pre-filled via "/run BTC", skip the picker
+    # If symbol was pre-filled via "/run BTC" or "/run flx:TSLA", skip picker.
     if session.symbol:
         return uc._run_cb_sym(session, session.symbol)
 
-    return uc._render_symbol_page(session, page=0)
+    crypto_symbols, hip3_symbols = _get_symbol_groups(uc._metadata_provider)
+    if crypto_symbols and hip3_symbols:
+        return uc._render_symbol_type_menu(session)
+    return uc._render_symbol_page(
+        session, page=0, symbol_type="hip3" if hip3_symbols else "crypto"
+    )
+
+
+def _run_cb_symidx(uc, session, value: str) -> TelegramCommandResult:
+    """Resolve an indexed symbol callback, then show interval picker."""
+    symbol_type, idx = _parse_symbol_index_value(value)
+    symbols = _symbols_for_type(uc._metadata_provider, symbol_type)
+    try:
+        symbol = symbols[idx]
+    except IndexError:
+        return TelegramCommandResult(
+            text="Invalid symbol selection. Please start again with /run\\."
+        )
+    return uc._run_cb_sym(session, symbol)
 
 
 def _run_cb_sym(uc, session, symbol: str) -> TelegramCommandResult:
     """User selected a symbol — show interval picker."""
-    session.symbol = symbol
+    session.symbol = _normalize_symbol(symbol)
     uc._session_store.save(session)
 
     sid = session.session_id

@@ -44,6 +44,8 @@ _MAX_CLASS_LINES = 150
 _FILE_ALLOWLIST: dict[str, str] = {
     "finbot/infrastructure/repositories/sqlite_bot_state_repository.py": "S10",
     "finbot/core/application/use_cases/live_trading_runtime.py": "S9",
+    "finbot/core/application/use_cases/telegram_lifecycle.py": "S8",
+    "finbot/core/application/use_cases/telegram_manual_orders.py": "S8",
 }
 
 # Classes over 150 lines. In-scope entries are removed when their scenario

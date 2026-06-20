@@ -83,6 +83,26 @@ def create_exchange_gateway(settings: Settings) -> ExchangeGateway:
     return _build_exchange_gateway(settings, TradingMode(settings.mode))
 
 
+def create_telegram_exchange_gateway(settings: Settings) -> ExchangeGateway:
+    """Always create a real Hyperliquid gateway for Telegram/TUI queries.
+
+    Telegram commands (/balance, /price, /position, /symbol, /leverage,
+    /long, /short, /close, /orders, /cancel) need real exchange data even
+    when the strategy-running mode is dry_run.  The manual-order safety
+    gates still block real order placement when mode=live without
+    live_trading_ack.
+
+    The base URL (testnet vs mainnet) is determined by
+    ``FINBOT_HYPERLIQUID_TESTNET``.
+    """
+    return HyperliquidExchangeGateway(
+        private_key=settings.hyperliquid_private_key.get_secret_value(),
+        base_url=hyperliquid_base_url(settings),
+        account_address=settings.hyperliquid_account_address,
+        vault_address=settings.hyperliquid_vault_address,
+    )
+
+
 def create_run_bot_use_case(
     settings: Settings,
     strategy_path: str,

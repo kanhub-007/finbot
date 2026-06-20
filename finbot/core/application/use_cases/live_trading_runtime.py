@@ -129,6 +129,7 @@ class LiveTradingRuntimeUseCase:
         account_event_handler: AccountEventHandler | None = None,
         trade_ledger: TradeLedger | None = None,
         live_state: Any | None = None,
+        strategy_log_writer: Any | None = None,
     ) -> None:
         self._exchange = exchange_gateway
         self._evaluator = strategy_evaluator
@@ -149,6 +150,7 @@ class LiveTradingRuntimeUseCase:
         self._account_handler = account_event_handler
         self._trade_ledger = trade_ledger or TradeLedger(self._repo)
         self._live_state = live_state
+        self._log_writer = strategy_log_writer
         self._required_columns: set[str] = required_columns or set()
         self._required_indicators: list[str] = (
             list(required_indicators) if required_indicators else []
@@ -461,6 +463,7 @@ class LiveTradingRuntimeUseCase:
             has_gap=self._warmup.has_gap,
         )
         if not validation.valid:
+            self._log_decision(ts, candle, latest, validation=validation)
             return self._handle_enrichment_rejection(ts, validation)
 
         # 4. Evaluate strategy
@@ -475,6 +478,7 @@ class LiveTradingRuntimeUseCase:
 
         # 5. If HOLD, no further processing
         if signal.action == SignalAction.HOLD:
+            self._log_decision(ts, candle, latest, signal=signal)
             return CandleProcessingResult(
                 candle_timestamp=ts,
                 enrichment_valid=True,
@@ -634,6 +638,17 @@ class LiveTradingRuntimeUseCase:
 
         self._persist_risk_decision(plan)
         if not plan.accepted:
+            self._log_decision(
+                candle_ts,
+                None,
+                bar,
+                signal=signal,
+                risk={
+                    "accepted": False,
+                    "gate": plan.gate_name,
+                    "reason": plan.reason,
+                },
+            )
             return CandleProcessingResult(
                 candle_timestamp=candle_ts,
                 enrichment_valid=True,
@@ -647,6 +662,28 @@ class LiveTradingRuntimeUseCase:
         intent_id, submitted = self._with_persistence_transaction(
             lambda: self._commit_accepted_plan(plan, signal.action.value, candle_ts)
         )
+        if plan.intent is not None:
+            self._log_decision(
+                candle_ts,
+                None,
+                bar,
+                signal=signal,
+                risk={"accepted": True},
+                intent={
+                    "symbol": plan.intent.symbol,
+                    "side": plan.intent.side.value,
+                    "size": str(plan.intent.size),
+                    "type": plan.intent.order_type.value,
+                    "reduce_only": plan.intent.reduce_only,
+                    "limit_price": (
+                        str(plan.intent.limit_price)
+                        if plan.intent.limit_price
+                        else None
+                    ),
+                    "submitted": submitted,
+                    "intent_id": intent_id,
+                },
+            )
 
         return CandleProcessingResult(
             candle_timestamp=candle_ts,
@@ -755,6 +792,51 @@ class LiveTradingRuntimeUseCase:
 
         return self._submission_strategy.submit(
             intent, self._bot_run_id, self._warmup.latest_bar
+        )
+
+    def _log_decision(
+        self,
+        ts: int,
+        candle: dict[str, Any] | None = None,
+        enriched_bar: dict[str, Any] | None = None,
+        *,
+        validation: Any | None = None,
+        signal: SignalDecision | None = None,
+        risk: dict[str, Any] | None = None,
+        intent: dict[str, Any] | None = None,
+    ) -> None:
+        """Write one evaluation log entry if a writer is configured."""
+        if self._log_writer is None:
+            return
+        indicators: dict[str, Any] | None = None
+        if enriched_bar:
+            indicators = {
+                k: enriched_bar[k]
+                for k in self._required_indicators
+                if k in enriched_bar
+            }
+        validation_dict: dict[str, Any] | None = None
+        if validation is not None:
+            validation_dict = {
+                "valid": getattr(validation, "valid", False),
+                "reason": getattr(validation, "reason", ""),
+            }
+        signal_dict: dict[str, Any] | None = None
+        if signal is not None:
+            signal_dict = {
+                "action": signal.action.value,
+            }
+        self._log_writer.log_candle(
+            strategy_file=self._strategy_name,
+            symbol=self._symbol,
+            interval=self._interval,
+            timestamp=ts,
+            candle=candle,
+            indicators=indicators,
+            validation=validation_dict,
+            signal=signal_dict,
+            risk=risk,
+            intent=intent,
         )
 
     # -- event emission -----------------------------------------------------

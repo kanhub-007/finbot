@@ -40,7 +40,21 @@ async def _handle_start(uc, request: TelegramCommandRequest) -> TelegramCommandR
             "/status \u2014 View bot status & stats\n"
             "/history \u2014 Browse past runs\n"
             "/panic \u2014 \U0001f6a8 Emergency stop \\+ cancel orders\n"
-            "/help \u2014 Show this message"
+            "/help \u2014 Show this message\n\n"
+            "*Trading \\(manual control\\):*\n"
+            "/symbol \u2014 Activate a trading symbol\n"
+            "/price \u2014 Show current price\n"
+            "/balance \u2014 Show wallet balance\n"
+            "/leverage \u2014 View or set leverage\n"
+            "/position \u2014 View current position\n"
+            "/long \u2014 Open a long position\n"
+            "/short \u2014 Open a short position\n"
+            "/close \u2014 Close the active position\n"
+            "/sl \u2014 Set stop\\-loss\n"
+            "/tp \u2014 Set take\\-profit\n"
+            "/orders \u2014 List open orders\n"
+            "/cancel \u2014 Cancel an order\n"
+            "/mode \u2014 Show connection \\(testnet/mainnet\\)"
         ),
         parse_mode="MarkdownV2",
         reply_markup={
@@ -63,15 +77,29 @@ async def _handle_help(uc, request: TelegramCommandRequest) -> TelegramCommandRe
     return TelegramCommandResult(
         text=(
             "*Finbot Commands*\n\n"
+            "*Runtime:*\n"
             "/run \u2014 Start a trading bot \\(guided setup\\)\n"
             "/stop \u2014 Stop the running bot\n"
             "/status \u2014 View bot status, position & stats\n"
             "/history \u2014 Browse past bot runs\n"
-            "/panic \u2014 \U0001f6a8 Emergency: cancel orders \\+ close position\n"
-            "/help \u2014 Show this message\n\n"
+            "/panic \u2014 \U0001f6a8 Emergency: cancel orders \\+ close position\n\n"
+            "*Trading:*\n"
+            "/symbol \u2014 Activate a symbol for trading\n"
+            "/price \u2014 Show current price\n"
+            "/balance \u2014 Show wallet balance\n"
+            "/leverage \u2014 View / set leverage\n"
+            "/position \u2014 View current position \\+ PnL\n"
+            "/long \u2014 Open long \\(e\\.g\\. /long 0\\.01 sl 95000\\)\n"
+            "/short \u2014 Open short\n"
+            "/close \u2014 Close active position\n"
+            "/sl \u2014 Set stop\\-loss \\(/sl 2% or /sl 95000\\)\n"
+            "/tp \u2014 Set take\\-profit\n"
+            "/orders \u2014 List open orders\n"
+            "/cancel \u2014 Cancel an order by oid\n"
+            "/mode \u2014 Show connection \\(testnet / mainnet\\)\n\n"
             "*Safety:*\n"
-            "\u2022 Default mode is Dry Run \u2014 no real orders\n"
-            "\u2022 Live/Testnet require explicit confirmation\n"
+            "\u2022 Dry Run is the default \u2014 no real orders\n"
+            "\u2022 Testnet / Live require explicit confirmation\n"
             "\u2022 Only one bot can run at a time"
         ),
         parse_mode="MarkdownV2",
@@ -301,13 +329,15 @@ async def _handle_symbol(uc, request: TelegramCommandRequest):
             parse_mode="MarkdownV2",
         )
     sym = result.get("symbol", args.upper())
-    lev = result.get("leverage", "1")
-    mm = result.get("margin_mode", "isolated")
+    lev = result.get("leverage", "0")
+    mm = result.get("margin_mode", "?")
+    lev_str = (
+        f"{_escape_mdv2(lev)}x {_escape_mdv2(mm)}"
+        if lev != "0"
+        else "unknown \\(set with /leverage\\)"
+    )
     return TelegramCommandResult(
-        text=(
-            f"\u2705 Active symbol: {_escape_mdv2(sym)}\n"
-            f"Leverage: {_escape_mdv2(lev)}x {_escape_mdv2(mm)}"
-        ),
+        text=(f"\u2705 Active symbol: {_escape_mdv2(sym)}\n" f"Leverage: {lev_str}"),
         parse_mode="MarkdownV2",
     )
 
@@ -371,15 +401,89 @@ async def _handle_balance(uc, request: TelegramCommandRequest):
         return TelegramCommandResult(
             text="Requires wallet connection\\.", parse_mode="MarkdownV2"
         )
+    spot = (
+        f"Spot: {_escape_mdv2(str(bal.spot_usdc))} "
+        "USD \\(available for perp margin\\)\n"
+        if bal.spot_usdc > 0
+        else ""
+    )
     return TelegramCommandResult(
         text=(
             "\U0001f4b0 Account Balance\n"
-            f"Wallet: {_escape_mdv2(str(bal.wallet_value))} USD\n"
-            f"Margin used: {_escape_mdv2(str(bal.margin_used))} USD\n"
-            f"Available: {_escape_mdv2(str(bal.available))} USD"
+            f"Margin: {_escape_mdv2(str(bal.wallet_value))} USD\n"
+            f"Used: {_escape_mdv2(str(bal.margin_used))} USD\n"
+            f"Avail: {_escape_mdv2(str(bal.available))} USD\n" + spot
         ),
         parse_mode="MarkdownV2",
     )
+
+
+async def _handle_log(uc, request: TelegramCommandRequest) -> TelegramCommandResult:
+    """Show recent strategy evaluation log entries."""
+    reader = getattr(uc, "_log_reader", None)
+    if reader is None:
+        return TelegramCommandResult(
+            text="Log reader not configured\\.", parse_mode="MarkdownV2"
+        )
+    available = reader.list_logs()
+    if not available:
+        return TelegramCommandResult(
+            text="No strategy logs found\\. Start a bot with /run first\\.",
+            parse_mode="MarkdownV2",
+        )
+    args = request.args.strip().split()
+    name = args[0] if args else available[0]
+    n = int(args[1]) if len(args) > 1 else 10
+    if name not in available:
+        return TelegramCommandResult(
+            text=(
+                f"Unknown log: {_escape_mdv2(name)}\\. "
+                f"Available: {', '.join(available[:8])}"
+            ),
+            parse_mode="MarkdownV2",
+        )
+    strategy, symbol = reader.parse_log_name(name)
+    entries = reader.read_tail(strategy, symbol, n=n)
+    if not entries:
+        return TelegramCommandResult(
+            text=f"Empty log: {_escape_mdv2(name)}", parse_mode="MarkdownV2"
+        )
+    lines = [f"*Log: {_escape_mdv2(name)} \\(last {len(entries)}\\)*"]
+    for e in entries[-5:]:
+        ts = _escape_mdv2(str(e.get("ts", "?")))
+        action = e.get("signal", {}).get("action", "?")
+        risk = e.get("risk", {})
+        intent = e.get("intent")
+        close_val = e.get("candle", {}).get("close", "?")
+        line = f"  {ts}: close={close_val} action={action}"
+        if risk.get("accepted") is False:
+            line += f" blocked: {_escape_mdv2(risk.get('gate','?'))}"
+        if intent:
+            line += f" {intent.get('side','?')} {intent.get('size','?')}"
+        lines.append(line)
+    if len(entries) > 5:
+        lines.append(f"  \\.\\.\\. and {len(entries) - 5} more")
+    return TelegramCommandResult(
+        text="\n".join(lines),
+        parse_mode="MarkdownV2",
+    )
+
+
+async def _handle_mode(uc, request: TelegramCommandRequest) -> TelegramCommandResult:
+    """Show current connection environment (testnet / mainnet)."""
+    env_url = "Testnet" if uc._testnet else "Mainnet"
+    env_emoji = "\U0001f9ea" if uc._testnet else "\U0001f310"
+    ack_status = "\u2705 enabled" if uc._live_trading_ack else "\u274c not set"
+    lines = [
+        f"{env_emoji} *Connection: {env_url}*",
+        f"Strategy mode: `{uc._mode}`",
+        f"Live trading ack: {ack_status}",
+        "",
+        "*Environment variables:*",
+        f"`FINBOT_MODE={uc._mode}`",
+        f"`FINBOT_HYPERLIQUID_TESTNET={"true" if uc._testnet else "false"}`",
+    ]
+    return TelegramCommandResult(text="\n".join(lines), parse_mode="MarkdownV2")
 
 
 async def _handle_leverage(uc, request: TelegramCommandRequest):
@@ -392,6 +496,15 @@ async def _handle_leverage(uc, request: TelegramCommandRequest):
         )
     args = request.args.strip().split()
     if not args:
+        if active.leverage == 0:
+            return TelegramCommandResult(
+                text=(
+                    f"{_escape_mdv2(active.symbol)} "
+                    "leverage unknown "
+                    "\\(set with /leverage 5 cross\\)"
+                ),
+                parse_mode="MarkdownV2",
+            )
         return TelegramCommandResult(
             text=(
                 f"{_escape_mdv2(active.symbol)} "

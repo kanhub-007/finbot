@@ -26,8 +26,6 @@ async def _handle_short(uc, request: TelegramCommandRequest):
 
 async def _manual_entry(uc, request, side):
     """Shared /long + /short flow: parse, validate, confirm (live), submit."""
-    from decimal import Decimal
-
     from finbot.core.domain.entities.order_side import OrderSide
 
     active = uc._bot_manager.get_active_symbol()
@@ -36,33 +34,32 @@ async def _manual_entry(uc, request, side):
             text="No symbol selected\\. Use /symbol first\\.",
             parse_mode="MarkdownV2",
         )
-    args = request.args.strip().split()
-    if not args:
-        cmd = "long" if side == "buy" else "short"
-        return TelegramCommandResult(
-            text=f"Usage: /{cmd} SIZE \\[sl PRICE\\] \\[tp PRICE\\]",
-            parse_mode="MarkdownV2",
-        )
-    try:
-        size = Decimal(args[0])
-    except Exception:
-        return TelegramCommandResult(text="Invalid size\\.", parse_mode="MarkdownV2")
-    # Optional bracket orders: "sl <price>" and "tp <price>"
-    sl_price, tp_price, parse_err = _parse_brackets(args[1:])
-    if parse_err is not None:
-        return TelegramCommandResult(
-            text=f"\u274c {_escape_mdv2(parse_err)}", parse_mode="MarkdownV2"
-        )
+    parsed, parse_error = _parse_order_args(uc, request, side, active)
+    if parse_error:
+        return parse_error
     order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
 
-    # In testnet/live, require an explicit Confirm before real orders.
-    # Dry-run skips confirmation (no real risk).
     if uc._needs_confirmation():
         return uc._render_order_confirmation(
-            request, side, active, size, sl_price, tp_price
+            request,
+            side,
+            active,
+            parsed.size,
+            parsed.sl_price,
+            parsed.tp_price,
+            parsed.limit_px,
+            parsed.raw_usd,
         )
 
-    return uc._execute_manual_order(order_side, active, size, sl_price, tp_price)
+    return uc._execute_manual_order(
+        order_side,
+        active,
+        parsed.size,
+        parsed.sl_price,
+        parsed.tp_price,
+        parsed.limit_px,
+        parsed.raw_usd,
+    )
 
 
 def _needs_confirmation(uc) -> bool:
@@ -82,7 +79,15 @@ def _live_trading_ack_mode(uc) -> str:
 
 
 def _render_order_confirmation(
-    uc, request, side, active, size, sl_price, tp_price
+    uc,
+    request,
+    side,
+    active,
+    size,
+    sl_price,
+    tp_price,
+    limit_px=None,
+    usd_notional=None,
 ) -> TelegramCommandResult:
     """Show a Confirm/Cancel prompt for a live/testnet manual order."""
     from finbot.core.domain.entities.manual_order_draft import (
@@ -98,12 +103,15 @@ def _render_order_confirmation(
     session.manual_order_draft = ManualOrderDraft(
         side=(OrderSide.BUY if side == "buy" else OrderSide.SELL),
         size=size,
+        limit_px=limit_px,
+        usd_notional=usd_notional,
         sl_price=sl_price,
         tp_price=tp_price,
     )
     uc._session_store.save(session)
 
-    extras = []
+    order_type_str = f"LIMIT @ {_escape_mdv2(str(limit_px))}" if limit_px else "MARKET"
+    extras = [order_type_str]
     if sl_price is not None:
         extras.append(f"SL={_escape_mdv2(str(sl_price))}")
     if tp_price is not None:
@@ -114,7 +122,7 @@ def _render_order_confirmation(
         text=(
             f"\u26a0\ufe0f Open {action.upper()}\n"
             f"Symbol: {_escape_mdv2(active.symbol)}\n"
-            f"Size: {_escape_mdv2(str(size))}{extra_str}\n"
+            f"Size: {_escape_mdv2(str(size))} tokens{extra_str}\n"
             f"Mode: {mode}\n\n"
             "Real orders WILL be placed\\."
         ),
@@ -137,15 +145,22 @@ def _render_order_confirmation(
 
 
 def _execute_manual_order(
-    uc, order_side, active, size, sl_price, tp_price
+    uc, order_side, active, size, sl_price, tp_price, limit_px=None, usd_notional=None
 ) -> TelegramCommandResult:
     """Submit the manual order (no confirmation step)."""
     if sl_price is not None or tp_price is not None:
         result = uc._bot_manager.submit_manual_order_with_brackets(
-            order_side, size, sl_price=sl_price, tp_price=tp_price
+            order_side,
+            size,
+            sl_price=sl_price,
+            tp_price=tp_price,
+            limit_px=limit_px,
+            usd_notional=usd_notional,
         )
     else:
-        result = uc._bot_manager.submit_manual_order(order_side, size)
+        result = uc._bot_manager.submit_manual_order(
+            order_side, size, limit_px, usd_notional=usd_notional
+        )
     if result.get("status") != "ok":
         return TelegramCommandResult(
             text=f"\u274c {_escape_mdv2(str(result.get('message', 'Rejected')))}",
@@ -163,10 +178,11 @@ def _execute_manual_order(
         warn_text = "\n" + "\n".join(
             f"\u26a0\ufe0f {_escape_mdv2(w)}" for w in warnings
         )
+    order_label = "limit" if limit_px else "market"
     return TelegramCommandResult(
         text=(
             f"\u2705 {_escape_mdv2(active.symbol)} "
-            f"{_escape_mdv2(str(size))} @ market{extra_str}{warn_text}"
+            f"{_escape_mdv2(str(size))} tokens @ {order_label}{extra_str}{warn_text}"
         ),
         parse_mode="MarkdownV2",
     )
@@ -348,3 +364,140 @@ async def _handle_cancel(uc, request: TelegramCommandRequest):
         text=f"\u2705 Cancelled order {_escape_mdv2(order_id)}\\.",
         parse_mode="MarkdownV2",
     )
+
+
+# -- argument parsing & size resolution -------------------------------------
+
+
+class _ParsedOrderArgs:
+    """Result of parsing /long or /short arguments."""
+
+    __slots__ = ("size", "raw_usd", "limit_px", "sl_price", "tp_price")
+
+    def __init__(
+        self,
+        size: object,
+        raw_usd: object,
+        limit_px: object | None = None,
+        sl_price: object | None = None,
+        tp_price: object | None = None,
+    ) -> None:
+        self.size = size
+        self.raw_usd = raw_usd
+        self.limit_px = limit_px
+        self.sl_price = sl_price
+        self.tp_price = tp_price
+
+
+def _parse_order_args(uc, request, side, active):
+    """Parse /long or /short arguments into a _ParsedOrderArgs.
+
+    Returns ``(parsed, error)`` — exactly one is None.
+    """
+    from decimal import Decimal
+
+    cmd = "long" if side == "buy" else "short"
+    args = request.args.strip().split()
+    if not args:
+        return None, TelegramCommandResult(
+            text=(
+                f"Usage: /{cmd} SIZE \\[LIMIT\\_PX\\] "
+                "\\[sl PRICE\\] \\[tp PRICE\\]\n"
+                "SIZE = USD notional \\(e\\.g\\. 100\\), "
+                "or % of balance \\(e\\.g\\. 25%\\)\n"
+                "Leverage and price are applied automatically"
+            ),
+            parse_mode="MarkdownV2",
+        )
+    size_error, size, raw_usd = _resolve_size(uc, args[0], active)
+    if size_error:
+        return None, size_error
+    limit_px = None
+    rest = args[1:]
+    if rest and rest[0].lower() not in ("sl", "tp"):
+        try:
+            limit_px = Decimal(rest[0])
+        except Exception:
+            return None, TelegramCommandResult(
+                text=f"Invalid limit price: {_escape_mdv2(rest[0])}",
+                parse_mode="MarkdownV2",
+            )
+        rest = rest[1:]
+    sl_price, tp_price, parse_err = _parse_brackets(rest)
+    if parse_err is not None:
+        return None, TelegramCommandResult(
+            text=f"\u274c {_escape_mdv2(parse_err)}", parse_mode="MarkdownV2"
+        )
+    return _ParsedOrderArgs(size, raw_usd, limit_px, sl_price, tp_price), None
+
+
+# -- size resolution -------------------------------------------------------
+
+
+def _resolve_size(uc, raw: str, active: object):
+    """Parse a USD or % size and convert to token amount.
+
+    Returns ``(error, token_size, raw_usd)``.
+    """
+    from decimal import Decimal
+
+    from finbot.core.domain.services.order_size_resolver import (
+        resolve_order_size,
+    )
+
+    price = _safe_fetch_price(uc)
+    if isinstance(price, TelegramCommandResult):
+        return price, None, None
+
+    leverage = int(getattr(active, "leverage", 1) or 1)
+
+    balance = None
+    if raw.strip().endswith("%"):
+        bal = uc._bot_manager.get_balance()
+        if bal is not None:
+            balance = max(bal.available, Decimal("0")) + max(
+                bal.spot_usdc, Decimal("0")
+            )
+
+    sz_decimals = _read_sz_decimals(uc, active.symbol)
+    result = resolve_order_size(
+        raw,
+        price,
+        leverage,
+        available_balance=balance,
+        sz_decimals=sz_decimals,
+    )
+    if isinstance(result, str):
+        return (
+            TelegramCommandResult(text=_escape_mdv2(result), parse_mode="MarkdownV2"),
+            None,
+            None,
+        )
+    return None, result.token_size, result.raw_usd
+
+
+def _safe_fetch_price(uc):
+    """Return current price or an error TelegramCommandResult."""
+    try:
+        price = uc._bot_manager.get_active_price()
+    except Exception:
+        return TelegramCommandResult(
+            text="Could not fetch price\\.", parse_mode="MarkdownV2"
+        )
+    if price is None or price <= 0:
+        return TelegramCommandResult(
+            text="Price unavailable\\.", parse_mode="MarkdownV2"
+        )
+    return price
+
+
+def _read_sz_decimals(uc, symbol: str) -> int:
+    """Read sz_decimals for *symbol* from metadata, defaulting to 5."""
+    if hasattr(uc, "_metadata_provider") and uc._metadata_provider:
+        try:
+            meta = uc._metadata_provider.get_metadata(symbol)
+            if meta is not None:
+                return getattr(meta, "sz_decimals", 5) or 5
+        except Exception:
+            pass
+    return 5
