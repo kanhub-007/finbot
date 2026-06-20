@@ -232,6 +232,20 @@ def _symbol_type_label(symbol_type: str) -> str:
     return "HIP\\-3 perp" if symbol_type == "hip3" else "crypto perp"
 
 
+def _read_symbol_max_leverage(uc, symbol: str) -> int:
+    """Return the exchange max leverage for *symbol*, or 0 if unknown."""
+    if not symbol:
+        return 0
+    provider = getattr(uc, "_metadata_provider", None)
+    if provider is None:
+        return 0
+    try:
+        meta = provider.get_metadata(symbol)
+    except Exception:
+        return 0
+    return int(getattr(meta, "max_leverage", 0)) if meta else 0
+
+
 def _parse_symbol_page_value(value: str) -> tuple[str, int]:
     """Parse ``<symbol_type>,<page>`` with backward-compatible page-only input."""
     if "," not in value:
@@ -365,6 +379,10 @@ def _show_risk_config(
     Risk is applied to the total USD balance (not the leveraged amount).
     The selected values are stored in *session* and forwarded to
     ``bot_manager.start()`` via ``_start_bot_from_session``.
+
+    Leverage presets are capped to the symbol's exchange max.  If the
+    currently-selected leverage exceeds the max (e.g. user changed
+    symbol after picking leverage), it is clamped down.
     """
     sid = session.session_id
     tf_display = interval
@@ -372,7 +390,15 @@ def _show_risk_config(
         tf_display = f"{interval} + {' + '.join(informatives)}"
 
     risk_label = f"{session.risk_pct}%"
+
+    # Read the symbol's max leverage from exchange metadata.
+    max_lev = _read_symbol_max_leverage(uc, session.symbol or "")
+    if max_lev > 0 and session.leverage > max_lev:
+        session.leverage = max_lev
+        uc._session_store.save(session)
     lev_label = f"{session.leverage}x"
+    if max_lev > 0:
+        lev_label += f" (max {max_lev}x)"
 
     # Build keyboard: risk presets row, leverage presets row, continue.
     risk_row: list[dict] = []
@@ -387,6 +413,8 @@ def _show_risk_config(
 
     lev_row: list[dict] = []
     for lev, label in _LEV_PRESETS:
+        if max_lev > 0 and lev > max_lev:
+            continue  # skip presets above the symbol's max
         sel = " \u2705" if session.leverage == lev else ""
         lev_row.append(
             {
@@ -588,8 +616,20 @@ def _start_bot_from_session(uc, session, mode: str) -> TelegramCommandResult:
 
     # Set leverage on the active symbol.
     if session.leverage > 0:
-        uc._bot_manager.activate_symbol(session.symbol or "")
-        uc._bot_manager.set_leverage(session.leverage, "isolated")
+        sym_result = uc._bot_manager.activate_symbol(session.symbol or "")
+        if sym_result.get("status") not in ("active", "ok"):
+            return TelegramCommandResult(
+                text=f"\u274c Cannot activate {_escape_mdv2(session.symbol or '')}: "
+                     f"{_escape_mdv2(str(sym_result.get('message', 'unknown')))}",
+                parse_mode="MarkdownV2",
+            )
+        lev_result = uc._bot_manager.set_leverage(session.leverage, "isolated")
+        if lev_result.get("status") != "ok":
+            return TelegramCommandResult(
+                text=f"\u274c Cannot set {session.leverage}x leverage: "
+                     f"{_escape_mdv2(str(lev_result.get('message', 'unknown')))}",
+                parse_mode="MarkdownV2",
+            )
 
     exec_config = uc._read_execution_config(session.strategy_path or "")
     result = uc._bot_manager.start(
