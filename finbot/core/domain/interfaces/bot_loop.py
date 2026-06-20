@@ -21,8 +21,16 @@ class BotLoop(ABC):
         on_candle: Callable[[dict[str, Any]], None],
         on_stale: Callable[[dict[str, Any]], None] | None = None,
         on_account_event: Callable[[dict[str, Any]], None] | None = None,
+        on_informative_candle: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
-        """Block the calling thread and process events until stopped."""
+        """Block the calling thread and process events until stopped.
+
+        Parameters
+        ----------
+        on_informative_candle:
+            Called as ``on_informative_candle(alias, bar)`` when a candle
+            arrives from an informative (non-primary) timeframe stream.
+        """
 
     @abstractmethod
     def stop(self) -> None:

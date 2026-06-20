@@ -297,6 +297,171 @@ def test_drain_skips_when_no_account_events_queued() -> None:
     assert queue.size() == 2
 
 
+# ---------------------------------------------------------------------------
+# Scenario 5: BotEventLoop subscribes to informative streams (MTF)
+# ---------------------------------------------------------------------------
+
+
+class TestBotEventLoopMTF:
+    """Scenario 5: BotEventLoop subscribes to multiple candle streams
+    for multi-timeframe strategies."""
+
+    def test_informative_streams_are_subscribed(self) -> None:
+        """When informative streams are provided, each one is subscribed."""
+        from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
+
+        q = ThreadSafeEventQueue()
+        primary = FakeMarketDataStream()
+        info_1h = FakeMarketDataStream()
+        info_4h = FakeMarketDataStream()
+
+        loop = BotEventLoop(
+            q,
+            primary,
+            informative_streams=[info_1h, info_4h],
+        )
+
+        # Verify informative streams haven't been subscribed yet
+        # (they're subscribed in start())
+        assert info_1h.subscription_count == 0
+        assert info_4h.subscription_count == 0
+
+        # Start the loop — it should subscribe all streams
+        import threading
+
+        t = threading.Thread(
+            target=loop.start,
+            args=("BTC", "30min", lambda _: None),
+            kwargs={"on_informative_candle": lambda _alias, _bar: None},
+        )
+        t.start()
+        import time
+
+        time.sleep(0.1)
+        loop.stop()
+        t.join(timeout=2)
+
+        assert primary.subscription_count >= 1
+        assert info_1h.subscription_count >= 1
+        assert info_4h.subscription_count >= 1
+
+    def test_informative_candle_triggers_on_informative_callback(self) -> None:
+        """When an informative stream emits a candle, the on_informative_candle
+        callback is called with the alias and bar data."""
+        from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
+
+        q = ThreadSafeEventQueue()
+        primary = FakeMarketDataStream()
+        info_1h = FakeMarketDataStream()
+
+        informative_calls: list[tuple[str, dict]] = []
+
+        loop = BotEventLoop(
+            q,
+            primary,
+            informative_streams=[info_1h],
+            informative_aliases=["h1"],
+        )
+
+        import threading
+
+        t = threading.Thread(
+            target=loop.start,
+            args=("BTC", "30min", lambda _: None),
+            kwargs={
+                "on_informative_candle": lambda alias, bar: informative_calls.append(
+                    (alias, bar)
+                )
+            },
+        )
+        t.start()
+        import time
+
+        time.sleep(0.1)
+
+        # Emit a candle from the informative stream
+        info_1h.emit_closed_candle({"close": 50000, "timestamp": 1000})
+        time.sleep(0.1)
+
+        loop.stop()
+        t.join(timeout=2)
+
+        assert len(informative_calls) >= 1
+        alias, bar = informative_calls[0]
+        assert alias == "h1"
+        assert bar["close"] == 50000
+
+    def test_single_tf_no_informative_streams(self) -> None:
+        """Single-TF strategies: no informative streams, no regression."""
+        from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
+
+        q = ThreadSafeEventQueue()
+        primary = FakeMarketDataStream()
+
+        loop = BotEventLoop(q, primary)
+
+        import threading
+
+        t = threading.Thread(
+            target=loop.start,
+            args=("BTC", "1h", lambda _: None),
+        )
+        t.start()
+        import time
+
+        time.sleep(0.1)
+        loop.stop()
+        t.join(timeout=2)
+
+        # Primary stream should be subscribed
+        assert primary.subscription_count >= 1
+
+    def test_informative_candle_does_not_trigger_on_candle(self) -> None:
+        """Informative candles must NOT trigger the primary on_candle
+        callback — they only update the cache."""
+        from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
+
+        q = ThreadSafeEventQueue()
+        primary = FakeMarketDataStream()
+        info_1h = FakeMarketDataStream()
+
+        primary_calls: list[dict] = []
+        informative_calls: list[tuple[str, dict]] = []
+
+        loop = BotEventLoop(
+            q,
+            primary,
+            informative_streams=[info_1h],
+            informative_aliases=["h1"],
+        )
+
+        import threading
+
+        t = threading.Thread(
+            target=loop.start,
+            args=("BTC", "30min", primary_calls.append),
+            kwargs={
+                "on_informative_candle": lambda alias, bar: informative_calls.append(
+                    (alias, bar)
+                )
+            },
+        )
+        t.start()
+        import time
+
+        time.sleep(0.1)
+
+        # Emit from informative — on_candle must NOT be called
+        info_1h.emit_closed_candle({"close": 50000})
+        time.sleep(0.1)
+
+        loop.stop()
+        t.join(timeout=2)
+
+        assert len(informative_calls) >= 1
+        assert len(primary_calls) == 0, "Informative candle must NOT trigger on_candle"
+
+
 class _ScriptedQueue:
     """Returns pre-loaded events in order; enqueue appends to the tail."""
 

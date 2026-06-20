@@ -40,6 +40,11 @@ class BotEventLoop(BotLoop):
         Market data stream that feeds candle events.
     reconnect_backoff:
         Initial backoff seconds for reconnect attempts.
+    informative_streams:
+        Additional market data streams for informative timeframes (MTF).
+    informative_aliases:
+        Short names for each informative stream (e.g. ``["h1"]``).
+        Must be same length as *informative_streams*.
     """
 
     MAX_BACKOFF = 60.0
@@ -54,17 +59,22 @@ class BotEventLoop(BotLoop):
         stream: MarketDataStream,
         account_stream: AccountStream | None = None,
         reconnect_backoff: float = 2.0,
+        informative_streams: list[MarketDataStream] | None = None,
+        informative_aliases: list[str] | None = None,
     ) -> None:
         self._queue = queue
         self._stream = stream
         self._account_stream = account_stream
         self._reconnect_backoff = reconnect_backoff
+        self._informative_streams: list[MarketDataStream] = informative_streams or []
+        self._informative_aliases: list[str] = informative_aliases or []
         self._running = False
         self._symbol: str = ""
         self._interval: str = ""
         self._on_candle: Callable[[dict[str, Any]], None] | None = None
         self._on_stale: Callable[[dict[str, Any]], None] | None = None
         self._on_account: Callable[[dict[str, Any]], None] | None = None
+        self._on_informative: Callable[[str, dict[str, Any]], None] | None = None
 
     # -- public API --------------------------------------------------------
 
@@ -75,6 +85,7 @@ class BotEventLoop(BotLoop):
         on_candle: Callable[[dict[str, Any]], None],
         on_stale: Callable[[dict[str, Any]], None] | None = None,
         on_account_event: Callable[[dict[str, Any]], None] | None = None,
+        on_informative_candle: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         """Subscribe to candles and begin processing events.  Blocks until stop()."""
         self._symbol = symbol
@@ -82,6 +93,7 @@ class BotEventLoop(BotLoop):
         self._on_candle = on_candle
         self._on_stale = on_stale
         self._on_account = on_account_event
+        self._on_informative = on_informative_candle
         self._running = True
 
         try:
@@ -89,6 +101,9 @@ class BotEventLoop(BotLoop):
         except Exception as exc:
             logger.warning("Initial subscribe failed: %s", exc)
             self._reconnect()
+
+        # Subscribe informative streams (MTF).
+        self._subscribe_informative()
 
         if self._account_stream is not None:
             try:
@@ -169,6 +184,42 @@ class BotEventLoop(BotLoop):
             callback=self._enqueue_from_callback,
         )
 
+    def _subscribe_informative(self) -> None:
+        """Subscribe each informative stream with its alias."""
+        for i, stream in enumerate(self._informative_streams):
+            alias = (
+                self._informative_aliases[i]
+                if i < len(self._informative_aliases)
+                else f"info_{i}"
+            )
+            try:
+                stream.subscribe_candles(
+                    self._symbol,
+                    "1h",  # interval is set per-stream at construction
+                    callback=lambda raw, a=alias: self._enqueue_informative(a, raw),
+                )
+                logger.info(
+                    "Subscribed informative stream '%s' for %s",
+                    alias,
+                    self._symbol,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to subscribe informative stream '%s': %s", alias, exc
+                )
+
+    def _enqueue_informative(self, alias: str, raw: dict[str, Any]) -> None:
+        """Enqueue an informative candle event."""
+        event = BotEvent(
+            type=BotEventType.INFORMATIVE_CANDLE,
+            data={**raw, "_informative_alias": alias},
+        )
+        if not self._queue.enqueue(event):
+            logger.warning(
+                "Event queue full — dropping informative candle for '%s'",
+                alias,
+            )
+
     def _reconnect(self) -> None:
         backoff = self._reconnect_backoff
         attempts = 0
@@ -205,6 +256,9 @@ class BotEventLoop(BotLoop):
             self._on_candle(event.data)
         elif event.type == BotEventType.STALE and self._on_stale:
             self._on_stale(event.data)
+        elif event.type == BotEventType.INFORMATIVE_CANDLE and self._on_informative:
+            alias = event.data.pop("_informative_alias", "unknown")
+            self._on_informative(alias, event.data)
         elif event.type in (BotEventType.FILL, BotEventType.ORDER_UPDATE):
             if self._on_account:
                 self._on_account(event.data)
@@ -226,3 +280,8 @@ class BotEventLoop(BotLoop):
             self._stream.stop()
         except Exception:
             pass
+        for stream in self._informative_streams:
+            try:
+                stream.stop()
+            except Exception:
+                pass

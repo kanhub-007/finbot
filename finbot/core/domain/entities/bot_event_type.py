@@ -9,3 +9,4 @@ class BotEventType(StrEnum):
     FILL = "fill"
     STALE = "stale"
     SHUTDOWN = "shutdown"
+    INFORMATIVE_CANDLE = "informative_candle"
