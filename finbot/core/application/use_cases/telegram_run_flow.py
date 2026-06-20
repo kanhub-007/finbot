@@ -396,7 +396,7 @@ def _show_risk_config(
         text=(
             f"Strategy: {_escape_mdv2(session.strategy_path or '')}\n"
             f"Symbol: {_escape_mdv2(session.symbol or '')}"
-            f" / {tf_display}\n\n"
+            f" / {_escape_mdv2(tf_display)}\n\n"
             f"*Risk per trade:* {risk_label} of balance\n"
             f"*Leverage:* {lev_label}\n\n"
             "Risk is applied to total USD balance, not the leveraged amount\\."
@@ -457,7 +457,7 @@ def _show_mode_picker_with_timeframes(
         text=(
             f"Strategy: {_escape_mdv2(session.strategy_path or '')}\n"
             f"Symbol: {_escape_mdv2(session.symbol or '')}"
-            f" / {tf_display}\n"
+            f" / {_escape_mdv2(tf_display)}\n"
             "Select mode:"
         ),
         parse_mode="MarkdownV2",
