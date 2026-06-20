@@ -367,7 +367,11 @@ def _render_symbol_picker(uc, symbols, page=0):
         nav.append({"text": "Next \u25b6", "callback_data": f"sympage:{page + 1}"})
     rows.append(nav)
     return TelegramCommandResult(
-        text=f"Select symbol \\({len(symbols)} available\\):",
+        text=(
+            "Select symbol "
+            + _escape_mdv2(f"({len(symbols)} available)")
+            + ":"
+        ),
         parse_mode="MarkdownV2",
         reply_markup={"inline_keyboard": rows},
     )

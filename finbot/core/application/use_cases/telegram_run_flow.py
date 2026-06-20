@@ -25,7 +25,8 @@ async def _handle_run(uc, request: TelegramCommandRequest) -> TelegramCommandRes
         return TelegramCommandResult(
             text=(
                 "\u26a0\ufe0f A bot is already running "
-                f"\\({_escape_mdv2(run_id)}\\)\\.\n"
+                + _escape_mdv2(f"({run_id})")
+                + "\\.\n"
                 "Stop it first with /stop, then start a new one\\."
             ),
             parse_mode="MarkdownV2",
@@ -212,7 +213,10 @@ def _render_symbol_page(
     return TelegramCommandResult(
         text=(
             f"Select {_symbol_type_label(symbol_type)} symbol "
-            f"\\({len(symbols)} available, page {page + 1}/{total_pages}\\):"
+            + _escape_mdv2(
+                f"({len(symbols)} available, page {page + 1}/{total_pages})"
+            )
+            + ":"
         ),
         parse_mode="MarkdownV2",
         reply_markup={"inline_keyboard": keyboard_rows},
