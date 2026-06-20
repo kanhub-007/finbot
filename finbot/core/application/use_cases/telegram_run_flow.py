@@ -399,7 +399,7 @@ def _show_risk_config(
             f" / {tf_display}\n\n"
             f"*Risk per trade:* {risk_label} of balance\n"
             f"*Leverage:* {lev_label}\n\n"
-            "Risk is applied to total USD balance, not the leveraged amount\."
+            "Risk is applied to total USD balance, not the leveraged amount\\."
         ),
         parse_mode="MarkdownV2",
         reply_markup={
