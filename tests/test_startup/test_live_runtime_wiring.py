@@ -490,6 +490,37 @@ class TestMTFFactoryIntervalOverride:
         assert result["interval"] == "30min"
         assert result["informative_intervals"] == "1h"
 
+    def test_mtf_warmup_bars_loaded_for_all_timeframes(self, monkeypatch):
+        """Scenario 7: warmup bars are loaded for both primary and
+        informative timeframes."""
+        settings = _test_settings(mode="dry_run")
+        monkeypatch.setattr("finbot.startup.runtime_factory.Settings", lambda: settings)
+
+        # Track warmup loads
+        warmup_loads: list[tuple[str, str, int]] = []
+
+        def _tracking_load(symbol, interval, min_bars=100):
+            warmup_loads.append((symbol, interval, min_bars))
+            return []
+
+        monkeypatch.setattr(
+            "finbot.startup.runtime_factory._load_warmup_bars",
+            _tracking_load,
+        )
+
+        create_live_trading_runtime_use_case(
+            self.MTF_STRATEGY,
+            "BTC",
+            "1h",
+            mode="dry_run",
+            live_data=True,
+            settings=settings,
+        )
+
+        intervals = [call[1] for call in warmup_loads]
+        assert "30min" in intervals, f"Primary warmup missing: {intervals}"
+        assert "1h" in intervals, f"Informative warmup missing: {intervals}"
+
 
 # -- helpers -------------------------------------------------------------
 
@@ -499,3 +530,10 @@ def _timeframes_summary(primary: str, informatives: list[str]) -> str:
     if not informatives:
         return primary
     return f"{primary} + {' + '.join(informatives)}"
+
+
+# Re-import needed to access the original in test_mtf_warmup_bars_loaded
+try:
+    from finbot.startup.runtime_factory import _load_warmup_bars
+except ImportError:
+    _load_warmup_bars = None  # type: ignore[assignment]

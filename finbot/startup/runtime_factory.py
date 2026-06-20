@@ -155,6 +155,15 @@ def create_live_trading_runtime_use_case(
 
     if warmup_bars is None and live_data:
         warmup_bars = _load_warmup_bars(symbol, interval, min_bars=100)
+        # Load warmup bars for each informative interval (MTF).
+        for info_interval in informative_intervals:
+            info_bars = _load_warmup_bars(symbol, info_interval, min_bars=100)
+            logger.info(
+                "Loaded %d warmup bars for informative %s/%s",
+                len(info_bars),
+                symbol,
+                info_interval,
+            )
 
     from finbot.infrastructure.adapters.simple_runtime_event_emitter import (
         SimpleRuntimeEventEmitter,
