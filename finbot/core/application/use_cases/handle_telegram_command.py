@@ -1,4 +1,12 @@
-"""HandleTelegramCommand — central use case for Telegram bot commands."""
+"""HandleTelegramCommand — central use case for Telegram bot commands.
+
+Routes commands via a module-level handler table.  The 40+ thin
+delegator methods that forwarded ``_handle_xxx(self, request)`` to
+``_handle_xxx(self, request)`` (the module-level function) have been
+removed — the routing table maps command strings directly to those
+module-level functions, and the *uc* (use case) instance is passed as
+the first argument at dispatch time.
+"""
 
 from __future__ import annotations
 
@@ -79,7 +87,16 @@ from finbot.core.application.use_cases.telegram_run_flow import (
 )
 from finbot.core.domain.entities.callback_data import CallbackData
 from finbot.core.domain.interfaces.bot_manager_port import BotManagerPort
+from finbot.core.domain.interfaces.market_metadata_provider import (
+    MarketMetadataProvider,
+)
+from finbot.core.domain.interfaces.strategy_definition_loader import (
+    StrategyDefinitionLoader,
+)
 from finbot.core.domain.interfaces.strategy_directory import StrategyDirectory
+from finbot.core.domain.interfaces.strategy_log_reader import (
+    StrategyLogReader,
+)
 from finbot.core.domain.interfaces.telegram_chat_repository import (
     TelegramChatRepository,
 )
@@ -95,6 +112,11 @@ class HandleTelegramCommand:
     commands and callbacks require the user_id to be in the configured
     allowed_users set. When allowed_users is empty, control commands
     are denied with a setup-unconfigured message.
+
+    The command routing table maps ``/command`` strings directly to
+    module-level handler functions.  ``execute()`` looks up the handler
+    and calls ``handler(self, request)`` — the use case instance is the
+    first argument so handlers can reach ``uc._bot_manager`` etc.
     """
 
     def __init__(
@@ -108,9 +130,9 @@ class HandleTelegramCommand:
         live_trading_ack: bool = False,
         mode: str = "dry_run",
         hyperliquid_testnet: bool = True,
-        metadata_provider: object | None = None,
-        log_reader: object | None = None,
-        strategy_loader: object | None = None,
+        metadata_provider: MarketMetadataProvider | None = None,
+        log_reader: StrategyLogReader | None = None,
+        strategy_loader: StrategyDefinitionLoader | None = None,
     ) -> None:
         self._bot_manager = bot_manager
         self._chat_repo = chat_repo
@@ -124,58 +146,140 @@ class HandleTelegramCommand:
         self._log_reader = log_reader
         self._strategy_loader = strategy_loader
 
-    async def _handle_start(
+    # -- helpers exposed to module-level handlers ---------------------------
+
+    def _needs_confirmation(self) -> bool:
+        """True when the configured mode requires confirmation."""
+        return _needs_confirmation(self)
+
+    def _live_trading_ack_mode(self) -> str:
+        """Return the configured mode for confirmation/display."""
+        return _live_trading_ack_mode(self)
+
+    def _read_execution_config(self, strategy_path: str):
+        """Parse the optional execution block from a strategy file."""
+        return _read_execution_config(self, strategy_path)
+
+    def _render_symbol_type_menu(self, session) -> TelegramCommandResult:
+        """Render the crypto-vs-HIP-3 symbol category picker."""
+        return _render_symbol_type_menu(self, session)
+
+    def _render_symbol_page(
+        self, session, page: int, symbol_type: str = "crypto"
+    ) -> TelegramCommandResult:
+        """Render a paginated symbol picker for one market type."""
+        return _render_symbol_page(self, session, page, symbol_type)
+
+    def _render_symbol_picker(self, symbols, page):
+        """Render a paginated symbol picker for /symbol with no args."""
+        return _render_symbol_picker(self, symbols, page)
+
+    # -- run-flow callbacks (called from handle_callback) -------------------
+
+    def _run_cb_strat(self, session, idx_str: str) -> TelegramCommandResult:
+        return _run_cb_strat(self, session, idx_str)
+
+    def _run_cb_symidx(self, session, value: str) -> TelegramCommandResult:
+        return _run_cb_symidx(self, session, value)
+
+    def _run_cb_sym(self, session, symbol: str) -> TelegramCommandResult:
+        return _run_cb_sym(self, session, symbol)
+
+    def _run_cb_int(self, session, interval: str) -> TelegramCommandResult:
+        return _run_cb_int(self, session, interval)
+
+    def _run_cb_mode(self, session, mode: str) -> TelegramCommandResult:
+        return _run_cb_mode(self, session, mode)
+
+    def _run_cb_mode_live(self, session) -> TelegramCommandResult:
+        return _run_cb_mode_live(self, session)
+
+    def _run_cb_confirm(self, session, value: str) -> TelegramCommandResult:
+        return _run_cb_confirm(self, session, value)
+
+    def _start_bot_from_session(self, session, mode: str) -> TelegramCommandResult:
+        return _start_bot_from_session(self, session, mode)
+
+    # -- manual-order helpers (called from handle_callback and handlers) ---
+
+    async def _manual_entry(self, request, side):
+        """Shared /long + /short entry flow."""
+        return await _manual_entry(self, request, side)
+
+    async def _risk_order(self, request, kind):
+        """Shared /sl + /tp flow."""
+        return await _risk_order(self, request, kind)
+
+    def _render_order_confirmation(
+        self,
+        request,
+        side,
+        active,
+        size,
+        sl_price,
+        tp_price,
+        limit_px=None,
+        usd_notional=None,
+    ) -> TelegramCommandResult:
+        return _render_order_confirmation(
+            self, request, side, active, size, sl_price,
+            tp_price, limit_px, usd_notional,
+        )
+
+    def _execute_manual_order(
+        self, order_side, active, size, sl_price, tp_price,
+        limit_px=None, usd_notional=None,
+    ) -> TelegramCommandResult:
+        return _execute_manual_order(
+            self, order_side, active, size, sl_price, tp_price,
+            limit_px, usd_notional,
+        )
+
+    def _render_clear_confirmation(self, request) -> TelegramCommandResult:
+        return _render_clear_confirmation(self, request)
+
+    def _execute_clear(self) -> TelegramCommandResult:
+        return _execute_clear(self)
+
+    # -- config helpers (called from telegram_config_flow) -----------------
+
+    def _render_config_view(self):
+        """Render the current runtime config view."""
+        return _render_config_view(self)
+
+    async def _handle_config_save(self):
+        """Save current runtime config to .env."""
+        return await _handle_config_save(self)
+
+    async def _handle_config_profile(self, rest: str):
+        """Save or load a named config profile."""
+        return await _handle_config_profile(self, rest)
+
+    # -- panic callbacks (called from handle_callback) ----------------------
+
+    def _panic_execute(self, action: str, symbol: str) -> TelegramCommandResult:
+        return _panic_execute(self, action, symbol)
+
+    # -- status formatting --------------------------------------------------
+
+    def _format_running_status(self, status: dict) -> TelegramCommandResult:
+        return _format_running_status(self, status)
+
+    def _format_idle_status(self, status: dict) -> TelegramCommandResult:
+        return _format_idle_status(self, status)
+
+    # -- public API ---------------------------------------------------------
+
+    async def execute(
         self, request: TelegramCommandRequest
     ) -> TelegramCommandResult:
-        return await _handle_start(self, request)
+        """Route a Telegram command to the appropriate handler.
 
-    async def _handle_help(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
-        return await _handle_help(self, request)
-
-    async def _handle_status(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
-        return await _handle_status(self, request)
-
-    def _format_running_status(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
-        return _format_running_status(self, request)
-
-    def _format_idle_status(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
-        return _format_idle_status(self, request)
-
-    async def _handle_stop(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
-        return await _handle_stop(self, request)
-
-    async def _handle_list(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
-        return await _handle_list(self, request)
-
-    async def _handle_mute(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
-        return await _handle_mute(self, request)
-
-    async def _handle_unmute(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
-        return await _handle_unmute(self, request)
-
-    async def _handle_history(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
-        return await _handle_history(self, request)
-
-    async def execute(self, request: TelegramCommandRequest) -> TelegramCommandResult:
-        """Route a Telegram command to the appropriate handler."""
+        Commands mapped to module-level functions via *handler_table*;
+        the use case instance is passed as the first argument so
+        handlers can access ``uc._bot_manager``, ``uc._metadata_provider``,
+        etc.
+        """
         cmd = request.command
 
         # /whoami is always allowed — no authorization check
@@ -187,7 +291,7 @@ class HandleTelegramCommand:
         if auth_error is not None:
             return auth_error
 
-        # Route to handler
+        # Route to module-level handler
         handler = _COMMAND_HANDLERS.get(cmd)
         if handler is not None:
             return await handler(self, request)
@@ -227,19 +331,41 @@ class HandleTelegramCommand:
 
         # Run flow callbacks: run:<sid>:<action>:<value>
         if data.has_prefix("run") and data.segment_count >= 4:
-            return await self._handle_run_callback(request, data)
+            return await self._dispatch_run_callback(request, data)
 
         # Confirmation callbacks (manual orders + clear): confirm:<sid>:<action>
         if data.has_prefix("confirm") and data.segment_count >= 3:
-            return self._handle_confirm_callback(request, data)
+            return self._dispatch_confirm_callback(request, data)
 
         # Panic callbacks
         if data.has_prefix("panic") and data.segment_count >= 2:
-            return self._handle_panic_callback(request, data)
+            return self._dispatch_panic_callback(request, data)
 
         return TelegramCommandResult(
             text="Invalid selection, please start again with /run\\."
         )
+
+    # -- internal dispatch helpers ------------------------------------------
+
+    async def _dispatch_run_callback(
+        self, request: CallbackQueryRequest, data: CallbackData
+    ) -> TelegramCommandResult:
+        """Forward a run-flow callback to the module-level handler."""
+        return await _handle_run_callback(self, request, data)
+
+    def _dispatch_confirm_callback(
+        self, request, data
+    ) -> TelegramCommandResult:
+        """Forward a confirmation callback to the module-level handler."""
+        return _handle_confirm_callback(self, request, data)
+
+    def _dispatch_panic_callback(
+        self, request: CallbackQueryRequest, data: CallbackData
+    ) -> TelegramCommandResult:
+        """Forward a panic callback to the module-level handler."""
+        return _handle_panic_callback(self, request, data)
+
+    # -- authorization ------------------------------------------------------
 
     def _authorize(
         self, request: TelegramCommandRequest | CallbackQueryRequest
@@ -269,7 +395,9 @@ class HandleTelegramCommand:
 
         return None
 
-    def _handle_whoami(self, request: TelegramCommandRequest) -> TelegramCommandResult:
+    def _handle_whoami(
+        self, request: TelegramCommandRequest
+    ) -> TelegramCommandResult:
         """Return the user's Telegram user_id and chat_id.
 
         Always allowed — no authorization check. This is how operators
@@ -284,213 +412,38 @@ class HandleTelegramCommand:
         )
         return TelegramCommandResult(text=text)
 
-    async def _handle_run(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
-        return await _handle_run(self, request)
 
-    async def _handle_panic(
-        self, request: TelegramCommandRequest
-    ) -> TelegramCommandResult:
-        return await _handle_panic(self, request)
+# -- command routing table ---------------------------------------------------
 
-    async def _handle_run_callback(
-        self, request: CallbackQueryRequest, data: CallbackData
-    ) -> TelegramCommandResult:
-        return await _handle_run_callback(self, request, data)
-
-    def _render_symbol_type_menu(self, session) -> TelegramCommandResult:
-        return _render_symbol_type_menu(self, session)
-
-    def _render_symbol_page(
-        self, session, page: int, symbol_type: str = "crypto"
-    ) -> TelegramCommandResult:
-        return _render_symbol_page(self, session, page, symbol_type)
-
-    def _run_cb_strat(self, session, idx_str: str) -> TelegramCommandResult:
-        return _run_cb_strat(self, session, idx_str)
-
-    def _run_cb_symidx(self, session, value: str) -> TelegramCommandResult:
-        return _run_cb_symidx(self, session, value)
-
-    def _run_cb_sym(self, session, symbol: str) -> TelegramCommandResult:
-        return _run_cb_sym(self, session, symbol)
-
-    def _run_cb_int(self, session, interval: str) -> TelegramCommandResult:
-        return _run_cb_int(self, session, interval)
-
-    def _run_cb_mode(self, session, mode: str) -> TelegramCommandResult:
-        return _run_cb_mode(self, session, mode)
-
-    def _run_cb_mode_live(self, session) -> TelegramCommandResult:
-        return _run_cb_mode_live(self, session)
-
-    def _run_cb_confirm(self, session, value: str) -> TelegramCommandResult:
-        return _run_cb_confirm(self, session, value)
-
-    def _read_execution_config(self, strategy_path: str):
-        return _read_execution_config(self, strategy_path)
-
-    def _start_bot_from_session(self, session, mode: str) -> TelegramCommandResult:
-        return _start_bot_from_session(self, session, mode)
-
-    def _handle_confirm_callback(self, request, data) -> TelegramCommandResult:
-        return _handle_confirm_callback(self, request, data)
-
-    def _handle_panic_callback(
-        self, request: CallbackQueryRequest, data: CallbackData
-    ) -> TelegramCommandResult:
-        return _handle_panic_callback(self, request, data)
-
-    def _panic_execute(self, action: str, symbol: str) -> TelegramCommandResult:
-        return _panic_execute(self, action, symbol)
-
-    async def _handle_symbol(self, request: TelegramCommandRequest):
-        return await _handle_symbol(self, request)
-
-    def _render_symbol_picker(self, symbols, page):
-        return _render_symbol_picker(self, symbols, page)
-
-    async def _handle_price(self, request: TelegramCommandRequest):
-        return await _handle_price(self, request)
-
-    async def _handle_balance(self, request: TelegramCommandRequest):
-        return await _handle_balance(self, request)
-
-    async def _handle_leverage(self, request: TelegramCommandRequest):
-        return await _handle_leverage(self, request)
-
-    async def _handle_log(self, request: TelegramCommandRequest):
-        return await _handle_log(self, request)
-
-    async def _handle_mode(self, request: TelegramCommandRequest):
-        return await _handle_mode(self, request)
-
-    async def _handle_position(self, request: TelegramCommandRequest):
-        return await _handle_position(self, request)
-
-    async def _handle_long(self, request: TelegramCommandRequest):
-        return await _handle_long(self, request)
-
-    async def _handle_short(self, request: TelegramCommandRequest):
-        return await _handle_short(self, request)
-
-    async def _manual_entry(self, request, side):
-        return await _manual_entry(self, request, side)
-
-    def _needs_confirmation(self) -> bool:
-        return _needs_confirmation(self)
-
-    def _live_trading_ack_mode(self) -> str:
-        return _live_trading_ack_mode(self)
-
-    def _render_order_confirmation(
-        self,
-        request,
-        side,
-        active,
-        size,
-        sl_price,
-        tp_price,
-        limit_px=None,
-        usd_notional=None,
-    ) -> TelegramCommandResult:
-        return _render_order_confirmation(
-            self,
-            request,
-            side,
-            active,
-            size,
-            sl_price,
-            tp_price,
-            limit_px,
-            usd_notional,
-        )
-
-    def _execute_manual_order(
-        self,
-        order_side,
-        active,
-        size,
-        sl_price,
-        tp_price,
-        limit_px=None,
-        usd_notional=None,
-    ) -> TelegramCommandResult:
-        return _execute_manual_order(
-            self, order_side, active, size, sl_price, tp_price, limit_px, usd_notional
-        )
-
-    async def _handle_close(self, request: TelegramCommandRequest):
-        return await _handle_close(self, request)
-
-    async def _handle_clear(self, request: TelegramCommandRequest):
-        return await _handle_clear(self, request)
-
-    def _render_clear_confirmation(self, request) -> TelegramCommandResult:
-        return _render_clear_confirmation(self, request)
-
-    def _execute_clear(self) -> TelegramCommandResult:
-        return _execute_clear(self)
-
-    async def _handle_sl(self, request: TelegramCommandRequest):
-        return await _handle_sl(self, request)
-
-    async def _handle_tp(self, request: TelegramCommandRequest):
-        return await _handle_tp(self, request)
-
-    async def _risk_order(self, request, kind):
-        return await _risk_order(self, request, kind)
-
-    async def _handle_config(self, request: TelegramCommandRequest):
-        return await _handle_config(self, request)
-
-    def _render_config_view(self):
-        return _render_config_view(self)
-
-    async def _handle_config_save(self):
-        return await _handle_config_save(self)
-
-    async def _handle_config_profile(self, rest: str):
-        return await _handle_config_profile(self, rest)
-
-    async def _handle_size(self, request: TelegramCommandRequest):
-        return await _handle_size(self, request)
-
-    async def _handle_orders(self, request: TelegramCommandRequest):
-        return await _handle_orders(self, request)
-
-    async def _handle_cancel(self, request: TelegramCommandRequest):
-        return await _handle_cancel(self, request)
-
-
-# Command routing table — references handler methods defined above.
+# Maps /command strings directly to module-level async handler functions.
+# At dispatch time ``handler(uc, request)`` is called where *uc* is the
+# ``HandleTelegramCommand`` instance.
 _COMMAND_HANDLERS: dict[str, object] = {
-    "/start": HandleTelegramCommand._handle_start,
-    "/help": HandleTelegramCommand._handle_help,
-    "/status": HandleTelegramCommand._handle_status,
-    "/stop": HandleTelegramCommand._handle_stop,
-    "/run": HandleTelegramCommand._handle_run,
-    "/list": HandleTelegramCommand._handle_list,
-    "/history": HandleTelegramCommand._handle_history,
-    "/panic": HandleTelegramCommand._handle_panic,
-    "/mute": HandleTelegramCommand._handle_mute,
-    "/unmute": HandleTelegramCommand._handle_unmute,
-    "/symbol": HandleTelegramCommand._handle_symbol,
-    "/price": HandleTelegramCommand._handle_price,
-    "/balance": HandleTelegramCommand._handle_balance,
-    "/leverage": HandleTelegramCommand._handle_leverage,
-    "/log": HandleTelegramCommand._handle_log,
-    "/mode": HandleTelegramCommand._handle_mode,
-    "/position": HandleTelegramCommand._handle_position,
-    "/long": HandleTelegramCommand._handle_long,
-    "/short": HandleTelegramCommand._handle_short,
-    "/close": HandleTelegramCommand._handle_close,
-    "/clear": HandleTelegramCommand._handle_clear,
-    "/sl": HandleTelegramCommand._handle_sl,
-    "/tp": HandleTelegramCommand._handle_tp,
-    "/config": HandleTelegramCommand._handle_config,
-    "/size": HandleTelegramCommand._handle_size,
-    "/orders": HandleTelegramCommand._handle_orders,
-    "/cancel": HandleTelegramCommand._handle_cancel,
+    "/start":    _handle_start,
+    "/help":     _handle_help,
+    "/status":   _handle_status,
+    "/stop":     _handle_stop,
+    "/run":      _handle_run,
+    "/list":     _handle_list,
+    "/history":  _handle_history,
+    "/panic":    _handle_panic,
+    "/mute":     _handle_mute,
+    "/unmute":   _handle_unmute,
+    "/symbol":   _handle_symbol,
+    "/price":    _handle_price,
+    "/balance":  _handle_balance,
+    "/leverage": _handle_leverage,
+    "/log":      _handle_log,
+    "/mode":     _handle_mode,
+    "/position": _handle_position,
+    "/long":     _handle_long,
+    "/short":    _handle_short,
+    "/close":    _handle_close,
+    "/clear":    _handle_clear,
+    "/sl":       _handle_sl,
+    "/tp":       _handle_tp,
+    "/config":   _handle_config,
+    "/size":     _handle_size,
+    "/orders":   _handle_orders,
+    "/cancel":   _handle_cancel,
 }

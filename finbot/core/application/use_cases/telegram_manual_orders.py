@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from finbot.core.application.dto.telegram_command_request import (
     TelegramCommandRequest,
 )
@@ -11,6 +13,14 @@ from finbot.core.application.dto.telegram_command_result import (
 from finbot.core.application.use_cases.telegram_helpers import (
     _escape_mdv2,
     _parse_brackets,
+    _require_active_symbol,
+)
+from finbot.core.domain.entities.manual_order_draft import (
+    ManualOrderDraft,
+)
+from finbot.core.domain.entities.order_side import OrderSide
+from finbot.core.domain.services.order_size_resolver import (
+    resolve_order_size,
 )
 
 
@@ -26,14 +36,9 @@ async def _handle_short(uc, request: TelegramCommandRequest):
 
 async def _manual_entry(uc, request, side):
     """Shared /long + /short flow: parse, validate, confirm (live), submit."""
-    from finbot.core.domain.entities.order_side import OrderSide
-
-    active = uc._bot_manager.get_active_symbol()
-    if active is None:
-        return TelegramCommandResult(
-            text="No symbol selected\\. Use /symbol first\\.",
-            parse_mode="MarkdownV2",
-        )
+    active, err = _require_active_symbol(uc)
+    if err is not None:
+        return err
     parsed, parse_error = _parse_order_args(uc, request, side, active)
     if parse_error:
         return parse_error
@@ -90,11 +95,6 @@ def _render_order_confirmation(
     usd_notional=None,
 ) -> TelegramCommandResult:
     """Show a Confirm/Cancel prompt for a live/testnet manual order."""
-    from finbot.core.domain.entities.manual_order_draft import (
-        ManualOrderDraft,
-    )
-    from finbot.core.domain.entities.order_side import OrderSide
-
     session = uc._session_store.create(request.chat_id, request.message_id)
     sid = session.session_id
     action = "long" if side == "buy" else "short"
@@ -270,14 +270,9 @@ async def _handle_tp(uc, request: TelegramCommandRequest):
 
 async def _risk_order(uc, request, kind):
     """Shared /sl + /tp flow."""
-    from decimal import Decimal
-
-    active = uc._bot_manager.get_active_symbol()
-    if active is None:
-        return TelegramCommandResult(
-            text="No symbol selected\\. Use /symbol first\\.",
-            parse_mode="MarkdownV2",
-        )
+    active, err = _require_active_symbol(uc)
+    if err is not None:
+        return err
     arg = request.args.strip()
     if arg.lower() == "clear":
         result = uc._bot_manager.clear_risk_order(kind)
@@ -317,12 +312,9 @@ async def _risk_order(uc, request, kind):
 
 async def _handle_orders(uc, request: TelegramCommandRequest):
     """List open orders for the active symbol."""
-    active = uc._bot_manager.get_active_symbol()
-    if active is None:
-        return TelegramCommandResult(
-            text="No symbol selected\\. Use /symbol first\\.",
-            parse_mode="MarkdownV2",
-        )
+    active, err = _require_active_symbol(uc)
+    if err is not None:
+        return err
     orders = uc._bot_manager.list_active_orders()
     if not orders:
         return TelegramCommandResult(
@@ -341,12 +333,9 @@ async def _handle_orders(uc, request: TelegramCommandRequest):
 
 async def _handle_cancel(uc, request: TelegramCommandRequest):
     """Cancel a single order by oid on the active symbol."""
-    active = uc._bot_manager.get_active_symbol()
-    if active is None:
-        return TelegramCommandResult(
-            text="No symbol selected\\. Use /symbol first\\.",
-            parse_mode="MarkdownV2",
-        )
+    active, err = _require_active_symbol(uc)
+    if err is not None:
+        return err
     arg = request.args.strip()
     if not arg:
         return TelegramCommandResult(
@@ -394,8 +383,6 @@ def _parse_order_args(uc, request, side, active):
 
     Returns ``(parsed, error)`` — exactly one is None.
     """
-    from decimal import Decimal
-
     cmd = "long" if side == "buy" else "short"
     args = request.args.strip().split()
     if not args:
@@ -439,12 +426,6 @@ def _resolve_size(uc, raw: str, active: object):
 
     Returns ``(error, token_size, raw_usd)``.
     """
-    from decimal import Decimal
-
-    from finbot.core.domain.services.order_size_resolver import (
-        resolve_order_size,
-    )
-
     price = _safe_fetch_price(uc)
     if isinstance(price, TelegramCommandResult):
         return price, None, None

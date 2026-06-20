@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from pathlib import Path
 from typing import Any, Protocol
 
 from finbot.core.domain.entities.bot_run import BotRun
@@ -115,11 +114,6 @@ class BotLifecycleService:
                 return {
                     "status": "rejected",
                     "message": "Bot already running. Stop it first.",
-                }
-            if not Path(strategy_path).exists():
-                return {
-                    "status": "rejected",
-                    "message": f"Strategy file not found: {strategy_path}",
                 }
             if mode not in ("dry_run", "testnet", "live"):
                 return {"status": "rejected", "message": f"Invalid mode: {mode}"}

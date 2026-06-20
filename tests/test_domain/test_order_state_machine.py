@@ -60,7 +60,8 @@ class TestValidTransitions:
 
         # Partial fill of 0.003
         OrderStateMachine.transition(
-            lifecycle, OrderState.PARTIALLY_FILLED, reason="0.003"
+            lifecycle, OrderState.PARTIALLY_FILLED, reason="0.003",
+            fill_size=Decimal("0.003"),
         )
         assert lifecycle.state == OrderState.PARTIALLY_FILLED
         assert lifecycle.filled_size == Decimal("0.003")
@@ -68,7 +69,8 @@ class TestValidTransitions:
 
         # Second partial fill
         OrderStateMachine.transition(
-            lifecycle, OrderState.PARTIALLY_FILLED, reason="0.002"
+            lifecycle, OrderState.PARTIALLY_FILLED, reason="0.002",
+            fill_size=Decimal("0.002"),
         )
         assert lifecycle.filled_size == Decimal("0.005")
         assert lifecycle.remaining_size == Decimal("0.005")

@@ -13,13 +13,24 @@ from tests.fakes import FakeRuntime
 
 
 def _make_manager(runtime=None, repo=None, exchange=None):
+    from pathlib import Path
+
     from finbot.core.domain.services.bot_manager import BotManager
 
     repo = repo or InMemoryBotStateRepository()
     if runtime is not None:
         factory = lambda **kw: runtime  # noqa: E731
     else:
-        factory = lambda **kw: FakeRuntime(repo=repo)  # noqa: E731
+        def _factory(**kw):
+            path = kw.get("strategy_path", "")
+            if path and not Path(path).exists():
+                return {
+                    "status": "rejected",
+                    "message": f"Strategy file not found: {path}",
+                }
+            return FakeRuntime(repo=repo)
+
+        factory = _factory
 
     return BotManager(
         runtime_factory=factory,

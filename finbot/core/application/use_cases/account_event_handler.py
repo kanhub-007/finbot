@@ -130,9 +130,8 @@ class AccountEventHandler:
         fill_id = str(event.get("fill_id", ""))
         if not fill_id:
             return {"status": "skipped", "reason": "no fill_id"}
-        if self._repo.has_fill(fill_id):
-            return {"status": "duplicate", "reason": f"fill {fill_id} already recorded"}
-
+        # Idempotency is handled by TradeLedger.apply_fill (in-memory LRU
+        # cache + cross-session DB check) — no duplicate guard needed here.
         size = Decimal(str(event.get("size", "0")))
         fill = self._build_fill_record(
             order_id, event, bot_run_id, symbol, fill_id, size

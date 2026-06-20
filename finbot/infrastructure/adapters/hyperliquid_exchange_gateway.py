@@ -82,6 +82,13 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         """Expose the account-state cache for the websocket stream to update."""
         return self._account_cache
 
+    def count_open_orders_cached(self, symbol: str) -> int | None:
+        """Return cached open-order count, or None if stale (never REST)."""
+        cached = self._account_cache.get_open_orders(symbol)
+        if cached is not None:
+            return len(cached)
+        return None
+
     # -- ExchangeGateway ---------------------------------------------------
 
     def get_position(self, symbol: str) -> PositionSnapshot:
@@ -168,31 +175,50 @@ class HyperliquidExchangeGateway(ExchangeGateway):
 
     def cancel_all(self, symbol: str) -> dict[str, Any]:
         exchange = self._ensure_exchange()
-        # A kill switch must operate on authoritative exchange state, not the
-        # account cache: cached entries from submit_order omit "oid" and would
-        # cause bulk_cancel([]) to silently no-op.  Always fetch fresh.
-        open_orders = self._fetch_open_orders(symbol)
-        if not open_orders:
+
+        def _cancel() -> dict[str, Any]:
+            open_orders = self._fetch_open_orders(symbol)
+            if not open_orders:
+                self._account_cache.clear()
+                return {"status": "ok", "cancelled": 0}
+            cancels = [
+                {"coin": symbol, "oid": o["oid"]}
+                for o in open_orders
+                if "oid" in o
+            ]
+            raw = exchange.bulk_cancel(cancels)
             self._account_cache.clear()
-            return {"status": "ok", "cancelled": 0}
-        # Use bulk_cancel for efficiency.
-        cancels = [{"coin": symbol, "oid": o["oid"]} for o in open_orders if "oid" in o]
-        result = exchange.bulk_cancel(cancels)  # type: ignore[no-any-return]
-        self._account_cache.clear()
-        return result
+            # Normalize the raw SDK response into a consistent dict shape
+            # so callers (panic, clear_all) don't branch on type.
+            cancelled = (
+                raw.get("cancelled", 0)
+                if isinstance(raw, dict)
+                else len(cancels)
+            )
+            return {"status": "ok", "cancelled": cancelled}
+
+        return self._retry.execute(_cancel)
 
     def cancel_by_cloid(self, symbol: str, cloid: str) -> dict[str, Any]:
         exchange = self._ensure_exchange()
-        result = exchange.cancel_by_cloid(  # type: ignore[no-any-return]
-            symbol, _to_sdk_cloid(cloid)
-        )
+
+        def _cancel() -> dict[str, Any]:
+            return exchange.cancel_by_cloid(  # type: ignore[no-any-return]
+                symbol, _to_sdk_cloid(cloid)
+            )
+
+        result = self._retry.execute(_cancel)
         self._account_cache.remove_open_order(symbol, lambda o: o.get("cloid") == cloid)
         return result
 
     def cancel_by_oid(self, symbol: str, oid: str) -> dict[str, Any]:
         """Cancel a single order by its exchange-assigned ID."""
         exchange = self._ensure_exchange()
-        result = exchange.cancel(symbol, oid)  # type: ignore[no-any-return]
+
+        def _cancel() -> dict[str, Any]:
+            return exchange.cancel(symbol, oid)  # type: ignore[no-any-return]
+
+        result = self._retry.execute(_cancel)
         self._account_cache.remove_open_order(
             symbol, lambda o: str(o.get("oid", "")) == oid
         )
@@ -206,9 +232,13 @@ class HyperliquidExchangeGateway(ExchangeGateway):
         """Set leverage and margin mode for a symbol via the SDK."""
         exchange = self._ensure_exchange()
         is_cross = margin_mode.lower() == "cross"
-        return exchange.update_leverage(  # type: ignore[no-any-return]
-            int(leverage), symbol, is_cross=is_cross
-        )
+
+        def _update() -> dict[str, Any]:
+            return exchange.update_leverage(  # type: ignore[no-any-return]
+                int(leverage), symbol, is_cross=is_cross
+            )
+
+        return self._retry.execute(_update)
 
     def get_leverage(self, symbol: str) -> tuple[int, str] | None:
         """Read current leverage and margin mode for a symbol.

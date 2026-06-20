@@ -28,6 +28,17 @@ class StrategyDefinitionLoader(ABC):
         """
         ...
 
+    def parse_timeframes(self, content: str):
+        """Parse the ``timeframes`` block from raw strategy content.
+
+        Returns a :class:`StrategyTimeframes` when the content declares
+        a ``timeframes`` block with at least a primary interval, or
+        ``None`` for single-TF strategies.  The default implementation
+        returns ``None`` — subclasses that understand strategy YAML
+        override this.
+        """
+        return None
+
     def last_timeframes(self):  # type: ignore[empty-body]
         """Return the timeframes declared by the last-loaded strategy.
 

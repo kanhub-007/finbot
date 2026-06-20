@@ -39,12 +39,22 @@ def _build_tools():
     dict mapping tool_name -> callable.
     """
     from fastmcp import FastMCP
+    from pathlib import Path
 
     repo = InMemoryBotStateRepository()
     exchange = DryRunExchangeGateway()
 
+    def _factory(**kw):
+        path = kw.get("strategy_path", "")
+        if path and not Path(path).exists():
+            return {
+                "status": "rejected",
+                "message": f"Strategy file not found: {path}",
+            }
+        return FakeRuntime(repo=repo)
+
     manager = BotManager(
-        runtime_factory=lambda **kw: FakeRuntime(repo=repo),
+        runtime_factory=_factory,
         repository=repo,
         exchange=exchange,
         startup_time=time.time(),

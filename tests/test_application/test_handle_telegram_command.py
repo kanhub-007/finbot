@@ -13,12 +13,20 @@ from finbot.core.application.dto.telegram_command_request import (
 from finbot.core.application.use_cases.handle_telegram_command import (
     HandleTelegramCommand,
 )
+from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
+    YamlStrategyDefinitionLoader,
+)
 from tests.fakes_telegram import (
     FakeBotManager,
     FakeStrategyDirectory,
     InMemoryTelegramChatRepository,
     InMemoryTelegramSessionStore,
 )
+
+
+def _make_test_strategy_loader():
+    """Real YAML loader for tests that need to parse MTF timeframes."""
+    return YamlStrategyDefinitionLoader()
 
 
 class TestUnauthorizedUser:
@@ -769,6 +777,7 @@ class TestRunFlow:
             session_store=fake_sessions,
             allowed_users=frozenset({987654321}),
             metadata_provider=_SymbolListProvider(["BTC"]),
+            strategy_loader=_make_test_strategy_loader(),
         )
 
         # Step 1: /run → strategies

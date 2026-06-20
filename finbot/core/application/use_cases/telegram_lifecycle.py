@@ -14,6 +14,7 @@ from finbot.core.application.dto.telegram_command_result import (
 from finbot.core.application.use_cases.telegram_helpers import (
     _escape_mdv2,
     _get_symbols,
+    _require_active_symbol,
 )
 from finbot.core.domain.entities.telegram_chat import TelegramChat
 
@@ -374,12 +375,9 @@ def _render_symbol_picker(uc, symbols, page=0):
 
 async def _handle_price(uc, request: TelegramCommandRequest):
     """Show the current price for the active symbol."""
-    active = uc._bot_manager.get_active_symbol()
-    if active is None:
-        return TelegramCommandResult(
-            text="No symbol selected\\. Use /symbol first\\.",
-            parse_mode="MarkdownV2",
-        )
+    active, err = _require_active_symbol(uc)
+    if err is not None:
+        return err
     try:
         price = uc._bot_manager.get_active_price()
     except Exception as exc:
@@ -488,12 +486,9 @@ async def _handle_mode(uc, request: TelegramCommandRequest) -> TelegramCommandRe
 
 async def _handle_leverage(uc, request: TelegramCommandRequest):
     """View or set leverage on the active symbol."""
-    active = uc._bot_manager.get_active_symbol()
-    if active is None:
-        return TelegramCommandResult(
-            text="No symbol selected\\. Use /symbol first\\.",
-            parse_mode="MarkdownV2",
-        )
+    active, err = _require_active_symbol(uc)
+    if err is not None:
+        return err
     args = request.args.strip().split()
     if not args:
         if active.leverage == 0:
@@ -537,12 +532,9 @@ async def _handle_leverage(uc, request: TelegramCommandRequest):
 
 async def _handle_position(uc, request: TelegramCommandRequest):
     """Show the current position + PnL for the active symbol."""
-    active = uc._bot_manager.get_active_symbol()
-    if active is None:
-        return TelegramCommandResult(
-            text="No symbol selected\\. Use /symbol first\\.",
-            parse_mode="MarkdownV2",
-        )
+    active, err = _require_active_symbol(uc)
+    if err is not None:
+        return err
     pos = uc._bot_manager.get_active_position()
     if pos is None or pos.direction.value == "flat":
         return TelegramCommandResult(

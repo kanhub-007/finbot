@@ -82,6 +82,47 @@ class YamlStrategyDefinitionLoader(StrategyDefinitionLoader):
             return []
         return list(self._last_result.required_indicators)
 
+    def parse_timeframes(self, content: str):
+        """Parse the ``timeframes`` block from raw strategy YAML content.
+
+        Returns a :class:`StrategyTimeframes` when the content declares a
+        ``timeframes`` block with at least a primary interval, or ``None``
+        for single-TF strategies.
+        """
+        import yaml
+
+        from finbot.core.domain.entities.strategy_timeframes import (
+            StrategyTimeframes,
+        )
+
+        try:
+            data = yaml.safe_load(content)
+            if not isinstance(data, dict):
+                return None
+            tf = data.get("timeframes")
+            if not isinstance(tf, dict):
+                return None
+            primary = tf.get("primary")
+            if not primary:
+                return None
+            informatives: list[str] = []
+            aliases: dict[str, str] = {}
+            for item in tf.get("informative", []) or []:
+                if isinstance(item, dict):
+                    interval = item.get("interval")
+                    alias = item.get("alias")
+                    if interval:
+                        informatives.append(interval)
+                        if alias:
+                            aliases[alias] = interval
+            return StrategyTimeframes(
+                primary=str(primary),
+                informative_intervals=tuple(informatives),
+                informative_aliases=aliases,
+            )
+        except Exception:
+            return None
+
     def last_timeframes(self):
         """Return the timeframes declared by the last-loaded strategy.
 

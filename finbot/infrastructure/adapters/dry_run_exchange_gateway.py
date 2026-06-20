@@ -60,3 +60,7 @@ class DryRunExchangeGateway(ExchangeGateway):
             margin_used=Decimal("0"),
             available=Decimal("10000"),
         )
+
+    def count_open_orders_cached(self, symbol: str) -> int | None:
+        """Dry-run always has zero open orders (no websocket cache)."""
+        return 0

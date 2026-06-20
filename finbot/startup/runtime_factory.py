@@ -60,27 +60,8 @@ def create_live_trading_runtime_use_case(
         EnrichmentValidator,
     )
     from finbot.core.domain.services.order_planner import OrderPlanner
-    from finbot.core.domain.services.risk_gates.daily_loss_gate import (
-        DailyLossGate,
-    )
-    from finbot.core.domain.services.risk_gates.duplicate_signal_gate import (
-        DuplicateSignalGate,
-    )
-    from finbot.core.domain.services.risk_gates.max_leverage_gate import (
-        MaxLeverageGate,
-    )
-    from finbot.core.domain.services.risk_gates.max_open_orders_gate import (
-        MaxOpenOrdersGate,
-    )
-    from finbot.core.domain.services.risk_gates.max_position_gate import (
-        MaxPositionGate,
-    )
-    from finbot.core.domain.services.risk_gates.mode_gate import ModeGate
-    from finbot.core.domain.services.risk_gates.reduce_only_gate import (
-        ReduceOnlyGate,
-    )
-    from finbot.core.domain.services.risk_gates.stale_data_gate import (
-        StaleDataGate,
+    from finbot.core.domain.services.risk_gates.registry import (
+        build_default_gates,
     )
     from finbot.infrastructure.strategy.pandas_bar_frame_converter import (
         PandasBarFrameConverter,
@@ -189,19 +170,16 @@ def create_live_trading_runtime_use_case(
         event_emitter.subscribe(RiskTriggeredEvent, observer.on_risk_triggered)
 
     order_planner = OrderPlanner(
-        gates=[
-            ModeGate(
-                mode=trading_mode.value,
-                live_trading_ack=settings.live_trading_ack,
-            ),
-            StaleDataGate(max_age_seconds=settings.stale_data_seconds),
-            MaxPositionGate(max_notional_usd=settings.max_position_usd),
-            MaxLeverageGate(max_leverage=settings.max_leverage),
-            MaxOpenOrdersGate(max_orders=settings.max_open_orders),
-            DailyLossGate(max_loss_usd=settings.max_daily_loss_usd),
-            ReduceOnlyGate(),
-            DuplicateSignalGate(repo),
-        ]
+        gates=build_default_gates(
+            mode=trading_mode.value,
+            live_trading_ack=settings.live_trading_ack,
+            stale_data_seconds=settings.stale_data_seconds,
+            max_position_usd=settings.max_position_usd,
+            max_leverage=settings.max_leverage,
+            max_open_orders=settings.max_open_orders,
+            max_daily_loss_usd=settings.max_daily_loss_usd,
+            repo=repo,
+        )
     )
 
     builder = (

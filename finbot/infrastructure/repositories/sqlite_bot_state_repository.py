@@ -352,20 +352,27 @@ class SqliteBotStateRepository(BotStateRepository):
     def _ensure_active_symbol_table(self) -> None:
         """Create the single-row active_symbol table if absent.
 
-        Uses a session-level flag so the DDL runs at most once per
-        repository instance, avoiding a per-call ``CREATE TABLE IF NOT
-        EXISTS`` on the symbol-session hot path.
+        Runs once at repository instance level under the write lock
+        so the check-and-set is atomic across threads.  ``CREATE TABLE
+        IF NOT EXISTS`` is idempotent at the database level as a
+        safety net, but the instance flag avoids calling it on every
+        symbol-session hot-path operation.
         """
         if self._active_symbol_table_ensured:
             return
-        self._execute(
-            "CREATE TABLE IF NOT EXISTS active_symbol ("
-            "id INTEGER PRIMARY KEY CHECK (id = 1),"
-            "symbol TEXT NOT NULL,"
-            "leverage INTEGER NOT NULL,"
-            "margin_mode TEXT NOT NULL)"
-        )
-        self._active_symbol_table_ensured = True
+        with self._write_lock:
+            # Double-check after acquiring the lock — another thread may
+            # have just created the table.
+            if self._active_symbol_table_ensured:
+                return
+            self._connection.execute(
+                "CREATE TABLE IF NOT EXISTS active_symbol ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1),"
+                "symbol TEXT NOT NULL," 
+                "leverage INTEGER NOT NULL," 
+                "margin_mode TEXT NOT NULL)"
+            )
+            self._active_symbol_table_ensured = True
 
     def save_active_symbol(self, state) -> None:
         """Persist (overwrite) the single active-symbol row."""

@@ -84,12 +84,28 @@ class CreateBotConfigCallable(Protocol):
     def __call__(self, settings: object) -> BotConfig: ...
 
 
-_ATTR_MAP = {
+_ATTR_MAP: dict[str, str] = {
     "max_position": "max_position_usd",
     "daily_loss": "max_daily_loss_usd",
     "max_orders": "max_open_orders",
     "stale_data": "stale_data_seconds",
 }
+
+# Validate at import time: every key in RuntimeBotConfig.AVAILABLE_KEYS
+# must have an entry in _ATTR_MAP, and the mapped setting attribute must be
+# usable by getattr().
+def _validate_attr_map() -> None:
+    from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
+
+    missing = [k for k in RuntimeBotConfig.AVAILABLE_KEYS if k not in _ATTR_MAP]
+    if missing:
+        raise AssertionError(
+            f"_ATTR_MAP missing entries for: {missing}. "
+            f"Add them to keep runtime-config seeding correct."
+        )
+
+
+_validate_attr_map()
 
 
 class BotManager:
@@ -172,6 +188,7 @@ class BotManager:
         return self._lifecycle._runtime_factory  # noqa: SLF001
 
     # -- lifecycle ----------------------------------------------------------
+
     def start(
         self,
         strategy_path: str,
@@ -182,6 +199,7 @@ class BotManager:
         live_trading_ack: bool = False,
         execution_config: Any | None = None,
     ) -> dict[str, str]:
+        """Start a bot in a background thread.  Delegates to BotLifecycleService."""
         return self._lifecycle.start(
             strategy_path,
             symbol,
@@ -193,66 +211,89 @@ class BotManager:
         )
 
     def stop(self) -> dict[str, str]:
+        """Stop the running bot and join its thread."""
         return self._lifecycle.stop()
 
     def get_status(self) -> dict[str, object]:
+        """Return a live status snapshot (dict, not typed DTO)."""
         return self._lifecycle.get_status()
 
     def is_running(self) -> bool:
+        """Return True if a bot is currently running."""
         return self._lifecycle.is_running()
 
     # -- symbol session -----------------------------------------------------
+
     def get_active_symbol(self):
+        """Return the active symbol state, or None if idle."""
         return self._symbol.get_active_symbol()
 
     def activate_symbol(self, symbol: str):
+        """Activate a trading symbol, reading leverage from the exchange."""
         return self._symbol.activate_symbol(symbol)
 
     def get_active_price(self):
+        """Return the current price for the active symbol, or None if idle."""
         return self._symbol.get_active_price()
 
     def get_active_position(self):
+        """Return the exchange position for the active symbol, or None."""
         return self._symbol.get_active_position()
 
     def list_active_orders(self):
+        """Return open orders for the active symbol, or None if idle."""
         return self._symbol.list_active_orders()
 
     def get_balance(self) -> WalletBalance | None:
+        """Return the wallet balance, or None if no exchange is wired."""
         return self._symbol.get_balance()
 
     def set_leverage(self, leverage: int, margin_mode: str = "isolated"):
+        """Set leverage on the active symbol; validates against symbol max."""
         return self._symbol.set_leverage(leverage, margin_mode)
 
     # -- config -------------------------------------------------------------
+
     def get_bot_config(self):
+        """Return the current RuntimeBotConfig snapshot."""
         return self._config.get_bot_config()
 
     def update_bot_config(self, key: str, value: str):
+        """Set a runtime config value by short key (e.g. 'max_position')."""
         return self._config.update_bot_config(key, value)
 
     def save_config_to_env(self):
+        """Persist the current runtime config back to .env."""
         return self._config.save_config_to_env()
 
     def set_default_size(self, size):
+        """Set the default order size for manual orders."""
         return self._config.set_default_size(size)
 
     def get_default_size(self):
+        """Return the default order size, or None."""
         return self._config.get_default_size()
 
     def clear_default_size(self) -> None:
+        """Clear the default order size."""
         return self._config.clear_default_size()
 
     def save_config_profile(self, name: str):
+        """Save a named config profile to .env."""
         return self._config.save_config_profile(name)
 
     def load_config_profile(self, name: str):
+        """Load a named config profile from .env."""
         return self._config.load_config_profile(name)
 
     def list_config_profiles(self):
+        """Return available config profile names from .env."""
         return self._config.list_config_profiles()
 
     # -- manual orders ------------------------------------------------------
+
     def submit_manual_order(self, side, size=None, limit_px=None, usd_notional=None):
+        """Submit a manual market or limit order on the active symbol."""
         return self._manual.submit_manual_order(
             side, size, limit_px=limit_px, usd_notional=usd_notional
         )
@@ -260,58 +301,77 @@ class BotManager:
     def submit_manual_order_with_brackets(
         self, side, size, sl_price=None, tp_price=None, limit_px=None, usd_notional=None
     ):
+        """Submit a manual entry then attach SL/TP triggers in one call."""
         return self._manual.submit_manual_order_with_brackets(
             side, size, sl_price, tp_price, limit_px=limit_px, usd_notional=usd_notional
         )
 
     def cancel_order(self, order_id: str):
+        """Cancel a single order on the active symbol by exchange oid."""
         return self._manual.cancel_order(order_id)
 
     def cancel_all_orders(self, symbol: str):
+        """Cancel all open orders for a symbol via the exchange."""
         return self._manual.cancel_all_orders(symbol)
 
     def close_position(self, symbol: str):
+        """Market-close the position for a symbol; clears SL/TP."""
         return self._manual.close_position(symbol)
 
     def close_active_position(self):
+        """Reduce-only market close on the active symbol; clears SL/TP."""
         return self._manual.close_active_position()
 
     def clear_all(self):
+        """Cancel all orders and close all positions on the active symbol."""
         return self._manual.clear_all()
 
     # -- risk orders --------------------------------------------------------
+
     def attach_stop_loss(self, price):
+        """Attach or update a stop-loss trigger order."""
         return self._risk_orders.attach_stop_loss(price)
 
     def attach_take_profit(self, price):
+        """Attach or update a take-profit trigger order."""
         return self._risk_orders.attach_take_profit(price)
 
     def clear_risk_order(self, kind: str):
+        """Clear a stop-loss or take-profit trigger order."""
         return self._risk_orders.clear_risk_order(kind)
 
     # -- queries ------------------------------------------------------------
+
     def get_bot_run(self, run_id: str):
+        """Return a single bot run by its run_id, or None."""
         return self._queries.get_bot_run(run_id)
 
     def list_bot_runs(self, limit: int = 20, mode_filter: str | None = None):
+        """Return recent bot runs ordered by started_at DESC."""
         return self._queries.list_bot_runs(limit, mode_filter)
 
     def get_signals_for_run(self, run_id: str):
+        """Return all signals for a specific bot run."""
         return self._queries.get_signals_for_run(run_id)
 
     def get_orders_for_run(self, run_id: str):
+        """Return all order responses for a specific bot run."""
         return self._queries.get_orders_for_run(run_id)
 
     def get_fills_for_run(self, run_id: str):
+        """Return all fills for a specific bot run."""
         return self._queries.get_fills_for_run(run_id)
 
     def get_run_counts(self, run_ids: list[str]):
+        """Return per-run signal/order/fill counts via GROUP BY."""
         return self._queries.get_run_counts(run_ids)
 
     def get_risk_events_for_run(self, run_id: str):
+        """Return all risk events for a specific bot run."""
         return self._queries.get_risk_events_for_run(run_id)
 
     def get_audit_log(self, limit: int = 50, event_type: str | None = None):
+        """Return recent audit log entries."""
         return self._queries.get_audit_log(limit, event_type)
 
 

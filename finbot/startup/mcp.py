@@ -51,6 +51,15 @@ def _make_runtime_factory(
         live_data: bool = True,
         warmup_bars: int = 100,
     ):
+        # File existence check belongs in infrastructure/startup, not domain.
+        from pathlib import Path
+
+        if not Path(strategy_path).exists():
+            return {
+                "status": "rejected",
+                "message": f"Strategy file not found: {strategy_path}",
+            }
+
         notification_sender = None
         if telegram_ref is not None:
             telegram = telegram_ref()

@@ -67,3 +67,13 @@ class ExchangeGateway(ABC):
     def get_balance(self) -> WalletBalance:
         """Return wallet value, margin used, and available margin."""
         ...
+
+    def count_open_orders_cached(self, symbol: str) -> int | None:
+        """Return the number of cached open orders, or None if stale.
+
+        Cache-only — never falls back to a REST call.  Returns ``None``
+        when the cache is expired or empty, signalling the caller to use
+        a stale-data gate instead of blocking.  Override in adapters that
+        maintain an account-state cache.
+        """
+        return None

@@ -334,13 +334,35 @@ def _cmd_panic(args) -> None:
     ARCHITECTURE EXCEPTION: Panic bypasses use cases and repositories,
     calling the exchange gateway directly.  This is intentional —
     kill-switch operations must not go through risk gates, order
-    planning, or any other pipeline.  No audit events are persisted;
-    reconcile after panic.
+    planning, or any other pipeline.  A minimal audit event is
+    persisted on a best-effort basis so there is a record of the
+    panic action; reconcile after panic.
     """
     settings = Settings()
     if not settings.hyperliquid_private_key.get_secret_value():
         print("ERROR: FINBOT_HYPERLIQUID_PRIVATE_KEY not set")
         sys.exit(1)
+
+    # Best-effort audit trail — fire-and-forget; don't block the kill switch.
+    try:
+        from finbot.core.domain.entities.audit_log_entry import AuditLogEntry
+        from finbot.startup.service_factory import create_bot_state_repository
+
+        repo = create_bot_state_repository(migrate=False)
+        repo.append_audit_log(
+            AuditLogEntry(
+                event_type="panic",
+                event_data_json=json.dumps(
+                    {
+                        "symbol": args.symbol,
+                        "cancel_orders": args.cancel_orders,
+                        "close_position": args.close_position,
+                    }
+                ),
+            )
+        )
+    except Exception:
+        pass
 
     gateway = create_exchange_gateway(settings)
 

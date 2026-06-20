@@ -288,7 +288,9 @@ def _run_cb_sym(uc, session, symbol: str) -> TelegramCommandResult:
     # Check for MTF timeframes in the strategy YAML (Scenario 4 / ADR-10).
     # When the strategy declares a ``timeframes`` block, the interval
     # picker is skipped and the user goes directly to the mode picker.
-    tf = _read_strategy_timeframes(session.strategy_path or "")
+    # Delegates to the injected StrategyDefinitionLoader so YAML/file I/O
+    # stays in infrastructure, not the application layer.
+    tf = _read_strategy_timeframes(uc, session.strategy_path or "")
     if tf is not None:
         primary, informatives = tf
         session.interval = primary
@@ -316,37 +318,31 @@ def _run_cb_sym(uc, session, symbol: str) -> TelegramCommandResult:
     )
 
 
-def _read_strategy_timeframes(path: str) -> tuple[str, list[str]] | None:
-    """Parse the ``timeframes`` block from a strategy YAML file.
+def _read_strategy_timeframes(uc, path: str) -> tuple[str, list[str]] | None:
+    """Parse the ``timeframes`` block via the injected strategy loader.
 
     Returns ``(primary, informatives)`` when the strategy has a
     ``timeframes`` block with at least a primary interval; ``None``
-    otherwise.
+    otherwise.  Delegates to ``uc._strategy_loader.parse_timeframes()``
+    so all YAML/file I/O stays in infrastructure.
     """
     if not path:
         return None
+    loader = getattr(uc, "_strategy_loader", None)
+    if loader is None:
+        return None
     try:
-        from pathlib import Path as _Path
-
-        import yaml
-
-        content = _Path(path).read_text(encoding="utf-8")
-        data = yaml.safe_load(content)
-        if not isinstance(data, dict):
-            return None
-        tf = data.get("timeframes")
-        if not isinstance(tf, dict):
-            return None
-        primary = tf.get("primary")
-        if not primary:
-            return None
-        informatives: list[str] = []
-        for item in tf.get("informative", []) or []:
-            if isinstance(item, dict) and "interval" in item:
-                informatives.append(item["interval"])
-        return (str(primary), informatives)
+        content = loader.load_content(path)
     except Exception:
         return None
+    try:
+        tf = loader.parse_timeframes(content)
+    except Exception:
+        return None
+    if tf is None:
+        return None
+    informatives = list(tf.informative_intervals)
+    return (tf.primary or "", informatives)
 
 
 def _show_mode_picker_with_timeframes(
@@ -365,26 +361,7 @@ def _show_mode_picker_with_timeframes(
             "Select mode:"
         ),
         parse_mode="MarkdownV2",
-        reply_markup={
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "\U0001f4ca Dry Run",
-                        "callback_data": f"run:{sid}:mode:dry_run",
-                    },
-                    {
-                        "text": "\U0001f9ea Testnet",
-                        "callback_data": f"run:{sid}:mode:testnet",
-                    },
-                ],
-                [
-                    {
-                        "text": "\u26a0 Live",
-                        "callback_data": f"run:{sid}:mode:live",
-                    },
-                ],
-            ]
-        },
+        reply_markup=_build_mode_picker_keyboard(sid),
     )
 
 
@@ -402,27 +379,32 @@ def _run_cb_int(uc, session, interval: str) -> TelegramCommandResult:
             "Select mode:"
         ),
         parse_mode="MarkdownV2",
-        reply_markup={
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "\U0001f4ca Dry Run",
-                        "callback_data": f"run:{sid}:mode:dry_run",
-                    },
-                    {
-                        "text": "\U0001f9ea Testnet",
-                        "callback_data": f"run:{sid}:mode:testnet",
-                    },
-                ],
-                [
-                    {
-                        "text": "\u26a0 Live",
-                        "callback_data": f"run:{sid}:mode:live",
-                    },
-                ],
-            ]
-        },
+        reply_markup=_build_mode_picker_keyboard(sid),
     )
+
+
+def _build_mode_picker_keyboard(sid: str) -> dict:
+    """Build the shared Dry Run / Testnet / Live mode picker keyboard."""
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "\U0001f4ca Dry Run",
+                    "callback_data": f"run:{sid}:mode:dry_run",
+                },
+                {
+                    "text": "\U0001f9ea Testnet",
+                    "callback_data": f"run:{sid}:mode:testnet",
+                },
+            ],
+            [
+                {
+                    "text": "\u26a0 Live",
+                    "callback_data": f"run:{sid}:mode:live",
+                },
+            ],
+        ]
+    }
 
 
 def _run_cb_mode(uc, session, mode: str) -> TelegramCommandResult:
@@ -477,15 +459,18 @@ def _read_execution_config(uc, strategy_path: str):
 
     Returns a StrategyExecutionConfig or None. Best-effort: file read or
     parse errors return None so a malformed block never blocks startup.
+    Delegates file I/O to the injected strategy loader so the application
+    layer has no filesystem dependency.
     """
-    from pathlib import Path
-
     from finbot.core.domain.services.strategy_execution_parser import (
         parse_strategy_execution,
     )
 
+    loader = getattr(uc, "_strategy_loader", None)
+    if loader is None:
+        return None
     try:
-        content = Path(strategy_path).read_text(encoding="utf-8")
+        content = loader.load_content(strategy_path)
     except Exception:
         return None
     try:

@@ -38,6 +38,9 @@ _MDV2_ESCAPE_CHARS = str.maketrans(
 _DEFAULT_SYMBOLS = ("BTC", "ETH", "SOL", "ARB", "DOGE")
 _DEFAULT_INTERVALS = ("1m", "5m", "15m", "1h", "4h", "1d")
 
+# Sentinel for _require_active_symbol to distinguish "no symbol" from "OK".
+_NO_ACTIVE_SYMBOL_TEXT = "No symbol selected\\. Use /symbol first\\."
+
 
 def _escape_mdv2(text: str) -> str:
     """Escape special characters for Telegram MarkdownV2."""
@@ -105,3 +108,92 @@ def _parse_brackets(tokens: list[str]):
             continue
         return None, None, f"Unexpected token: {tokens[i]}"
     return sl_price, tp_price, None
+
+
+def _require_active_symbol(uc):
+    """Return ``(active_symbol, None)`` or ``(None, error_result)``.
+
+    Callers write::
+
+        active, err = _require_active_symbol(uc)
+        if err is not None:
+            return err
+        # … use *active* …
+
+    Eliminates the 10+ repetitions of the "no active symbol" guard
+    across telegram_lifecycle.py and telegram_manual_orders.py.
+    """
+    from finbot.core.application.dto.telegram_command_result import (
+        TelegramCommandResult,
+    )
+
+    active = uc._bot_manager.get_active_symbol()
+    if active is None:
+        return None, TelegramCommandResult(
+            text=_NO_ACTIVE_SYMBOL_TEXT,
+            parse_mode="MarkdownV2",
+        )
+    return active, None
+
+
+def _build_paginated_keyboard(
+    items: tuple[str, ...],
+    page: int,
+    per_page: int,
+    callback_prefix: str,
+    extra_rows: list[list[dict]] | None = None,
+) -> dict:
+    """Build a paginated inline keyboard with Prev / N-of-M / Next nav.
+
+    Parameters
+    ----------
+    items:
+        Full list of display strings.
+    page:
+        Zero-based page index (clamped to valid range).
+    per_page:
+        Items per page.
+    callback_prefix:
+        Callback data prefix for item buttons (suffix is ``:item_idx``).
+    extra_rows:
+        Extra keyboard rows appended below the nav row.
+
+    Returns:
+        ``{"inline_keyboard": [[...], [...], nav_row, ...extra_rows]}``
+    """
+    total = max(1, (len(items) + per_page - 1) // per_page)
+    page = max(0, min(page, total - 1))
+    start = page * per_page
+    page_items = items[start : start + per_page]
+
+    # Item grid: 3 items per row.
+    rows: list[list[dict]] = []
+    row: list[dict] = []
+    for i, display in enumerate(page_items):
+        item_idx = start + i
+        row.append(
+            {"text": display, "callback_data": f"{callback_prefix}:{item_idx}"}
+        )
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+
+    # Navigation row.
+    nav: list[dict] = []
+    if page > 0:
+        nav.append(
+            {"text": "\u25c0 Prev", "callback_data": f"{callback_prefix}_page:{page - 1}"}
+        )
+    nav.append({"text": f"{page + 1}/{total}", "callback_data": "none"})
+    if page < total - 1:
+        nav.append(
+            {"text": "Next \u25b6", "callback_data": f"{callback_prefix}_page:{page + 1}"}
+        )
+    rows.append(nav)
+
+    if extra_rows:
+        rows.extend(extra_rows)
+
+    return {"inline_keyboard": rows}

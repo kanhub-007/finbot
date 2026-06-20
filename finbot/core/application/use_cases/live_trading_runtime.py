@@ -724,6 +724,12 @@ class LiveTradingRuntimeUseCase:
         self, bar: dict[str, Any], position: PositionSnapshot
     ) -> dict[str, Any]:
         """Assemble the context dict consumed by the risk gates."""
+        # Use cache-only count to avoid a blocking REST call on every
+        # non-HOLD candle.  Falls back to 0 when the cache is stale
+        # (the StaleDataGate already covers that case).
+        cached_count = self._exchange.count_open_orders_cached(self._symbol or "")
+        open_order_count = 0 if cached_count is None else cached_count
+
         return {
             "bar": bar,
             "symbol": self._symbol,
@@ -731,9 +737,7 @@ class LiveTradingRuntimeUseCase:
             "mode": self._mode.value,
             "position_size": position.size,
             "leverage": self._read_leverage(),
-            "open_order_count": len(
-                self._exchange.list_open_orders(self._symbol or "")
-            ),
+            "open_order_count": open_order_count,
             "daily_loss_usd": self._trade_ledger.realized_loss_on(_dt.now(UTC).date()),
         }
 

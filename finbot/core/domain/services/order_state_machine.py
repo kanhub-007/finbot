@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import warnings
 from decimal import Decimal
 from typing import ClassVar
 
@@ -145,17 +144,11 @@ class OrderStateMachine:
         fill_size: Decimal | None = None,
     ) -> None:
         if to_state == OrderState.PARTIALLY_FILLED:
-            if fill_size is not None:
-                size = fill_size
-            else:
-                warnings.warn(
-                    "transition() called without fill_size; parsing from reason "
-                    "string is deprecated.  Pass fill_size explicitly.",
-                    DeprecationWarning,
-                    stacklevel=3,
+            if fill_size is None:
+                raise InvalidTransitionError(
+                    "transition() to PARTIALLY_FILLED requires an explicit fill_size"
                 )
-                size = _parse_fill_size(reason)
-            lifecycle.filled_size += size
+            lifecycle.filled_size += fill_size
             lifecycle.remaining_size = max(
                 Decimal("0"),
                 lifecycle.original_size - lifecycle.filled_size,
@@ -163,11 +156,3 @@ class OrderStateMachine:
         elif to_state == OrderState.FILLED:
             lifecycle.filled_size = lifecycle.original_size
             lifecycle.remaining_size = Decimal("0")
-
-
-def _parse_fill_size(reason: str) -> Decimal:
-    """Parse a fill size from the reason string (backward compat)."""
-    try:
-        return Decimal(reason)
-    except Exception:
-        raise InvalidTransitionError(f"Invalid fill size: {reason}") from None

@@ -223,10 +223,9 @@ def _panic_execute(uc, action: str, symbol: str) -> TelegramCommandResult:
 
     if action in ("cancel", "both"):
         cancel_result = mgr.cancel_all_orders(symbol)
-        if isinstance(cancel_result, dict) and "error" not in cancel_result:
-            cancelled = int(cancel_result.get("cancelled", 0))
-        elif isinstance(cancel_result, dict):
-            cancel_error = str(cancel_result.get("error", "unknown"))
+        cancelled = int(cancel_result.get("cancelled", 0))
+        if cancel_result.get("error"):
+            cancel_error = str(cancel_result["error"])
 
     if action in ("close", "both"):
         close_result = mgr.close_position(symbol)

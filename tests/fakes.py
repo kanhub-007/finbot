@@ -158,6 +158,11 @@ class InMemoryExchangeGateway(ExchangeGateway):
             available=Decimal("10000"),
         )
 
+    def count_open_orders_cached(self, symbol: str) -> int | None:
+        """Return cached count or 0 for the test fake (no websocket)."""
+        orders = self.list_open_orders(symbol)
+        return len(orders) if orders is not None else 0
+
 
 # ---------------------------------------------------------------------------
 # Indicator calculator fake
