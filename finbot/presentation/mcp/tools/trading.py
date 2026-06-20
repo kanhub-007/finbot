@@ -85,12 +85,50 @@ def _register_trading_queries(mcp: FastMCP, bot_manager: Any) -> None:
         name="set_leverage",
         description=(
             "Set leverage and margin mode on the active symbol. "
-            "Example: set_leverage(5, 'cross') for 5x cross margin."
+            "Example: set_leverage(5, 'cross') for 5x cross margin. "
+            "Call activate_symbol first to select a symbol."
         ),
     )
     def set_leverage(leverage: int, margin_mode: str = "isolated") -> str:
         result = bot_manager.set_leverage(leverage, margin_mode)
         return json.dumps(result, indent=2)
+
+    @mcp.tool(
+        name="set_risk_percent",
+        description=(
+            "Set the maximum position size as a percentage of total USD "
+            "balance. Risk is on the total balance, not the leveraged "
+            "amount. Example: set_risk_percent(3) limits each trade to "
+            "3% of your account value. This updates max_position_usd in "
+            "the runtime config and applies to both strategy and manual "
+            "orders immediately."
+        ),
+    )
+    def set_risk_percent(risk_pct: float) -> str:
+        """Set max_position_usd to risk_pct% of total balance."""
+        bal = bot_manager.get_balance()
+        if bal is None:
+            return json.dumps(
+                {"status": "error", "message": "No exchange wired — cannot read balance"},
+                indent=2,
+            )
+        if risk_pct <= 0 or risk_pct > 100:
+            return json.dumps(
+                {"status": "rejected", "message": "Risk percent must be between 0 and 100"},
+                indent=2,
+            )
+        total = bal.wallet_value + bal.spot_usdc
+        max_usd = int(total * Decimal(str(risk_pct)) / 100)
+        result = bot_manager.update_bot_config("max_position", str(max_usd))
+        return json.dumps(
+            {
+                "status": result.get("status", "ok"),
+                "risk_percent": risk_pct,
+                "total_balance": str(total),
+                "max_position_usd": max_usd,
+            },
+            indent=2,
+        )
 
     @mcp.tool(
         name="get_leverage",

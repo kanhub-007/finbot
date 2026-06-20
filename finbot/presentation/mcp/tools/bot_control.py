@@ -29,21 +29,22 @@ def register_bot_control_tools(
             "Supports dry_run (paper trading), testnet (testnet execution), "
             "and live modes. Only one bot can run at a time. "
             "Use live_trading_ack=true when starting testnet/live mode. "
-            "Returns the bot_run_id on success."
+            "The interval is auto-detected from the strategy YAML when "
+            "not specified (use an empty string ''). For MTF strategies "
+            "with a timeframes block, the primary interval overrides "
+            "any passed value. Informative intervals are auto-discovered. "
+            "Returns the bot_run_id and resolved intervals on success."
         ),
     )
     def start_bot(
         strategy_path: str,
         symbol: str = "BTC",
-        interval: str = "1h",
+        interval: str = "",
         mode: str = "dry_run",
         warmup_bars: int = 100,
         live_trading_ack: bool = False,
     ) -> str:
-        """Start a bot with the given strategy and parameters."""
-        # C4: refuse mode/URL combinations that would route orders to the
-        # wrong environment before touching the BotManager.  Mirrors the
-        # CLI guard in cli/main.py:_cmd_run.
+        """Start a bot — interval auto-detected from strategy YAML when empty."""
         _settings = settings or Settings()
         reasons = check_mode_url_consistency(
             mode=mode,
@@ -58,7 +59,7 @@ def register_bot_control_tools(
         result = bot_manager.start(
             strategy_path=strategy_path,
             symbol=symbol,
-            interval=interval,
+            interval=interval or "",
             mode=mode,
             warmup_bars=warmup_bars,
             live_trading_ack=live_trading_ack,
