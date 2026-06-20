@@ -130,6 +130,8 @@ class LiveTradingRuntimeUseCase:
         trade_ledger: TradeLedger | None = None,
         live_state: Any | None = None,
         strategy_log_writer: Any | None = None,
+        interval: str = "",
+        informative_intervals: list[str] | None = None,
     ) -> None:
         self._exchange = exchange_gateway
         self._evaluator = strategy_evaluator
@@ -159,8 +161,9 @@ class LiveTradingRuntimeUseCase:
         self._strategy_name: str = ""
         self._strategy_hash: str = ""
         self._symbol: str = ""
-        self._interval: str = ""
+        self._interval: str = interval or ""
         self._started: bool = False
+        self._informative_intervals: list[str] = list(informative_intervals or [])
 
         # Warmup
         self._warmup = WarmupWindow()

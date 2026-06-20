@@ -97,6 +97,8 @@ class LiveTradingRuntimeBuilder:
         self._trade_ledger: TradeLedger | None = None
         self._strategy_log_writer: Any | None = None
         self._live_state: Any | None = None
+        self._interval: str = ""
+        self._informative_intervals: list[str] | None = None
 
     # -- required setters ---------------------------------------------------
 
@@ -226,6 +228,17 @@ class LiveTradingRuntimeBuilder:
         self._live_state = state
         return self
 
+    def with_interval(self, interval: str) -> LiveTradingRuntimeBuilder:
+        self._interval = interval
+        return self
+
+    def with_informative_intervals(
+        self,
+        intervals: list[str] | None,
+    ) -> LiveTradingRuntimeBuilder:
+        self._informative_intervals = intervals
+        return self
+
     # -- build --------------------------------------------------------------
 
     def build(self) -> LiveTradingRuntimeUseCase:
@@ -273,4 +286,6 @@ class LiveTradingRuntimeBuilder:
             trade_ledger=self._trade_ledger,
             strategy_log_writer=self._strategy_log_writer,
             live_state=self._live_state,
+            interval=self._interval,
+            informative_intervals=self._informative_intervals,
         )

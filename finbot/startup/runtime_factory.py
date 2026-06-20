@@ -114,6 +114,21 @@ def create_live_trading_runtime_use_case(
     definition = loader.load_from_file(strategy_path)
     strategy_hash = hash_strategy_file(strategy_path)
 
+    # Resolve MTF timeframes from the strategy YAML (ADR-10).
+    # When the strategy declares a ``timeframes`` block, the YAML primary
+    # overrides the caller's interval and informative intervals are
+    # auto-discovered.
+    timeframes = loader.last_timeframes()
+    informative_intervals: list[str] = []
+    if timeframes is not None and timeframes.is_mtf:
+        interval = timeframes.primary or interval
+        informative_intervals = list(timeframes.informative_intervals)
+        logger.info(
+            "MTF strategy detected: primary=%s, informative=%s",
+            interval,
+            informative_intervals,
+        )
+
     from finbot.core.application.use_cases.account_event_handler import (
         AccountEventHandler,
     )
@@ -203,6 +218,10 @@ def create_live_trading_runtime_use_case(
             AccountEventHandler(repo, trade_ledger, notification_sender)
         )
         .with_strategy_log_writer(_make_log_writer())
+        .with_interval(interval)
+        .with_informative_intervals(
+            informative_intervals if informative_intervals else None
+        )
     )
     if trading_mode != TradingMode.DRY_RUN:
         from finbot.core.domain.services.cloid_generator import CloidGenerator

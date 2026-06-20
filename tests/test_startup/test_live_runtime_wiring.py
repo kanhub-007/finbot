@@ -358,3 +358,90 @@ class TestMaxLeverageGateWiring:
         decision = gate.check(signal, {"leverage": 20})
         assert not decision.accepted
         assert decision.gate_name == "max_leverage"
+
+
+# ---------------------------------------------------------------------------
+# Multi-timeframe factory wiring (Scenario 2)
+# ---------------------------------------------------------------------------
+
+
+class TestMTFFactoryIntervalOverride:
+    """Scenario 2: Runtime factory overrides interval from strategy YAML."""
+
+    MTF_STRATEGY = "strategies/14_amt_value_reject_30m_1h_mtf.yaml"
+    SINGLE_TF_STRATEGY = "tests/fixtures/strategies/amt_dip_buyer_final.yaml"
+
+    def test_mtf_strategy_overrides_interval_to_yaml_primary(self, monkeypatch):
+        """When the strategy declares MTF timeframes, the runtime factory
+        overrides the caller's interval with the YAML primary."""
+        settings = _test_settings(mode="dry_run")
+        monkeypatch.setattr("finbot.startup.runtime_factory.Settings", lambda: settings)
+
+        runtime = create_live_trading_runtime_use_case(
+            self.MTF_STRATEGY,
+            "BTC",
+            "1h",  # caller passes 1h, but YAML says 30min
+            mode="dry_run",
+            live_data=False,
+            warmup_bars=_recent_bars(30, base_ts=int(time.time())),
+        )
+
+        assert (
+            runtime._interval == "30min"
+        ), f"Expected 30min from YAML, got {runtime._interval}"
+
+    def test_mtf_strategy_sets_informative_intervals(self, monkeypatch):
+        """The runtime receives informative_intervals from the strategy YAML."""
+        settings = _test_settings(mode="dry_run")
+        monkeypatch.setattr("finbot.startup.runtime_factory.Settings", lambda: settings)
+
+        runtime = create_live_trading_runtime_use_case(
+            self.MTF_STRATEGY,
+            "BTC",
+            "1h",
+            mode="dry_run",
+            live_data=False,
+            warmup_bars=_recent_bars(30, base_ts=int(time.time())),
+        )
+
+        assert hasattr(
+            runtime, "_informative_intervals"
+        ), "Runtime missing _informative_intervals attribute"
+        assert runtime._informative_intervals == [
+            "1h"
+        ], f"Expected ['1h'], got {runtime._informative_intervals}"
+
+    def test_single_tf_strategy_preserves_caller_interval(self, monkeypatch):
+        """Single-TF strategies: the caller's interval is used unchanged."""
+        settings = _test_settings(mode="dry_run")
+        monkeypatch.setattr("finbot.startup.runtime_factory.Settings", lambda: settings)
+
+        runtime = create_live_trading_runtime_use_case(
+            self.SINGLE_TF_STRATEGY,
+            "BTC",
+            "4h",
+            mode="dry_run",
+            live_data=False,
+            warmup_bars=_recent_bars(30, base_ts=int(time.time())),
+        )
+
+        assert (
+            runtime._interval == "4h"
+        ), f"Expected 4h (caller's), got {runtime._interval}"
+
+    def test_single_tf_strategy_no_informative_intervals(self, monkeypatch):
+        """Single-TF strategies have empty informative_intervals."""
+        settings = _test_settings(mode="dry_run")
+        monkeypatch.setattr("finbot.startup.runtime_factory.Settings", lambda: settings)
+
+        runtime = create_live_trading_runtime_use_case(
+            self.SINGLE_TF_STRATEGY,
+            "BTC",
+            "1h",
+            mode="dry_run",
+            live_data=False,
+            warmup_bars=_recent_bars(30, base_ts=int(time.time())),
+        )
+
+        assert hasattr(runtime, "_informative_intervals")
+        assert runtime._informative_intervals == []
