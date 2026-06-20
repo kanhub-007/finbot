@@ -89,6 +89,9 @@ async def _handle_run_callback(
     value = data.subvalue  # parts[3]
     if action == "sym" and data.segment_count > 4:
         value = ":".join(data.parts[3:])
+    # Risk callbacks have 5 segments: run:sid:risk:pct:5 or run:sid:risk:lev:10
+    if action == "risk" and data.segment_count > 4:
+        value = ":".join(data.parts[3:])
 
     session = uc._session_store.get(session_id)
     if session is None:

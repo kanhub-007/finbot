@@ -109,6 +109,12 @@ def create_server() -> FinbotMcpServer:
         HyperliquidMetadataProvider,
     )
 
+    metadata_provider = HyperliquidMetadataProvider()
+    # Warm the symbol cache at startup so MCP tools that list symbols
+    # (or the Telegram /run flow) respond instantly instead of stalling
+    # for ~10s on the first Hyperliquid REST call.
+    metadata_provider.list_symbols()
+
     bot_manager = BotManager(
         runtime_factory=_make_runtime_factory(
             settings, telegram_ref=lambda: telegram_holder[0]
@@ -118,7 +124,7 @@ def create_server() -> FinbotMcpServer:
         settings=settings,
         create_bot_config=lambda s: create_bot_config(s),
         startup_time=time.time(),
-        metadata_provider=HyperliquidMetadataProvider(),
+        metadata_provider=metadata_provider,
         config_writer=DotEnvConfigWriter(),
     )
 

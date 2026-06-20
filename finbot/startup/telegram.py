@@ -102,6 +102,9 @@ class TelegramControlPlane:
         )
 
         metadata_provider = HyperliquidMetadataProvider()
+        # Warm the symbol cache at startup so the first /run doesn't stall
+        # for ~10s while Hyperliquid returns the full perp universe.
+        metadata_provider.list_symbols()
 
         from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
             YamlStrategyDefinitionLoader,
