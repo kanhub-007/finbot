@@ -477,21 +477,24 @@ class LiveTradingRuntimeUseCase:
             has_gap=self._warmup.has_gap,
         )
         if not validation.valid:
+            logger.warning(
+                "\u26a0 %s/%s candle=%s enrichment INVALID: %s",
+                self._symbol, self._interval, ts, validation.reason,
+            )
             self._log_decision(ts, candle, latest, validation=validation)
             return self._handle_enrichment_rejection(ts, validation)
 
         # 4. Evaluate strategy
         position = self._exchange.get_position(self._symbol or "DEFAULT")
         signal = self._evaluator.evaluate(latest, position)
-        logger.info(
-            "Candle %s: action=%s symbol=%s",
-            ts,
-            signal.action.value,
-            signal.symbol,
-        )
+        close_price = latest.get("close", "?")
 
         # 5. If HOLD, no further processing
         if signal.action == SignalAction.HOLD:
+            logger.info(
+                "\u25b3 %s/%s candle=%s close=%s action=HOLD",
+                self._symbol, self._interval, ts, close_price,
+            )
             self._log_decision(ts, candle, latest, signal=signal)
             return CandleProcessingResult(
                 candle_timestamp=ts,
@@ -501,7 +504,20 @@ class LiveTradingRuntimeUseCase:
             )
 
         # 6. Risk gates + order planning (delegated to OrderPlanner)
-        return self._plan_and_persist(signal, latest, position, ts)
+        result = self._plan_and_persist(signal, latest, position, ts)
+        risk = result.risk_decision or "accepted"
+        intent_info = ""
+        if result.intent_id:
+            side = signal.action.value
+            intent_info = f" {side}"
+        if result.submitted:
+            intent_info += " submitted"
+        logger.info(
+            "\u25b6 %s/%s candle=%s close=%s action=%s risk=%s%s",
+            self._symbol, self._interval, ts, close_price,
+            signal.action.value, risk, intent_info,
+        )
+        return result
 
     def process_account_event(self, event: dict[str, Any]) -> dict[str, Any]:
         """Process an account websocket event (order update, fill, etc.).
@@ -527,6 +543,11 @@ class LiveTradingRuntimeUseCase:
         into the next primary bar before indicator calculation.
         """
         self._informative_cache[alias] = dict(bar)
+        close_price = bar.get("close", "?")
+        logger.debug(
+            "\u2139 %s/%s informative=%s close=%s",
+            self._symbol, alias, bar.get("timestamp", "?"), close_price,
+        )
 
     # -- internal pipeline steps ---------------------------------------------
 
