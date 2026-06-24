@@ -30,6 +30,7 @@ from finbot.presentation.telegram.bot_handler import TelegramBotHandler
 from finbot.presentation.telegram.notification_sender import (
     TelegramNotificationSender,
 )
+from finbot.startup.service_factory import create_log_reader
 
 logger = logging.getLogger(__name__)
 NotificationDispatcher = telegram_dispatcher.ThreadSafeTelegramNotificationDispatcher
@@ -122,7 +123,7 @@ class TelegramControlPlane:
             mode=self._settings.mode,
             hyperliquid_testnet=self._settings.hyperliquid_testnet,
             metadata_provider=metadata_provider,
-            log_reader=_make_log_reader(),
+            log_reader=create_log_reader(),
             strategy_loader=strategy_loader,
         )
 
@@ -193,10 +194,4 @@ def create_telegram_control_plane(
     return TelegramControlPlane(settings=settings, chat_repo=chat_repo)
 
 
-def _make_log_reader():
-    """Create the strategy log reader for Telegram /log command."""
-    from finbot.infrastructure.services.strategy_log_writer import (
-        StrategyLogFileReader,
-    )
 
-    return StrategyLogFileReader()

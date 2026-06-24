@@ -17,7 +17,15 @@ from finbot.core.domain.entities.bot_run import BotRun
 from finbot.core.domain.entities.strategy_execution_config import (
     StrategyExecutionConfig,
 )
+from finbot.core.domain.interfaces.bot_state_repository import (
+    BotStateRepository,
+)
+from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 from finbot.core.domain.services.bot_live_state import BotLiveState
+from finbot.core.domain.services.bot_manager._protocols import (
+    CreateBotConfigCallable,
+    SettingsLike,
+)
 from finbot.core.domain.services.bot_manager.bot_manager_lock import (
     BotManagerLock,
 )
@@ -49,14 +57,14 @@ class BotLifecycleService:
         self,
         state: BotManagerState,
         lock: BotManagerLock,
-        repo: Any,
-        exchange: Any,
+        repo: BotStateRepository,
+        exchange: ExchangeGateway | None,
         runtime_factory: RuntimeFactory,
-        settings: Any,
-        create_bot_config: Any,
+        settings: SettingsLike | None,
+        create_bot_config: CreateBotConfigCallable | None,
         startup_time: float | None = None,
         live_state: BotLiveState | None = None,
-        set_leverage_fn: Any = None,
+        set_leverage_fn: object | None = None,
     ) -> None:
         self._state = state
         self._lock = lock
@@ -144,18 +152,16 @@ class BotLifecycleService:
             )
             self._state.thread.start()
             result: dict[str, str] = {"status": "running", "bot_run_id": bot_run_id}
-            # Include resolved timeframes (MTF strategies override the
-            # caller's interval via the YAML primary; informatives are
+            # Include resolved timeframes via public API (MTF strategies override
+            # the caller's interval via the YAML primary; informatives are
             # auto-discovered).  MCP / Telegram use this for display.
-            if hasattr(runtime, "_interval"):
-                result["interval"] = runtime._interval
-            if (
-                hasattr(runtime, "_informative_intervals")
-                and runtime._informative_intervals
-            ):
-                result["informative_intervals"] = ",".join(
-                    runtime._informative_intervals
-                )
+            if hasattr(runtime, "get_resolved_intervals"):
+                resolved = runtime.get_resolved_intervals()
+                result["interval"] = str(resolved.get("interval", ""))
+                if "informative_intervals" in resolved:
+                    result["informative_intervals"] = str(
+                        resolved["informative_intervals"]
+                    )
             return result
 
     def stop(self) -> dict[str, str]:

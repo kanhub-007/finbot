@@ -19,6 +19,7 @@ from finbot.startup.service_factory import (
     create_bot_config,
     create_bot_state_repository,
     create_live_trading_runtime_use_case,
+    create_log_reader,
     create_telegram_exchange_gateway,
 )
 
@@ -181,7 +182,7 @@ def create_server() -> FinbotMcpServer:
         bot_manager,
         settings=settings,
         validate_strategy_use_case=create_validate_strategy_use_case(),
-        log_reader=_make_log_reader(),
+        log_reader=create_log_reader(),
     )
 
     config = get_transport_config()
@@ -222,10 +223,4 @@ def run() -> None:
         server.run(transport="stdio")
 
 
-def _make_log_reader():
-    """Create the strategy log reader for MCP log tools."""
-    from finbot.infrastructure.services.strategy_log_writer import (
-        StrategyLogFileReader,
-    )
 
-    return StrategyLogFileReader()

@@ -15,12 +15,12 @@ import logging
 from typing import Any
 
 from finbot.config.settings import Settings
-from finbot.core.domain.services.content_hash import hash_strategy_file
+from finbot.infrastructure.services.strategy_file_hasher import hash_strategy_file
 from finbot.infrastructure.strategy.yaml_strategy_definition_loader import (
     YamlStrategyDefinitionLoader,
 )
 from finbot.startup.service_factory import (
-    _build_exchange_gateway,
+    build_exchange_gateway,
     create_bot_loop,
     create_bot_state_repository,
     create_in_memory_repository,
@@ -82,7 +82,7 @@ def create_live_trading_runtime_use_case(
     else:
         repo = create_in_memory_repository()
 
-    gateway = _build_exchange_gateway(settings, trading_mode)
+    gateway = build_exchange_gateway(settings, trading_mode)
 
     if bot_loop is None and live_data:
         bot_loop = create_bot_loop(
@@ -110,6 +110,16 @@ def create_live_trading_runtime_use_case(
             informative_intervals,
         )
 
+    # Per-informative warmup bars, keyed by alias (resolved from the loader's
+    # alias→interval map). Seeded from historical bars and passed to the runtime
+    # so the shared MultiTimeframeBarEnricher has informative history.
+    informative_warmup_bars: dict[str, list] = {}
+    if timeframes is not None and timeframes.is_mtf:
+        for alias, info_interval in timeframes.informative_aliases.items():
+            # Reserve the alias key even before bars load so the runtime knows
+            # which informatives to expect.
+            informative_warmup_bars.setdefault(alias, [])
+
     from finbot.core.application.use_cases.account_event_handler import (
         AccountEventHandler,
     )
@@ -136,15 +146,21 @@ def create_live_trading_runtime_use_case(
 
     if warmup_bars is None and live_data:
         warmup_bars = _load_warmup_bars(symbol, interval, min_bars=100)
-        # Load warmup bars for each informative interval (MTF).
-        for info_interval in informative_intervals:
+    # Load informative warmup bars (MTF), keyed by alias, and RETAIN them
+    # (previously discarded). They seed the per-informative warmup windows the
+    # shared MultiTimeframeBarEnricher needs to compute informative indicators.
+    if live_data and informative_warmup_bars:
+        aliases = timeframes.informative_aliases if timeframes else {}
+        for alias, info_interval in aliases.items():
             info_bars = _load_warmup_bars(symbol, info_interval, min_bars=100)
             logger.info(
-                "Loaded %d warmup bars for informative %s/%s",
+                "Loaded %d warmup bars for informative %s/%s (alias=%s)",
                 len(info_bars),
                 symbol,
                 info_interval,
+                alias,
             )
+            informative_warmup_bars[alias] = info_bars
 
     from finbot.infrastructure.adapters.simple_runtime_event_emitter import (
         SimpleRuntimeEventEmitter,
@@ -188,6 +204,9 @@ def create_live_trading_runtime_use_case(
         .with_evaluator(evaluator)
         .with_repository(repo)
         .with_indicator_calculator(SharedRuntimeIndicatorCalculator())
+        .with_bar_enricher(_build_bar_enricher(loader))
+        .with_required_data_validator(_make_required_data_validator())
+        .with_causal_streaming_enricher(_build_causal_streaming_enricher(loader))
         .with_enrichment_validator(EnrichmentValidator())
         .with_bar_converter(PandasBarFrameConverter())
         .with_mode(trading_mode)
@@ -208,6 +227,9 @@ def create_live_trading_runtime_use_case(
         .with_interval(interval)
         .with_informative_intervals(
             informative_intervals if informative_intervals else None
+        )
+        .with_informative_warmup_bars(
+            informative_warmup_bars if informative_warmup_bars else None
         )
     )
     if trading_mode != TradingMode.DRY_RUN:
@@ -283,7 +305,9 @@ def _load_warmup_bars(
             "Warmup bar load failed for %s/%s: %s — "
             "will warm up from live candles instead "
             "(normal for new or low-volume tokens)",
-            symbol, interval, e,
+            symbol,
+            interval,
+            e,
         )
         return []
 
@@ -295,3 +319,52 @@ def _make_log_writer():
     )
 
     return StrategyLogWriter()
+
+
+def _build_causal_streaming_enricher(loader: YamlStrategyDefinitionLoader):
+    """Build the causal MTF streaming enricher from the parsed strategy.
+
+    Returns ``None`` for strategies with no parsed definition (the runtime
+    then falls back to the batch enricher or legacy path).
+    """
+    definition = loader.last_definition()
+    if definition is None:
+        return None
+    from finbar_strategy_runtime.indicators.causal_multi_timeframe_streaming_enricher import (  # noqa: E501
+        CausalMultiTimeframeStreamingEnricher,
+    )
+
+    return CausalMultiTimeframeStreamingEnricher.from_strategy_definition(
+        definition=definition,
+        primary_indicators=list(loader.last_primary_required_indicators()),
+        informative_indicators=loader.last_informative_required_indicators(),
+    )
+
+
+def _build_bar_enricher(loader: YamlStrategyDefinitionLoader):
+    """Build the shared MultiTimeframeBarEnricher adapter for the strategy.
+
+    Returns ``None`` for strategies with no parsed definition (the runtime
+    then falls back to the legacy single-TF indicator path).
+    """
+    definition = loader.last_definition()
+    if definition is None:
+        return None
+    from finbot.infrastructure.strategy.shared_runtime_multi_timeframe_enricher import (
+        SharedRuntimeMultiTimeframeEnricher,
+    )
+
+    return SharedRuntimeMultiTimeframeEnricher(
+        definition=definition,
+        primary_required_indicators=loader.last_primary_required_indicators(),
+        informative_required_indicators=loader.last_informative_required_indicators(),
+    )
+
+
+def _make_required_data_validator():
+    """Build the shared RequiredDataValidator adapter (data-driven warmup)."""
+    from finbot.infrastructure.strategy.shared_runtime_required_data_validator import (
+        SharedRuntimeRequiredDataValidator,
+    )
+
+    return SharedRuntimeRequiredDataValidator()

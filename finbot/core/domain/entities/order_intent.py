@@ -1,5 +1,7 @@
 """Domain entity describing a desired exchange order."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, replace
 from decimal import Decimal
 

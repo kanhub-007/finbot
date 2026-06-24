@@ -48,6 +48,12 @@ class SymbolSessionService:
         self._metadata_provider = metadata_provider
         self._repo = repo
 
+    def set_metadata_provider(
+        self, provider: MarketMetadataProvider | None
+    ) -> None:
+        """Replace the metadata provider (e.g. for test injection)."""
+        self._metadata_provider = provider
+
     @property
     def has_exchange(self) -> bool:
         """Return True if an exchange gateway is wired."""

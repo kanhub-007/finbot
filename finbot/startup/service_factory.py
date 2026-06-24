@@ -59,7 +59,7 @@ def create_bot_config(settings: Settings) -> BotConfig:
     )
 
 
-def _build_exchange_gateway(settings: Settings, mode: TradingMode) -> ExchangeGateway:
+def build_exchange_gateway(settings: Settings, mode: TradingMode) -> ExchangeGateway:
     """Create the correct exchange gateway for the given mode.
 
     Dry-run uses a no-op gateway; testnet/live use the real Hyperliquid
@@ -80,7 +80,7 @@ def create_exchange_gateway(settings: Settings) -> ExchangeGateway:
 
     Used by kill-switch / panic commands that need the gateway directly.
     """
-    return _build_exchange_gateway(settings, TradingMode(settings.mode))
+    return build_exchange_gateway(settings, TradingMode(settings.mode))
 
 
 def create_telegram_exchange_gateway(settings: Settings) -> ExchangeGateway:
@@ -128,7 +128,7 @@ def create_run_bot_use_case(
     else:
         stream = InMemoryMarketDataStream()
     return RunBotUseCase(
-        exchange_gateway=_build_exchange_gateway(settings, mode),
+        exchange_gateway=build_exchange_gateway(settings, mode),
         market_data_stream=stream,
         strategy_evaluator=_build_strategy_evaluator(strategy_path, symbol, interval),
         state_repository=InMemoryBotStateRepository(),
@@ -142,7 +142,7 @@ def _build_strategy_evaluator(strategy_path: str, symbol: str, interval: str):
     own evaluator via the shared factory.
     """
     from finbot.core.domain.interfaces.strategy_evaluator import StrategyEvaluator
-    from finbot.core.domain.services.content_hash import hash_strategy_file
+    from finbot.infrastructure.services.strategy_file_hasher import hash_strategy_file
     from finbot.infrastructure.adapters import (
         shared_runtime_strategy_evaluator_factory as _eval_factory_mod,
     )
@@ -324,3 +324,16 @@ def create_bot_loop(
 from finbot.startup.runtime_factory import (  # noqa: E402, F401
     create_live_trading_runtime_use_case,
 )
+
+
+def create_log_reader():
+    """Create a shared StrategyLogFileReader for MCP and Telegram.
+
+    Single canonical factory — avoids the duplicated ``_make_log_reader()``
+    that previously lived in both ``mcp.py`` and ``telegram.py``.
+    """
+    from finbot.infrastructure.services.strategy_log_writer import (
+        StrategyLogFileReader,
+    )
+
+    return StrategyLogFileReader()

@@ -18,9 +18,8 @@ existing callers (MCP tools, Telegram handler, tests) work unchanged.
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any
 
-from finbot.core.domain.entities.bot_config import BotConfig
 from finbot.core.domain.entities.wallet_balance import WalletBalance
 from finbot.core.domain.interfaces.bot_state_repository import (
     BotStateRepository,
@@ -29,6 +28,10 @@ from finbot.core.domain.interfaces.config_writer_port import ConfigWriterPort
 from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
 from finbot.core.domain.interfaces.market_metadata_provider import (
     MarketMetadataProvider,
+)
+from finbot.core.domain.services.bot_manager._protocols import (
+    CreateBotConfigCallable,
+    SettingsLike,
 )
 from finbot.core.domain.services.bot_manager.bot_lifecycle_service import (
     BotLifecycleService,
@@ -55,33 +58,6 @@ from finbot.core.domain.services.bot_manager.runtime_config_service import (
 from finbot.core.domain.services.bot_manager.symbol_session_service import (
     SymbolSessionService,
 )
-
-
-class SettingsLike(Protocol):
-    """Minimal protocol for a settings object consumed by BotManager.
-
-    The real ``Settings`` lives in ``finbot.config.settings`` (Pydantic),
-    which is outside the domain layer.  This protocol keeps BotManager
-    layer-clean.
-    """
-
-    mode: str
-    live_trading_ack: bool
-    max_position_usd: object
-    max_daily_loss_usd: object
-    max_open_orders: object
-    stale_data_seconds: object
-    hyperliquid_testnet: bool
-    hyperliquid_private_key: object
-    hyperliquid_account_address: str
-    hyperliquid_vault_address: str
-    database_path: str
-
-
-class CreateBotConfigCallable(Protocol):
-    """Callable that converts settings into a :class:`BotConfig`."""
-
-    def __call__(self, settings: object) -> BotConfig: ...
 
 
 _ATTR_MAP: dict[str, str] = {
@@ -174,13 +150,13 @@ class BotManager:
 
     @property
     def _metadata_provider(self):
-        """Forward to symbol-session + manual-order collaborators (test compat)."""
+        """Forward to symbol-session collaborator (test compat)."""
         return self._symbol._metadata_provider  # noqa: SLF001
 
     @_metadata_provider.setter
     def _metadata_provider(self, value):
-        self._symbol._metadata_provider = value  # noqa: SLF001
-        self._manual._metadata_provider = value  # noqa: SLF001
+        self._symbol.set_metadata_provider(value)
+        self._manual.set_metadata_provider(value)
 
     @property
     def _runtime_factory(self):
@@ -225,23 +201,40 @@ class BotManager:
     # -- symbol session -----------------------------------------------------
 
     def get_active_symbol(self):
-        """Return the active symbol state, or None if idle."""
+        """Return the active symbol state, or None if idle.
+
+        The returned :class:`ActiveSymbolState` carries symbol, leverage,
+        and margin mode.
+        """
         return self._symbol.get_active_symbol()
 
     def activate_symbol(self, symbol: str):
-        """Activate a trading symbol, reading leverage from the exchange."""
+        """Activate a trading symbol, reading current leverage from the exchange.
+
+        Rejected when a strategy is running.  Sets the active symbol and
+        persists it so it survives restarts.
+        """
         return self._symbol.activate_symbol(symbol)
 
     def get_active_price(self):
-        """Return the current price for the active symbol, or None if idle."""
+        """Return the current mark/mid price for the active symbol.
+
+        Returns ``None`` when no symbol is active or no exchange is wired.
+        """
         return self._symbol.get_active_price()
 
     def get_active_position(self):
-        """Return the exchange position for the active symbol, or None."""
+        """Return the exchange position snapshot for the active symbol.
+
+        Returns ``None`` when no symbol is active or no exchange is wired.
+        """
         return self._symbol.get_active_position()
 
     def list_active_orders(self):
-        """Return open orders for the active symbol, or None if idle."""
+        """Return open exchange orders for the active symbol.
+
+        Returns ``None`` when no symbol is active or no exchange is wired.
+        """
         return self._symbol.list_active_orders()
 
     def get_balance(self) -> WalletBalance | None:
@@ -255,39 +248,48 @@ class BotManager:
     # -- config -------------------------------------------------------------
 
     def get_bot_config(self):
-        """Return the current RuntimeBotConfig snapshot."""
+        """Return a snapshot of the current mutable runtime config.
+
+        Shared with risk gates so ``/config`` changes are visible immediately.
+        """
         return self._config.get_bot_config()
 
     def update_bot_config(self, key: str, value: str):
-        """Set a runtime config value by short key (e.g. 'max_position')."""
+        """Set a runtime config value by short key (e.g. ``'max_position'``).
+
+        Validated immediately — rejects unknown keys and invalid values.
+        """
         return self._config.update_bot_config(key, value)
 
     def save_config_to_env(self):
-        """Persist the current runtime config back to .env."""
+        """Persist the current runtime config back to ``.env`` for durability."""
         return self._config.save_config_to_env()
 
     def set_default_size(self, size):
-        """Set the default order size for manual orders."""
+        """Set the default order size for manual orders (``/long`` / ``/short``)."""
         return self._config.set_default_size(size)
 
     def get_default_size(self):
-        """Return the default order size, or None."""
+        """Return the default order size, or ``None`` if unset."""
         return self._config.get_default_size()
 
     def clear_default_size(self) -> None:
-        """Clear the default order size."""
+        """Clear the default order size so ``/long`` / ``/short`` require a size."""
         return self._config.clear_default_size()
 
     def save_config_profile(self, name: str):
-        """Save a named config profile to .env."""
+        """Snapshot the current config under a named profile."""
         return self._config.save_config_profile(name)
 
     def load_config_profile(self, name: str):
-        """Load a named config profile from .env."""
+        """Restore a previously-saved config profile by name.
+
+        Rejected if the profile name is unknown.
+        """
         return self._config.load_config_profile(name)
 
     def list_config_profiles(self):
-        """Return available config profile names from .env."""
+        """Return available config profile names."""
         return self._config.list_config_profiles()
 
     # -- manual orders ------------------------------------------------------

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import UTC
 from datetime import datetime as _dt
 from typing import Any
@@ -47,6 +48,9 @@ from finbot.core.domain.entities.signal_action import SignalAction
 from finbot.core.domain.entities.signal_decision import SignalDecision
 from finbot.core.domain.entities.trading_mode import TradingMode
 from finbot.core.domain.events.runtime_events import RiskTriggeredEvent
+from finbot.core.domain.interfaces.bar_enricher import (
+    BarEnricher,
+)
 from finbot.core.domain.interfaces.bar_frame_converter import (
     BarFrameConverter,
 )
@@ -70,6 +74,9 @@ from finbot.core.domain.interfaces.order_planner import OrderPlanner
 from finbot.core.domain.interfaces.order_submission_strategy import (
     OrderSubmissionStrategy,
 )
+from finbot.core.domain.interfaces.required_data_validator import (
+    RequiredDataValidator,
+)
 from finbot.core.domain.interfaces.runtime_event_emitter import RuntimeEventEmitter
 from finbot.core.domain.interfaces.strategy_definition_loader import (
     StrategyDefinitionLoader,
@@ -80,6 +87,13 @@ from finbot.core.domain.interfaces.strategy_evaluator import (
 from finbot.core.domain.interfaces.strategy_validator import (
     StrategyValidator,
 )
+from finbot.core.domain.interfaces.causal_streaming_enricher import (
+    CausalStreamingEnricher,
+)
+from finbar_strategy_runtime.domain.entities.causal_enriched_bar import (
+    CausalEnrichedBar,
+)
+
 from finbot.core.domain.services.live_mode_guard import check_live_mode
 from finbot.core.domain.services.order_helpers import (
     normalize_order_side,
@@ -132,6 +146,10 @@ class LiveTradingRuntimeUseCase:
         strategy_log_writer: Any | None = None,
         interval: str = "",
         informative_intervals: list[str] | None = None,
+        bar_enricher: BarEnricher | None = None,
+        required_data_validator: RequiredDataValidator | None = None,
+        causal_streaming_enricher: CausalStreamingEnricher | None = None,
+        informative_warmup_bars: dict[str, list[dict[str, Any]]] | None = None,
     ) -> None:
         self._exchange = exchange_gateway
         self._evaluator = strategy_evaluator
@@ -168,6 +186,34 @@ class LiveTradingRuntimeUseCase:
         # Dict of alias → bar; initialized on first informative candle.
         self._informative_cache: dict[str, dict[str, Any]] = {}
 
+        # Slice-1 shared primitives (optional; when wired they replace the
+        # legacy single-TF indicator + fixed-count warmup gate). See this
+        # spec's ADR-1 / ADR-4.
+        self._bar_enricher = bar_enricher
+        self._required_data_validator = required_data_validator
+        # Causal streaming enricher (Slice 2 parity — replaces batch
+        # recompute with stateful causal MTF enrichment). When wired,
+        # the runtime feeds each bar to the streaming engine and reads
+        # the latest causal enriched row directly — no DataFrame rebuild.
+        self._causal_streaming_enricher = causal_streaming_enricher
+        if causal_streaming_enricher is not None and warmup_bars:
+            for bar in warmup_bars:
+                causal_streaming_enricher.update_primary(bar)
+        if causal_streaming_enricher is not None and informative_warmup_bars:
+            for alias, bars in informative_warmup_bars.items():
+                for bar in bars:
+                    causal_streaming_enricher.update_informative(alias, bar)
+        self._required_data_validator = required_data_validator
+        self._informative_warmups: dict[str, WarmupWindow] = {}
+        if informative_warmup_bars:
+            for alias, bars in informative_warmup_bars.items():
+                window = WarmupWindow()
+                for bar in bars:
+                    window.append(bar)
+                self._informative_warmups[alias] = window
+        # Cached first-tradable index from the data-driven validator.
+        self._first_tradable_index: int | None = None
+
         # Warmup
         self._warmup = WarmupWindow()
         self._warmup_needed = True
@@ -187,6 +233,19 @@ class LiveTradingRuntimeUseCase:
         thread can update live state fields on each candle/signal/order.
         """
         self._live_state = state
+
+    def get_resolved_intervals(self) -> dict[str, object]:
+        """Return the resolved primary + informative intervals.
+
+        Public accessor so callers (``BotLifecycleService``) don't need
+        to reach into private ``_interval`` / ``_informative_intervals``
+        via ``hasattr``.  Returns a dict suitable for JSON-serialisation
+        in MCP/Telegram status responses.
+        """
+        result: dict[str, object] = {"interval": self._interval}
+        if self._informative_intervals:
+            result["informative_intervals"] = ",".join(self._informative_intervals)
+        return result
 
     def start(
         self,
@@ -431,11 +490,29 @@ class LiveTradingRuntimeUseCase:
         )
 
     def process_closed_candle(self, candle: dict[str, Any]) -> CandleProcessingResult:
-        """Process a single closed candle through the full pipeline."""
-        ts = _normalize_ts(candle)
+        """Process a single closed candle through the full pipeline.
 
-        # 1. Warmup
+        Dispatches to the shared-primitives path (Slice 1: ``MultiTimeframeBarEnricher``
+        + data-driven ``RequiredDataValidator``) when both are wired, otherwise
+        falls back to the legacy single-TF indicator + fixed-count warmup path.
+        """
+        ts = _normalize_ts(candle)
         self._warmup.append(candle)
+        if self._causal_streaming_enricher is not None:
+            return self._process_candle_causal_streaming(candle, ts)
+        if self._bar_enricher is not None and self._required_data_validator is not None:
+            return self._process_candle_shared(candle, ts)
+        return self._process_candle_legacy(candle, ts)
+
+    def _process_candle_legacy(
+        self, candle: dict[str, Any], ts: int
+    ) -> CandleProcessingResult:
+        """Legacy path: single-TF indicator calc + fixed ``min_bars`` warmup gate.
+
+        Preserved for runtimes that do not wire the shared enricher/validator
+        (e.g. some unit tests). Production wires both via the composition root.
+        """
+        # 1. Warmup
         if not self._warmup.is_ready():
             if self._warmup_needed:
                 logger.info(
@@ -479,7 +556,10 @@ class LiveTradingRuntimeUseCase:
         if not validation.valid:
             logger.warning(
                 "\u26a0 %s/%s candle=%s enrichment INVALID: %s",
-                self._symbol, self._interval, ts, validation.reason,
+                self._symbol,
+                self._interval,
+                ts,
+                validation.reason,
             )
             self._log_decision(ts, candle, latest, validation=validation)
             return self._handle_enrichment_rejection(ts, validation)
@@ -493,7 +573,10 @@ class LiveTradingRuntimeUseCase:
         if signal.action == SignalAction.HOLD:
             logger.info(
                 "\u25b3 %s/%s candle=%s close=%s action=HOLD",
-                self._symbol, self._interval, ts, close_price,
+                self._symbol,
+                self._interval,
+                ts,
+                close_price,
             )
             self._log_decision(ts, candle, latest, signal=signal)
             return CandleProcessingResult(
@@ -514,8 +597,230 @@ class LiveTradingRuntimeUseCase:
             intent_info += " submitted"
         logger.info(
             "\u25b6 %s/%s candle=%s close=%s action=%s risk=%s%s",
-            self._symbol, self._interval, ts, close_price,
-            signal.action.value, risk, intent_info,
+            self._symbol,
+            self._interval,
+            ts,
+            close_price,
+            signal.action.value,
+            risk,
+            intent_info,
+        )
+        return result
+
+    def _process_candle_causal_streaming(
+        self, candle: dict[str, Any], ts: int
+    ) -> CandleProcessingResult:
+        """Causal streaming path: stateful MTF enricher + row-based readiness.
+
+        Each bar is fed to the package ``CausalMultiTimeframeStreamingEnricher``
+        which maintains per-timeframe state and returns the latest causal enriched
+        row. No full-window recomputation — O(session) bounded, not O(n²).
+
+        Readiness is gated by the enricher's ``is_ready`` flag AND a check that
+        all required columns are non-NaN in the latest values. Bars before
+        readiness feed ``on_bar`` for state-building only.
+        """
+        self._tick_submission_on_bar(candle)
+        result = self._causal_streaming_enricher.update_primary(candle)
+        latest = result.values
+
+        # Row-level readiness: enricher warmup + all required cols non-NaN.
+        ready = result.is_ready
+        if ready and self._required_columns:
+            ready = all(
+                c in latest
+                and not (isinstance(latest.get(c), float) and math.isnan(latest[c]))
+                for c in self._required_columns
+            )
+
+        if not ready:
+            return self._handle_warmup_state_building(
+                candle, latest, ts,
+                current_idx=self._warmup.count,
+                first_tradable=0,  # data-driven readiness; count is informational
+            )
+
+        if self._warmup_needed:
+            self._warmup_needed = False
+            logger.info(
+                "Warmup complete — causal streaming enricher ready (%d bars)",
+                self._warmup.count,
+            )
+
+        return self._evaluate_and_plan(candle, latest, ts)
+
+    def _process_candle_shared(
+        self, candle: dict[str, Any], ts: int
+    ) -> CandleProcessingResult:
+        """Shared-primitives path: MTF enricher + data-driven warmup.
+
+        Enrichment goes through the package ``MultiTimeframeBarEnricher``;
+        readiness is gated by ``RequiredDataValidator`` (first row where all
+        required columns are non-NaN), not a fixed ``min_bars`` count. Bars
+        before ``first_tradable`` feed ``on_bar`` for **state-building only**
+        — no orders are generated (this spec's ADR-4 / parity rule).
+        """
+        # Let a bar-aware submission strategy (e.g. ReplayFillExchange) process
+        # pending entries / intrabar stops before this bar's signal evaluation.
+        self._tick_submission_on_bar(candle)
+        enriched = self._enrich_bars()
+        if self._bar_converter.is_empty(enriched):
+            return CandleProcessingResult(
+                candle_timestamp=ts,
+                enrichment_valid=False,
+                enrichment_errors=["indicator engine returned empty result"],
+                message="enrichment failed — empty result",
+            )
+        latest = self._bar_converter.latest_bar(enriched)
+
+        readiness = self._required_data_validator.validate(
+            enriched, list(self._required_columns)
+        )
+        first_tradable = int(readiness.get("warmup_bars", 0))
+        current_idx = max(len(enriched) - 1, 0)
+        if current_idx < first_tradable or readiness.get("no_tradable_bars", False):
+            return self._handle_warmup_state_building(
+                candle, latest, ts, current_idx, first_tradable
+            )
+
+        if self._warmup_needed:
+            # When warmup bars are pre-seeded (warmup_bars param), the
+            # runtime's window may already contain bars up to (and past)
+            # first_tradable before the first live candle arrives. In that
+            # case we must batch-call on_bar on the warmup prefix so the
+            # strategy's crossover state mirrors what a bar-by-bar warmup
+            # would have produced. Without this, the first tradable bar
+            # evaluates with an empty PreviousValues dict and the signal
+            # diverges from the backtest.
+            if current_idx >= first_tradable:
+                self._build_crossover_state_from_seed(enriched, first_tradable)
+            self._warmup_needed = False
+            logger.info(
+                "Warmup complete — first_tradable at index %d (%d bars loaded)",
+                first_tradable,
+                self._warmup.count,
+            )
+
+        return self._evaluate_and_plan(candle, latest, ts)
+
+    def _tick_submission_on_bar(self, candle: dict[str, Any]) -> None:
+        """Forward the bar to a bar-aware submission strategy if present.
+
+        ``ReplayFillExchange`` (dry-run/replay) uses this to fill pending
+        entries at the open and resolve intrabar stop/target exits between
+        signal bars. Live submission strategies do not implement ``on_bar``
+        and are unaffected.
+        """
+        strategy = self._submission_strategy
+        if strategy is None:
+            return
+        on_bar = getattr(strategy, "on_bar", None)
+        if callable(on_bar):
+            on_bar(candle)
+
+    def _build_crossover_state_from_seed(
+        self, enriched: Any, first_tradable: int
+    ) -> None:
+        """Call ``on_bar`` on warmup rows 0..first_tradable-1 to build crossover
+        state from pre-seeded warmup bars.
+
+        Mirrors what the incremental warmup path (``_handle_warmup_state_building``)
+        achieves one bar at a time. All rows are evaluated against a flat position
+        — no trades are generated during this phase.
+        """
+        position = self._exchange.get_position(self._symbol or "DEFAULT")
+        try:
+            n_rows = len(enriched)
+        except TypeError:
+            n_rows = 0
+        limit = min(first_tradable, n_rows)
+        for i in range(limit):
+            row = enriched.iloc[i].to_dict()
+            self._evaluator.evaluate(row, position)
+
+    def _handle_warmup_state_building(
+        self,
+        candle: dict[str, Any],
+        latest: dict[str, Any],
+        ts: int,
+        current_idx: int,
+        first_tradable: int,
+    ) -> CandleProcessingResult:
+        """Feed the bar to ``on_bar`` for state, suppress order generation."""
+        if self._warmup_needed:
+            logger.info(
+                "Warmup %d/%d — state building (no orders)",
+                current_idx + 1,
+                first_tradable,
+            )
+        # Build strategy state (crossover/profile tracking) so the first
+        # tradable bar sees warm state — mirrors finbar's `_update_warmup_state`.
+        if not self._warmup.has_gap:
+            position = self._exchange.get_position(self._symbol or "DEFAULT")
+            self._evaluator.evaluate(latest, position)
+        self._log_decision(ts, candle, latest)
+        return CandleProcessingResult(
+            candle_timestamp=ts,
+            enrichment_valid=False,
+            enrichment_errors=["warmup not ready"],
+            message=f"warmup — state building ({current_idx + 1}/{first_tradable})",
+        )
+
+    def _evaluate_and_plan(
+        self, candle: dict[str, Any], latest: dict[str, Any], ts: int
+    ) -> CandleProcessingResult:
+        """Bar-level validation, evaluate, and plan/persist for a tradable bar."""
+        validation = self._enrichment_validator.validate(
+            enriched_bar=latest,
+            required_columns=self._required_columns,
+            warmup_ready=True,
+            has_gap=self._warmup.has_gap,
+        )
+        if not validation.valid:
+            logger.warning(
+                "\u26a0 %s/%s candle=%s enrichment INVALID: %s",
+                self._symbol,
+                self._interval,
+                ts,
+                validation.reason,
+            )
+            self._log_decision(None, latest, validation=validation)
+            return self._handle_enrichment_rejection(ts, validation)
+
+        position = self._exchange.get_position(self._symbol or "DEFAULT")
+        signal = self._evaluator.evaluate(latest, position)
+        close_price = latest.get("close", "?")
+        if signal.action == SignalAction.HOLD:
+            logger.info(
+                "\u25b3 %s/%s candle=%s close=%s action=HOLD",
+                self._symbol,
+                self._interval,
+                ts,
+                close_price,
+            )
+            self._log_decision(ts, candle, latest, signal=signal)
+            return CandleProcessingResult(
+                candle_timestamp=ts,
+                enrichment_valid=True,
+                signal_action=signal.action.value,
+                message="processed — HOLD",
+            )
+        result = self._plan_and_persist(signal, latest, position, ts)
+        risk = result.risk_decision or "accepted"
+        intent_info = ""
+        if result.intent_id:
+            intent_info = f" {signal.action.value}"
+        if result.submitted:
+            intent_info += " submitted"
+        logger.info(
+            "\u25b6 %s/%s candle=%s close=%s action=%s risk=%s%s",
+            self._symbol,
+            self._interval,
+            ts,
+            close_price,
+            signal.action.value,
+            risk,
+            intent_info,
         )
         return result
 
@@ -539,14 +844,25 @@ class LiveTradingRuntimeUseCase:
     def process_informative_candle(self, alias: str, bar: dict[str, Any]) -> None:
         """Process a candle from an informative (non-primary) timeframe.
 
-        Stores the latest bar in the informative cache so it can be merged
-        into the next primary bar before indicator calculation.
+        Forwards to the causal streaming enricher when wired; otherwise
+        appends to the per-alias warmup window for the batch enricher.
         """
         self._informative_cache[alias] = dict(bar)
+        if self._causal_streaming_enricher is not None:
+            self._causal_streaming_enricher.update_informative(alias, bar)
+            return
+        window = self._informative_warmups.get(alias)
+        if window is None:
+            window = WarmupWindow()
+            self._informative_warmups[alias] = window
+        window.append(bar)
         close_price = bar.get("close", "?")
         logger.debug(
             "\u2139 %s/%s informative=%s close=%s",
-            self._symbol, alias, bar.get("timestamp", "?"), close_price,
+            self._symbol,
+            alias,
+            bar.get("timestamp", "?"),
+            close_price,
         )
 
     # -- internal pipeline steps ---------------------------------------------
@@ -575,19 +891,29 @@ class LiveTradingRuntimeUseCase:
         self._started = True
 
     def _enrich_bars(self) -> Any:
-        """Build the OHLCV frame and recompute indicators for the latest candle.
+        """Build the OHLCV frame and compute indicators for the latest candle.
 
-        The frame is cached and appended to (one row) per candle instead of
-        being rebuilt from the warmup list, then trimmed to the warmup max
-        length so it cannot grow unbounded over a long session.
+        On the shared-primitives path (``bar_enricher`` wired), the frame is
+        rebuilt from the warmup windows each candle and the shared
+        ``MultiTimeframeBarEnricher`` does per-TF indicators + merge +
+        features. The enricher is stateless (recomputes all columns from the
+        full frame each call), so per-candle work is ``O(max_length)``; the
+        warmup ``max_length`` bounds memory.
 
-        Cost note: per-candle work is ``O(max_length)`` — the append+trim
-        copies the frame and the indicator calculator recomputes *every*
-        requested indicator over the full frame each call (the package
-        calculator is stateless). The indicator recompute dominates; making
-        it ``O(1)`` per bar needs a streaming indicator engine, tracked
-        separately. ``max_length`` (default 500) is the bounding knob.
+        On the legacy path, the frame is cached and appended to (one row)
+        per candle, then the single-TF indicator calculator runs.
         """
+        if self._bar_enricher is not None:
+            informative = {
+                alias: window.bars
+                for alias, window in self._informative_warmups.items()
+            }
+            enriched = self._bar_enricher.enrich(self._warmup.bars, informative)
+            return self._trim_frame(enriched)
+        return self._enrich_bars_legacy()
+
+    def _enrich_bars_legacy(self) -> Any:
+        """Legacy: append one row to the cached frame and run single-TF indicators."""
         if self._enriched_frame is None or self._bar_converter.is_empty(
             self._enriched_frame
         ):

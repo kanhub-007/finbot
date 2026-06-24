@@ -15,8 +15,12 @@ from finbot.core.domain.entities.order_intent import OrderIntent
 from finbot.core.domain.entities.order_side import OrderSide
 from finbot.core.domain.entities.order_type import OrderType
 from finbot.core.domain.entities.position_direction import PositionDirection
+from finbot.core.domain.entities.runtime_bot_config import RuntimeBotConfig
 from finbot.core.domain.interfaces.bot_state_repository import BotStateRepository
 from finbot.core.domain.interfaces.exchange_gateway import ExchangeGateway
+from finbot.core.domain.interfaces.market_metadata_provider import (
+    MarketMetadataProvider,
+)
 from finbot.core.domain.services.bot_manager.bot_manager_lock import (
     BotManagerLock,
 )
@@ -43,7 +47,7 @@ class ManualOrderService:
         exchange: ExchangeGateway | None,
         risk_orders: RiskOrderService,
         repository: BotStateRepository,
-        metadata_provider: Any | None = None,
+        metadata_provider: MarketMetadataProvider | None = None,
         mode: str = "dry_run",
         live_trading_ack: bool = False,
     ) -> None:
@@ -55,6 +59,12 @@ class ManualOrderService:
         self._metadata_provider = metadata_provider
         self._mode = mode
         self._ack = live_trading_ack
+
+    def set_metadata_provider(
+        self, provider: MarketMetadataProvider | None
+    ) -> None:
+        """Replace the metadata provider (e.g. for test injection)."""
+        self._metadata_provider = provider
 
     def submit_manual_order(
         self,
@@ -287,20 +297,18 @@ def _validate_size(metadata_provider, active_symbol, size) -> str | None:
 
 
 def _run_manual_gates(
-    mode: str, ack: bool, config: Any, intent: OrderIntent, context: dict[str, Any]
+    mode: str,
+    ack: bool,
+    config: RuntimeBotConfig,
+    intent: OrderIntent,
+    context: dict[str, Any],
 ) -> str | None:
     """Run the manual gate chain; return the first rejection reason or None."""
-    from finbot.core.domain.services.risk_gates.manual_max_position_gate import (
-        ManualMaxPositionGate,
-    )
-    from finbot.core.domain.services.risk_gates.manual_mode_gate import (
-        ManualModeGate,
+    from finbot.core.domain.services.risk_gates.registry import (
+        build_default_manual_gates,
     )
 
-    gates = (
-        ManualModeGate(mode=mode, live_trading_ack=ack),
-        ManualMaxPositionGate(config),
-    )
+    gates = build_default_manual_gates(mode=mode, live_trading_ack=ack, config=config)
     for gate in gates:
         decision = gate.check(intent, context)
         if not decision.accepted:
