@@ -82,6 +82,32 @@ class YamlStrategyDefinitionLoader(StrategyDefinitionLoader):
             return []
         return list(self._last_result.required_indicators)
 
+    def last_primary_required_indicators(self) -> list[str]:
+        """Indicators to compute on the PRIMARY timeframe (parser split).
+
+        Distinct from :meth:`last_required_indicators` (the flat union of all
+        timeframes). Empty when nothing has been loaded yet.
+        """
+        if self._last_result is None:
+            return []
+        return list(self._last_result.primary_required_indicators)
+
+    def last_informative_required_indicators(self) -> dict[str, list[str]]:
+        """Per-informative-alias indicator split, keyed by **alias** (e.g. ``h1``).
+
+        Empty dict for single-TF strategies or when nothing is loaded.
+        """
+        if self._last_result is None:
+            return {}
+        return {
+            alias: list(inds)
+            for alias, inds in self._last_result.informative_required_indicators.items()
+        }
+
+    def last_definition(self) -> StrategyDefinition | None:
+        """Return the last parsed package ``StrategyDefinition`` (or None)."""
+        return self._last_definition
+
     def parse_timeframes(self, content: str):
         """Parse the ``timeframes`` block from raw strategy YAML content.
 
@@ -107,6 +133,7 @@ class YamlStrategyDefinitionLoader(StrategyDefinitionLoader):
                 return None
             informatives: list[str] = []
             aliases: dict[str, str] = {}
+            symbols: dict[str, str | None] = {}
             for item in tf.get("informative", []) or []:
                 if isinstance(item, dict):
                     interval = item.get("interval")
@@ -115,10 +142,13 @@ class YamlStrategyDefinitionLoader(StrategyDefinitionLoader):
                         informatives.append(interval)
                         if alias:
                             aliases[alias] = interval
+                            # Cross-asset: optional symbol per informative.
+                            symbols[alias] = item.get("symbol") or None
             return StrategyTimeframes(
                 primary=str(primary),
                 informative_intervals=tuple(informatives),
                 informative_aliases=aliases,
+                informative_symbols=symbols,
             )
         except Exception:
             return None

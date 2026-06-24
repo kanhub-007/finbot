@@ -85,10 +85,20 @@ def create_live_trading_runtime_use_case(
     gateway = build_exchange_gateway(settings, trading_mode)
 
     if bot_loop is None and live_data:
+        # Build informative streams for MTF / cross-asset.
+        # One MarketDataStream per unique (symbol, interval) pair.
+        # Duplicate pairs share a single websocket — both aliases receive
+        # the same candles via the callback.
+        info_streams, info_aliases_list, info_symbols_list = _build_informative_streams(
+            settings, timeframes, symbol
+        )
         bot_loop = create_bot_loop(
             settings,
             gateway,
             account=trading_mode in (TradingMode.TESTNET, TradingMode.LIVE),
+            informative_streams=info_streams if info_streams else None,
+            informative_aliases=info_aliases_list if info_aliases_list else None,
+            informative_symbols=info_symbols_list if info_symbols_list else None,
         )
 
     loader = YamlStrategyDefinitionLoader()
@@ -146,17 +156,22 @@ def create_live_trading_runtime_use_case(
 
     if warmup_bars is None and live_data:
         warmup_bars = _load_warmup_bars(symbol, interval, min_bars=100)
-    # Load informative warmup bars (MTF), keyed by alias, and RETAIN them
-    # (previously discarded). They seed the per-informative warmup windows the
-    # shared MultiTimeframeBarEnricher needs to compute informative indicators.
+    # Load informative warmup bars (MTF / cross-asset), keyed by alias.
+    # Cross-asset informatives load from their declared symbol; same-symbol
+    # informatives (symbol=None) fall back to the primary symbol.
     if live_data and informative_warmup_bars:
         aliases = timeframes.informative_aliases if timeframes else {}
         for alias, info_interval in aliases.items():
-            info_bars = _load_warmup_bars(symbol, info_interval, min_bars=100)
+            info_symbol = (
+                timeframes.effective_symbol(alias, symbol)
+                if timeframes
+                else symbol
+            )
+            info_bars = _load_warmup_bars(info_symbol, info_interval, min_bars=100)
             logger.info(
                 "Loaded %d warmup bars for informative %s/%s (alias=%s)",
                 len(info_bars),
-                symbol,
+                info_symbol,
                 info_interval,
                 alias,
             )
@@ -310,6 +325,59 @@ def _load_warmup_bars(
             e,
         )
         return []
+
+
+def _build_informative_streams(
+    settings: Settings,
+    timeframes: object | None,
+    primary_symbol: str,
+) -> tuple[list, list[str], list[str | None]]:
+    """Build MarketDataStream instances for each unique (symbol, interval) pair.
+
+    Returns three parallel lists:
+        streams:  one ``HyperliquidMarketDataStream`` per unique pair
+        aliases:  alias for each stream (used as informative label)
+        symbols:  symbol for each stream (``None`` = use primary)
+
+    Duplicate (symbol, interval) pairs share a single websocket.
+    """
+    from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
+        HyperliquidMarketDataStream,
+    )
+    from finbot.startup.service_factory import hyperliquid_base_url
+
+    if timeframes is None or not getattr(timeframes, "is_mtf", False):
+        return [], [], []
+
+    base = hyperliquid_base_url(settings)
+    deduped: dict[tuple[str, str], list[str]] = {}
+    for alias, interval in timeframes.informative_aliases.items():
+        eff = timeframes.effective_symbol(alias, primary_symbol)
+        key = (eff, interval)
+        deduped.setdefault(key, []).append(alias)
+
+    streams: list = []
+    all_aliases: list[str] = []
+    all_symbols: list[str | None] = []
+
+    for (eff_symbol, interval), aliases_for_pair in deduped.items():
+        stream = HyperliquidMarketDataStream(
+            base_url=base,
+            stale_data_seconds=settings.stale_data_seconds,
+        )
+        streams.append(stream)
+        all_aliases.append(aliases_for_pair[0])
+        is_cross = eff_symbol.upper() != primary_symbol.upper()
+        all_symbols.append(eff_symbol if is_cross else None)
+        if len(aliases_for_pair) > 1:
+            logger.info(
+                "Sharing websocket for %s/%s across aliases %s",
+                eff_symbol,
+                interval,
+                aliases_for_pair,
+            )
+
+    return streams, all_aliases, all_symbols
 
 
 def _make_log_writer():

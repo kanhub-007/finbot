@@ -210,3 +210,153 @@ class TestLoaderLastTimeframes:
         """Before any strategy is loaded, last_timeframes() returns None."""
         loader = YamlStrategyDefinitionLoader()
         assert loader.last_timeframes() is None
+
+
+# ---------------------------------------------------------------------------
+# Cross-asset tests (2026-06-24 spec)
+# ---------------------------------------------------------------------------
+
+
+class TestCrossAssetStrategyTimeframes:
+    """Cross-asset extends MTF: each informative can declare a symbol."""
+
+    def test_informative_with_explicit_symbol(self) -> None:
+        """parse_timeframes reads the symbol field when present."""
+        from finbar_strategy_runtime.domain.entities.informative_timeframe import (
+            InformativeTimeframe,
+        )
+        from finbar_strategy_runtime.domain.entities.strategy_definition import (
+            StrategyDefinition,
+            TimeframeDeclaration,
+        )
+
+        # Simulate a package InformativeTimeframe with a symbol attr.
+        item = InformativeTimeframe(interval="1h", alias="btc_1h")
+        object.__setattr__(item, "symbol", "BTC")
+
+        definition = StrategyDefinition(
+            name="cross_asset",
+            sides={},
+            timeframes=TimeframeDeclaration(
+                primary="30m",
+                informative=[item],
+            ),
+        )
+
+        result = parse_timeframes(definition)
+        assert result is not None
+        assert result.informative_aliases == {"btc_1h": "1h"}
+        assert result.informative_symbols == {"btc_1h": "BTC"}
+        assert result.effective_symbol("btc_1h", "ALT") == "BTC"
+
+    def test_informative_without_symbol_defaults_to_none(self) -> None:
+        """When no symbol is declared, informative_symbols stores None."""
+        from finbar_strategy_runtime.domain.entities.informative_timeframe import (
+            InformativeTimeframe,
+        )
+        from finbar_strategy_runtime.domain.entities.strategy_definition import (
+            StrategyDefinition,
+            TimeframeDeclaration,
+        )
+
+        item = InformativeTimeframe(interval="1h", alias="h1")
+        definition = StrategyDefinition(
+            name="same_symbol",
+            sides={},
+            timeframes=TimeframeDeclaration(
+                primary="30m",
+                informative=[item],
+            ),
+        )
+
+        result = parse_timeframes(definition)
+        assert result is not None
+        assert result.informative_symbols == {"h1": None}
+        # effective_symbol falls back to primary
+        assert result.effective_symbol("h1", "ALT") == "ALT"
+
+    def test_mixed_cross_asset_and_same_symbol(self) -> None:
+        """Informatives with and without symbols coexist."""
+        from finbar_strategy_runtime.domain.entities.informative_timeframe import (
+            InformativeTimeframe,
+        )
+        from finbar_strategy_runtime.domain.entities.strategy_definition import (
+            StrategyDefinition,
+            TimeframeDeclaration,
+        )
+
+        h1 = InformativeTimeframe(interval="1h", alias="h1")
+        btc = InformativeTimeframe(interval="1h", alias="btc_1h")
+        object.__setattr__(btc, "symbol", "BTC")
+
+        definition = StrategyDefinition(
+            name="mixed",
+            sides={},
+            timeframes=TimeframeDeclaration(
+                primary="30m",
+                informative=[h1, btc],
+            ),
+        )
+
+        result = parse_timeframes(definition)
+        assert result is not None
+        assert result.informative_aliases == {"h1": "1h", "btc_1h": "1h"}
+        assert result.informative_symbols == {"h1": None, "btc_1h": "BTC"}
+
+    def test_effective_symbol_on_unknown_alias_returns_primary(self) -> None:
+        """effective_symbol on an alias not in the map returns primary."""
+        tf = StrategyTimeframes(
+            primary="30m",
+            informative_intervals=("1h",),
+            informative_aliases={"h1": "1h"},
+        )
+        assert tf.effective_symbol("unknown", "ALT") == "ALT"
+
+    def test_strategy_timeframes_equality_with_symbols(self) -> None:
+        """Two StrategyTimeframes with same symbols are equal."""
+        a = StrategyTimeframes(
+            primary="30m",
+            informative_intervals=("1h",),
+            informative_aliases={"h1": "1h"},
+            informative_symbols={"h1": "BTC"},
+        )
+        b = StrategyTimeframes(
+            primary="30m",
+            informative_intervals=("1h",),
+            informative_aliases={"h1": "1h"},
+            informative_symbols={"h1": "BTC"},
+        )
+        assert a == b
+
+
+class TestLoaderCrossAssetTimeframes:
+    """YAML loader passes symbol through from raw content."""
+
+    def test_parse_raw_yaml_with_symbol(self) -> None:
+        """Loader.parse_timeframes() extracts symbol from raw YAML."""
+        loader = YamlStrategyDefinitionLoader()
+        result = loader.parse_timeframes(
+            "timeframes:\n"
+            "  primary: 30m\n"
+            "  informative:\n"
+            "    - alias: btc_1h\n"
+            "      interval: 1h\n"
+            "      symbol: BTC\n"
+        )
+        assert result is not None
+        assert result.informative_aliases == {"btc_1h": "1h"}
+        assert result.informative_symbols == {"btc_1h": "BTC"}
+
+    def test_parse_raw_yaml_without_symbol(self) -> None:
+        """Loader.parse_timeframes() stores None when symbol is absent."""
+        loader = YamlStrategyDefinitionLoader()
+        result = loader.parse_timeframes(
+            "timeframes:\n"
+            "  primary: 30m\n"
+            "  informative:\n"
+            "    - alias: h1\n"
+            "      interval: 1h\n"
+        )
+        assert result is not None
+        assert result.informative_aliases == {"h1": "1h"}
+        assert result.informative_symbols == {"h1": None}

@@ -40,13 +40,18 @@ def parse_timeframes(
 
     tf = definition.timeframes
     aliases: dict[str, str] = {}
+    symbols: dict[str, str | None] = {}
     intervals: list[str] = []
     for item in tf.informative:
         intervals.append(item.interval)
         aliases[item.alias] = item.interval
+        # Cross-asset: read optional symbol per informative.
+        item_symbol: str | None = getattr(item, "symbol", None) or None
+        symbols[item.alias] = item_symbol
 
     return StrategyTimeframes(
         primary=tf.primary or None,
         informative_intervals=tuple(intervals),
         informative_aliases=aliases,
+        informative_symbols=symbols,
     )

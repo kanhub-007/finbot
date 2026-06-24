@@ -1,0 +1,28 @@
+# Sample cross-asset strategy: trade PURR using BTC 1h data.
+# The ``symbol`` field on the informative entry tells Finbot to open
+# a separate websocket for BTC/1h (instead of the primary PURR/1h).
+#
+# Without the ``symbol`` field the informative would use the primary
+# symbol (same-symbol MTF, backward compatible).
+schema_version: "2.0"
+name: cross_asset_purr_btc_example
+indicators:
+  - name: my_atr
+    type: atr
+    timeframe: primary
+  - name: btc_atr
+    type: atr
+    timeframe: btc_1h       # <-- cross-asset: computed from BTC bars
+timeframes:
+  primary: 30m
+  informative:
+    - alias: btc_1h
+      interval: 1h
+      symbol: BTC           # <-- cross-asset: subscribe to BTC, not PURR
+sides:
+  long:
+    entry:
+      condition:
+        operator: ">"
+        left: close
+        right: my_atr

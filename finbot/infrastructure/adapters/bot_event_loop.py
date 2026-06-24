@@ -45,6 +45,9 @@ class BotEventLoop(BotLoop):
     informative_aliases:
         Short names for each informative stream (e.g. ``["h1"]``).
         Must be same length as *informative_streams*.
+    informative_symbols:
+        Symbol for each informative stream.  ``None`` entries use the
+        primary symbol.  Same length as *informative_streams*.
     """
 
     MAX_BACKOFF = 60.0
@@ -61,6 +64,7 @@ class BotEventLoop(BotLoop):
         reconnect_backoff: float = 2.0,
         informative_streams: list[MarketDataStream] | None = None,
         informative_aliases: list[str] | None = None,
+        informative_symbols: list[str | None] | None = None,
     ) -> None:
         self._queue = queue
         self._stream = stream
@@ -68,6 +72,7 @@ class BotEventLoop(BotLoop):
         self._reconnect_backoff = reconnect_backoff
         self._informative_streams: list[MarketDataStream] = informative_streams or []
         self._informative_aliases: list[str] = informative_aliases or []
+        self._informative_symbols: list[str | None] = informative_symbols or []
         self._running = False
         self._symbol: str = ""
         self._interval: str = ""
@@ -185,23 +190,30 @@ class BotEventLoop(BotLoop):
         )
 
     def _subscribe_informative(self) -> None:
-        """Subscribe each informative stream with its alias."""
+        """Subscribe each informative stream, using per-alias symbol when set."""
         for i, stream in enumerate(self._informative_streams):
             alias = (
                 self._informative_aliases[i]
                 if i < len(self._informative_aliases)
                 else f"info_{i}"
             )
+            symbol = (
+                self._informative_symbols[i]
+                if i < len(self._informative_symbols)
+                and self._informative_symbols[i]
+                else self._symbol
+            )
             try:
                 stream.subscribe_candles(
-                    self._symbol,
+                    symbol,
                     "1h",  # interval is set per-stream at construction
                     callback=lambda raw, a=alias: self._enqueue_informative(a, raw),
                 )
                 logger.info(
-                    "Subscribed informative stream '%s' for %s",
+                    "Subscribed informative stream '%s' for %s/%s",
                     alias,
-                    self._symbol,
+                    symbol,
+                    "1h",
                 )
             except Exception as exc:
                 logger.warning(

@@ -269,6 +269,9 @@ def create_bot_loop(
     gateway: ExchangeGateway | None = None,
     *,
     account: bool = False,
+    informative_streams: list | None = None,
+    informative_aliases: list[str] | None = None,
+    informative_symbols: list[str | None] | None = None,
 ):
     """Create the market-data (and optional account) event loop.
 
@@ -282,6 +285,12 @@ def create_bot_loop(
     account:
         When ``True`` (testnet/live), subscribe to user fills and order
         updates so lifecycle/fill handling is fed by real exchange events.
+    informative_streams:
+        Pre-built market data streams for informative timeframes (MTF / cross-asset).
+    informative_aliases:
+        Short names for each informative stream (e.g. ``["h1"]``).
+    informative_symbols:
+        Symbol for each informative stream (``None`` = use primary).
     """
     from finbot.infrastructure.adapters.bot_event_loop import BotEventLoop
     from finbot.infrastructure.adapters.hyperliquid_market_data_stream import (
@@ -315,7 +324,14 @@ def create_bot_loop(
             user_address=settings.hyperliquid_account_address,
             account_cache=gateway.account_cache(),
         )
-    return BotEventLoop(queue, stream, account_stream=account_stream)
+    return BotEventLoop(
+        queue,
+        stream,
+        account_stream=account_stream,
+        informative_streams=informative_streams,
+        informative_aliases=informative_aliases,
+        informative_symbols=informative_symbols,
+    )
 
 
 # Re-export the runtime factory at the bottom (S10) to avoid a circular
